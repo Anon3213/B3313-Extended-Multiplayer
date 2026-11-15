@@ -1,0 +1,24 @@
+[package]
+name = "b3313-nettools"
+version = "0.1.0"
+description = "Network test tools for B3313 sessions: a bad-network proxy and a load test"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license = "0BSD"
+
+[lints]
+workspace = true
+
+[dependencies]
+b3313-bridge = { path = "../bridge", version = "0.1.0" }
+b3313-protocol = { path = "../protocol", version = "0.1.0" }
+b3313-server = { path = "../server", version = "0.1.0" }
+
+[[bin]]
+name = "b3313-netsim"
+path = "src/bin/netsim.rs"
+
+[[bin]]
+name = "b3313-loadtest"
+path = "src/bin/loadtest.rs"

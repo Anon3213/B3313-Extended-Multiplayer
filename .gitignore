@@ -1,0 +1,36 @@
+# ROMs, saves and patches: Nintendo's ROM and B3313 itself are other people's work and must
+# never enter history, whatever the dump format.
+*.z64
+*.n64
+*.v64
+*.eeprom
+*.config
+*.zip
+*.7z
+ROM/
+Bee/*
+!Bee/.gitkeep
+# The A2AE patch, wherever it was downloaded to. The multiplayer patch the panel carries is
+# this project's own and is the one exception.
+*.bps
+!/panel/assets/multiplayer.bps
+
+# Troll Engine is fetched by scripts/engine.py, not kept here: only Multiplayer/ is ours.
+/.engine/
+/TrollEngine/*
+!/TrollEngine/Multiplayer/
+*.o
+
+# Logs of test runs played by hand; the folder itself stays, so commands can write into it.
+/logs/*
+!/logs/.gitkeep
+
+# toolchains and what they build
+/dist/
+/target/
+/panel/target/
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+.vscode/

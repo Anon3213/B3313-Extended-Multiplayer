@@ -1,0 +1,45 @@
+name: Release
+
+# Pushing a tag such as v0.1.0 builds the players' zip and a Linux server, and attaches them to
+# a draft release for a person to look over and publish.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.99.1
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync
+      - run: uv run --no-sync python scripts/release.py
+      - run: gh release create "${{ github.ref_name }}" --draft --generate-notes dist/*.zip dist/*.sha256
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+  linux-server:
+    needs: windows
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.99.1
+      - run: cargo build --release -p b3313-server
+      - run: |
+          name="b3313-server-${{ github.ref_name }}-linux-x64"
+          mkdir "$name"
+          cp target/release/b3313-server server/server.example.conf LICENSE.txt NOTICE.md "$name/"
+          tar -czf "$name.tar.gz" "$name"
+          sha256sum "$name.tar.gz" > "$name.tar.gz.sha256"
+          gh release upload "${{ github.ref_name }}" "$name.tar.gz" "$name.tar.gz.sha256"
+        env:
+          GH_TOKEN: ${{ github.token }}

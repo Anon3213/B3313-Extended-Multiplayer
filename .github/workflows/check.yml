@@ -1,0 +1,37 @@
+name: Check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  # Everything scripts/check.py runs: formatting, lints, tests and dependency policy, for both
+  # Rust workspaces and the Python scripts. The ROM build is not here: it needs Nintendo's ROM.
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.99.1
+          components: clippy, rustfmt
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest,cargo-deny
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync
+      - run: uv run --no-sync python scripts/check.py
+
+  # The server alone must also build and pass its tests on Linux, where a host may run it.
+  linux-server:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.99.1
+      - run: cargo test -p b3313-protocol -p b3313-server

@@ -1,0 +1,17 @@
+# Keeps the bridge's dependency tree small and auditable: it parses untrusted network data.
+[advisories]
+yanked = "deny"
+
+[licenses]
+# Unicode-3.0 covers the character tables in unicode-ident, a compile-time dependency of the
+# curve25519-dalek that snow's X25519 uses; none of it ships in the binaries.
+# 0BSD is this project's own.
+allow = ["0BSD", "MIT", "Apache-2.0", "BSD-3-Clause", "Unicode-3.0"]
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"

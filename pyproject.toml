@@ -1,0 +1,28 @@
+[project]
+name = "b3313-multiplayer-tools"
+version = "0.1.0"
+description = "Scripts that check, build and release B3313 Extended Multiplayer"
+requires-python = ">=3.14"
+dependencies = []
+
+[dependency-groups]
+dev = ["pyright", "pytest", "ruff"]
+
+[tool.uv]
+package = false
+
+[tool.ruff]
+line-length = 100
+extend-exclude = ["TrollEngine", ".engine"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF", "PTH", "C4"]
+
+[tool.pyright]
+include = ["scripts", "tests"]
+typeCheckingMode = "strict"
+extraPaths = ["scripts"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["scripts"]

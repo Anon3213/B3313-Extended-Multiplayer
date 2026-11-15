@@ -1,0 +1,82 @@
+[package]
+name = "b3313-panel"
+version = "0.1.0"
+description = "Desktop control panel that joins, hosts and moderates B3313 multiplayer sessions"
+edition = "2024"
+rust-version = "1.99"
+publish = false
+license = "0BSD"
+
+[lints]
+workspace = true
+
+[dependencies]
+# For the Play page, which runs a bridge as the Overview runs a server.
+b3313-bridge = { path = "../bridge", version = "0.1.0" }
+b3313-protocol = { path = "../protocol", version = "0.1.0" }
+b3313-server = { path = "../server", version = "0.1.0" }
+# Zed's own crate. Without default features it leaves out Linux's Wayland and X11 support.
+gpui = { version = "=0.2.2", default-features = false, features = ["windows-manifest"] }
+# Asks the host's router to open the server's port and for its public address (src/port_map.rs).
+# Its default HTTP client is MPL-2.0, outside this workspace's license policy; this one runs on
+# tokio and hyper, which GPUI already brings.
+igd-next = { version = "0.18", default-features = false, features = ["aio_tokio"] }
+tokio = { version = "1", features = ["rt", "time"] }
+# Checks the player's ROM, the B3313 patch and the ROM built from them (src/game_setup.rs). The
+# version GPUI already uses, so it adds no crate.
+sha2 = "0.10"
+# The window handle GPUI exposes, to flash the taskbar button (src/alert.rs).
+raw-window-handle = "0.6"
+
+# The versions GPUI already uses, so these add no crates: the taskbar flash (src/alert.rs), the
+# time of day, time format, contrast theme, memory and Windows version (src/system.rs), and the
+# minidump of a crash (src/crash/native.rs).
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Globalization",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Diagnostics_Debug",
+    "Win32_System_Kernel",
+    "Win32_System_Memory",
+    "Win32_System_ProcessStatus",
+    "Win32_System_Registry",
+    "Win32_System_SystemInformation",
+    "Win32_System_Threading",
+    "Win32_UI_Accessibility",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
+# A workspace of its own, apart from the bridge and server: GPUI brings hundreds of crates, kept
+# out of their lock file and dependency policy (see deny.toml here).
+[workspace]
+
+# The same lint levels as the main workspace.
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+missing_debug_implementations = "warn"
+
+[workspace.lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+undocumented_unsafe_blocks = "deny"
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+indexing_slicing = "deny"
+as_conversions = "warn"
+
+# A password-protected server derives its key with Argon2 at startup, slow unoptimized.
+[profile.dev.package.argon2]
+opt-level = 3
+
+[profile.dev.package.blake2]
+opt-level = 3
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+# Function names, files and lines go in b3313_panel.pdb beside the program, not in it, so crash
+# reports' stack traces and minidumps can be read. Keep the .pdb with the .exe.
+debug = "line-tables-only"
+strip = "none"

@@ -1,0 +1,3 @@
+# Built under WSL from a Windows checkout. Never rewrite line endings: IDO, armips and
+# shell scripts need LF, and the tree holds SGI binaries that git could misdetect as text.
+* -text

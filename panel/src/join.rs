@@ -1,0 +1,298 @@
+//! Runs a bridge session on a thread of its own, as `b3313-bridge` does in its process, so the
+//! Play page can join a server without a command line.
+//!
+//! The panel reads back what the session reports; neither side waits on the other.
+
+use crate::emulator::Install;
+use crate::game_setup;
+use b3313_bridge::client::resolve;
+use b3313_bridge::session::{self, Event, Input, Options};
+use b3313_protocol::Outfit;
+use std::net::{SocketAddr, UdpSocket};
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{self, Receiver, Sender};
+use std::thread::{self, JoinHandle};
+
+/// What the session's thread reports.
+#[derive(Debug)]
+pub enum Notice {
+    Event(Event),
+    /// The session ended, saying why in a sentence for the player, with what the system said
+    /// of it when there is more to know.
+    Ended {
+        reason: String,
+        detail: Option<String>,
+    },
+}
+
+#[derive(Debug)]
+pub struct Bridge {
+    stop: Arc<AtomicBool>,
+    /// Whether the session's thread is still getting ready to join: reading or building the
+    /// game, looking the server up, starting the emulator.
+    preparing: Arc<AtomicBool>,
+    notices: Receiver<Notice>,
+    /// What the player types for the chat, a line at a time, and the outfits they choose.
+    input: Sender<Input>,
+    thread: Option<JoinHandle<()>>,
+}
+
+impl Bridge {
+    /// Starts a session as `request` says; it attaches to the game as soon as it runs, then
+    /// joins. Reading the ROM and looking up the server's name happen on the session's thread,
+    /// so the panel never waits on them; what fails there ends the session with a message.
+    ///
+    /// # Errors
+    /// Fails, with a message for the player, if the session's thread cannot start.
+    pub fn start(request: Request) -> Result<Self, String> {
+        let stop = Arc::new(AtomicBool::new(false));
+        let (notify, notices) = mpsc::channel();
+        let (input, typed) = mpsc::channel();
+        let preparing = Arc::new(AtomicBool::new(true));
+        let thread = {
+            let (stop, preparing) = (Arc::clone(&stop), Arc::clone(&preparing));
+            thread::Builder::new()
+                .name("b3313-bridge".to_owned())
+                .spawn(move || play(request, (&stop, &preparing), &typed, &notify))
+                .map_err(|error| format!("cannot start the bridge: {error}"))?
+        };
+        Ok(Self {
+            stop,
+            preparing,
+            notices,
+            input,
+            thread: Some(thread),
+        })
+    }
+
+    /// Sends a line the player typed to the chat; the server sends it back when it has it.
+    pub fn say(&self, text: String) {
+        // Fails only once the session has ended, which `drain` reports.
+        let _ = self.input.send(Input::Say(text));
+    }
+
+    /// Has the player wear an outfit from now on; the roster shows it once the server has it.
+    pub fn wear(&self, outfit: Outfit) {
+        // Fails only once the session has ended, which `drain` reports.
+        let _ = self.input.send(Input::Wear(outfit));
+    }
+
+    /// Everything reported since the last call.
+    #[must_use]
+    pub fn drain(&self) -> Vec<Notice> {
+        self.notices.try_iter().collect()
+    }
+
+    /// Asks the session to leave. Its thread notices within a frame or two, or a quarter of
+    /// a second while waiting for the game or for the server to answer, or once the game is
+    /// built if it is building it; `drain` then reports the end.
+    pub fn ask_to_leave(&self) {
+        self.stop.store(true, Ordering::Relaxed);
+    }
+
+    fn shut_down(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+        // A session still getting ready, which may be building the game for a while yet,
+        // has nothing in a game or on a server to take back, and is not waited for: a
+        // window being closed would stand still until it had. It ends when it looks at
+        // `stop`, or with the panel.
+        if self.preparing.load(Ordering::Relaxed) {
+            return;
+        }
+        if let Some(thread) = self.thread.take() {
+            // A panic on that thread has already been reported by the panic hook.
+            let _ = thread.join();
+        }
+    }
+}
+
+impl Drop for Bridge {
+    fn drop(&mut self) {
+        self.shut_down();
+    }
+}
+
+/// Says the session ended if its thread panics, which nothing else would: the Play page
+/// would show it joined for good.
+struct EndedOnPanic<'a>(&'a Sender<Notice>);
+
+impl Drop for EndedOnPanic<'_> {
+    fn drop(&mut self) {
+        if thread::panicking() {
+            let reason = "The session stopped for a fault in the panel; a crash report was \
+                          written."
+                .to_owned();
+            let _ = self.0.send(Notice::Ended {
+                reason,
+                detail: None,
+            });
+        }
+    }
+}
+
+/// The session's thread. `preparing` is cleared once it has what it joins with, and from
+/// then on is waited for when it is to stop: it has a game to take the session out of.
+fn play(
+    request: Request,
+    (stop, preparing): (&AtomicBool, &AtomicBool),
+    typed: &Receiver<Input>,
+    notify: &Sender<Notice>,
+) {
+    let _ended = EndedOnPanic(notify);
+    let report = |event| {
+        let _ = notify.send(Notice::Event(event));
+    };
+    let options = request.options(stop);
+    preparing.store(false, Ordering::Relaxed);
+    let (reason, detail) = match options {
+        Ok(options) => match session::run(&options, stop, typed, report) {
+            Ok(end) => (end.describe(), end.detail()),
+            Err(error) => (format!("Could not join: {error}."), None),
+        },
+        Err(message) => (message, None),
+    };
+    let _ = notify.send(Notice::Ended { reason, detail });
+}
+
+/// What the Play page asks to join with, as the player gave it.
+#[derive(Clone, Debug)]
+pub struct Request {
+    pub rom: PathBuf,
+    /// The player's Super Mario 64 ROM and the B3313 patch, if they are known: what the ROM
+    /// is built from again when this panel is newer than it.
+    pub sources: Option<(PathBuf, PathBuf)>,
+    /// The emulator already running the game, or none to start it.
+    pub pid: Option<u32>,
+    /// As typed: a name or an address, with its port.
+    pub server: String,
+    pub password: String,
+    /// The name the player chose; empty leaves it to the server.
+    pub name: String,
+    /// The outfit the player chose, if they have.
+    pub outfit: Option<Outfit>,
+    /// The key that opens the chat in the game, if the player types it there.
+    pub chat_key: Option<char>,
+    /// How many seconds the game shows the chat's lines for.
+    pub chat_seconds: u8,
+    /// The server this panel is hosting, if it is: where it listens, and its host password,
+    /// which goes to that server alone, so the player hosting is the host.
+    pub hosting: Option<(SocketAddr, String)>,
+}
+
+/// Whether `server` is the one this panel hosts at `hosting`: the same port, on this PC. Any
+/// other server must never be sent the host password, which would let its owner join as host.
+fn is_own_server(server: SocketAddr, hosting: SocketAddr) -> bool {
+    // Only an address of this PC can be bound to.
+    let is_this_pc = server.ip().is_loopback()
+        || server.ip() == hosting.ip()
+        || UdpSocket::bind((server.ip(), 0)).is_ok();
+    server.port() == hosting.port() && is_this_pc
+}
+
+impl Request {
+    /// The ROM's bytes. A ROM the panel built is checked against the one this panel's bridge
+    /// was made for, and built again if an older panel made it; one the player chose
+    /// themself is taken as it is.
+    fn current_rom(&self) -> Result<Vec<u8>, String> {
+        let read = || {
+            std::fs::read(&self.rom)
+                .map_err(|error| format!("Could not read the ROM {}: {error}.", self.rom.display()))
+        };
+        let built_here = game_setup::rom_path().is_some_and(|built| built == self.rom);
+        match read() {
+            Ok(rom) if !built_here || game_setup::is_current(&rom) => Ok(rom),
+            outdated => {
+                let Some((sm64, patch)) = self.sources.as_ref().filter(|_| built_here) else {
+                    return outdated.and(Err(
+                        "This panel is newer than its game. Set the game up again on the Play \
+                         page."
+                            .to_owned(),
+                    ));
+                };
+                game_setup::set_up(sm64, patch)?;
+                read()
+            }
+        }
+    }
+
+    /// The emulator to join with: the one named, or one started now with the ROM.
+    fn emulator(&self) -> Result<u32, String> {
+        if let Some(pid) = self.pid {
+            return Ok(pid);
+        }
+        let install = Install::find().ok_or(
+            "Parallel Launcher's emulator was not found. Install Parallel Launcher and start \
+             any game in it once, or start the multiplayer ROM yourself.",
+        )?;
+        install
+            .start(&self.rom, self.chat_key.is_some())
+            .map_err(|error| format!("Could not start the emulator: {error}."))
+    }
+
+    /// Copies the game's save aside before a session adds to it, where the emulator is the
+    /// one whose saves the panel can find.
+    fn back_up_save(&self) -> Result<(), String> {
+        let (Some(install), Some(backups)) = (Install::find(), game_setup::backups_path()) else {
+            return Ok(());
+        };
+        install
+            .back_up_saves(&self.rom, &backups)
+            .map(|_| ())
+            .map_err(|error| format!("Could not copy your save aside before joining: {error}."))
+    }
+
+    /// What the session needs, read and looked up; or why that failed, in a sentence.
+    fn options(self, stop: &AtomicBool) -> Result<Options, String> {
+        // Before the emulator is started, which a mistyped name should not do.
+        let server = resolve(&self.server)
+            .map_err(|error| format!("Could not find the server {}: {error}.", self.server))?;
+        let rom = self.current_rom()?;
+        // Looking the name up and building the game take a while: a player who left
+        // meanwhile is not to have the game start in front of them.
+        if stop.load(Ordering::Relaxed) {
+            return Err("You left the session.".to_owned());
+        }
+        self.back_up_save()?;
+        let pid = self.emulator()?;
+        let host_password = self
+            .hosting
+            .filter(|&(hosting, _)| is_own_server(server, hosting))
+            .map(|(_, password)| password)
+            .unwrap_or_default();
+        Ok(Options {
+            rom,
+            pid,
+            server,
+            password: self.password,
+            outfit: self.outfit,
+            name: self.name,
+            host_password,
+            chat_key: self.chat_key,
+            chat_seconds: self.chat_seconds,
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_own_server;
+    use std::net::SocketAddr;
+
+    fn address(text: &str) -> SocketAddr {
+        text.parse()
+            .unwrap_or_else(|_| unreachable!("the test's address"))
+    }
+
+    #[test]
+    fn only_this_pcs_own_server_is_sent_the_host_password() {
+        let hosting = address("0.0.0.0:41313");
+        assert!(is_own_server(address("127.0.0.1:41313"), hosting));
+        assert!(is_own_server(address("[::1]:41313"), hosting));
+        // Another server on this PC, and one on another PC at the same port: 203.0.113.0/24 is
+        // kept for documentation, so it is no address of this PC.
+        assert!(!is_own_server(address("127.0.0.1:41314"), hosting));
+        assert!(!is_own_server(address("203.0.113.7:41313"), hosting));
+    }
+}

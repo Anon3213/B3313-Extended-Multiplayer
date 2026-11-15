@@ -1,0 +1,14 @@
+[package]
+name = "b3313-server"
+version = "0.1.0"
+description = "Session server that relays player state between B3313 bridges"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license = "0BSD"
+
+[lints]
+workspace = true
+
+[dependencies]
+b3313-protocol = { path = "../protocol", version = "0.1.0" }

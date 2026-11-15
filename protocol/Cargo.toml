@@ -1,0 +1,22 @@
+[package]
+name = "b3313-protocol"
+version = "0.1.0"
+description = "Wire format between B3313 bridges and the session server"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license = "0BSD"
+
+[lints]
+workspace = true
+
+[dependencies]
+argon2 = "0.6.0"
+# Only the pure-Rust primitives of Noise_NNpsk0_25519_ChaChaPoly_BLAKE2s. The default features
+# also pull in `ring`, through `std`, which this project does not need.
+snow = { version = "0.10.0", default-features = false, features = [
+    "use-chacha20poly1305",
+    "use-blake2",
+    "use-curve25519",
+    "use-getrandom",
+] }
