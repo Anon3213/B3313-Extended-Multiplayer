@@ -38,9 +38,11 @@ What to know as you play:
 
 ## What you need
 
-- Windows 10 or 11.
-- [Parallel Launcher](https://parallel-launcher.ca/), which installs the emulator. Start any
-  game in it once, so it sets the emulator up.
+- Windows 10 or 11. Playing needs Windows; the Linux download holds only the server, for
+  hosting a session on a machine that players can reach.
+- [Parallel Launcher](https://parallel-launcher.ca/), which installs RetroArch, the emulator
+  the game runs in. Start any game in Parallel Launcher once, so it sets RetroArch up; after
+  that the panel starts the game in it for you.
 - Your own Super Mario 64 (USA) ROM.
 - The B3313 Unabandoned A2 Anniversary Edition patch (`.bps`), from romhacking.com.
 
