@@ -1,9 +1,9 @@
 # Changelog
 
-What each version changed, newest first. Versions of the same protocol play together: a
-0.1.0 game joins a 0.1.1 server, and the other way round.
+What each version changed, newest first. Versions of the same protocol play together: every
+version so far joins every other's server.
 
-## Not yet released
+## 0.1.2
 
 - The panel, the bridge and the server have an icon: two pairs of eyes in the dark, one
   pair to a player. The panel's window and taskbar button show it too.
@@ -12,6 +12,8 @@ What each version changed, newest first. Versions of the same protocol play toge
 - In the Players table, the lines between the headings follow the mouse that drags them, as
   the Log's do: right of the address they moved the other way. There is now a line between
   Address and Connected, and none after Flags, the last column.
+
+Nothing changed in how games and servers talk, or in the game itself.
 
 ## 0.1.1
 
