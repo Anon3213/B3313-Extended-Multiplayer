@@ -3,7 +3,7 @@
 What each version changed, newest first. Versions of the same protocol play together: every
 version so far joins every other's server.
 
-## Not yet released
+## 0.1.3
 
 - **`/name <new name>` renames you** in a session. A name another player has is refused,
   and everyone sees who is now called what.
@@ -14,6 +14,9 @@ version so far joins every other's server.
   the panel's name field says what a name may be.
 - The panel shows its version: at the foot of the sidebar, and in a new "About" panel on the
   Preferences page, which also opens the project's page.
+
+The names are the server's doing: a 0.1.3 panel or `b3313-server` is needed to host with
+them, and players on earlier versions can join it and use `/name` as they are.
 
 ## 0.1.2
 
