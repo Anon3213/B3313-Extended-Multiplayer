@@ -87,7 +87,7 @@ const fn of_a_player(
     }
 }
 
-static WORDS: [Word; 9] = [
+static WORDS: [Word; 10] = [
     Word {
         names: &["help"],
         rule: ANYONE,
@@ -119,6 +119,11 @@ static WORDS: [Word; 9] = [
         names: &["color", "colour"],
         rule: ANYONE,
         form: Form::Text(ChatCommand::Color),
+    },
+    Word {
+        names: &["name"],
+        rule: ANYONE,
+        form: Form::Text(ChatCommand::Name),
     },
     Word {
         names: &["end", "stop"],

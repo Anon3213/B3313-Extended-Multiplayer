@@ -65,7 +65,7 @@ list and `/color green` to wear one. Everyone sees you in them, and so do you.
 
 | | Who | Mark | Can |
 |---|---|---|---|
-| **Player** | Everyone who joins | None | Play, chat, `/help`, `/list`, `/color` |
+| **Player** | Everyone who joins | None | Play, chat, `/help`, `/list`, `/color`, `/name` |
 | **Moderator** | A player the host appoints with `/mod` | Blue shield | Also `/kick` and `/ban` ordinary players. Lasts until they leave |
 | **Host** | The one player in charge of the session | Gold crown | Also `/mod`, `/unmod`, remove anyone, pass the role on with `/host`, and `/end` the session |
 | **Server owner** | Whoever runs the server, on their PC or elsewhere | Server icon; lines show as `[Server]` | Everything, from outside the game: the panel's **Server chat**, Players and Bans pages, or the server's console |
@@ -95,10 +95,17 @@ lines and take the same commands.
 |---|---|---|
 | `/help`, `/list` | Anyone | Lists the commands, or who is in the session |
 | `/color [name]` | Anyone | Wears the colors named, or lists them |
+| `/name [new name]` | Anyone | Takes the new name, or says the one you have |
 | `/kick <player>`, `/ban <player>` | Host, moderators | Removes a player, by name or by their number in `/list` |
 | `/mod <player>`, `/unmod <player>` | Host | Makes a player a moderator, or an ordinary player again |
 | `/host <player>` | Host | Makes that player the host in the host's place |
 | `/end` | Host | Ends the session for everyone, and stops the server |
+
+A name is up to 16 plain characters, and no two players in a session have the same one,
+whatever the case of its letters. If the name you join with is taken, you get a number after
+it and the chat says so; `/name` and a name that is free changes it, at most every ten
+seconds. A name is free again as soon as its player has left. If you close the game and come
+straight back, you have your own name again.
 
 While the chat is open, the game ignores the controller and the keys bound to it, so typing
 does not move Mario. The keyboard is read only while the game's window is in front. Choose

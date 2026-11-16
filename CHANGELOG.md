@@ -5,6 +5,13 @@ version so far joins every other's server.
 
 ## Not yet released
 
+- **`/name <new name>` renames you** in a session. A name another player has is refused,
+  and everyone sees who is now called what.
+- **Your own name is yours again when you come straight back.** A game closed and started
+  again within a few seconds found its old self still holding the name, and was called
+  "Mario 2". The server now lets the old one go.
+- A player whose name was taken, and so got a number after it, is told so in the chat, and
+  the panel's name field says what a name may be.
 - The panel shows its version: at the foot of the sidebar, and in a new "About" panel on the
   Preferences page, which also opens the project's page.
 

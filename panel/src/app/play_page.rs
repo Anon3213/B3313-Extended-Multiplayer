@@ -1171,8 +1171,10 @@ impl Panel {
             .child(div().max_w(scaled(320.)).child(self.play.name.clone()))
             .child(hint(
                 theme,
-                "Shown over your Mario and in the chat. Applies the next time you join; empty, \
-                 the server calls you Player and a number.",
+                "Shown over your Mario and in the chat: up to 16 plain characters, with no \
+                 accents. Applies the next time you join; in a session, /name and a new name in \
+                 the chat changes it. If someone in the session has the name, you get a number \
+                 after it and are told so. Empty, the server calls you Player and a number.",
             ))
     }
 

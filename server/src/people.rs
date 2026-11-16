@@ -23,20 +23,27 @@ const SAY_INTERVAL: Duration = Duration::from_secs(2);
 
 /// What the chat's `/help` says to each kind of player, a line to each message. Each line is
 /// short enough to be one row of the chat in the game, which is 200 pixels wide and shows six.
-const HELP: &[&str] = &["/list: who is here. /color: your colors."];
+const HELP: &[&str] = &[
+    "/list: who is here. /color: your colors.",
+    "/name <new name> renames you.",
+];
 const MODERATOR_HELP: &[&str] = &[
     "/list: who is here. /color: your colors.",
+    "/name <new name> renames you.",
     "/kick <player>, /ban <player>.",
     "<player>: a name, or a number in /list.",
 ];
 pub(crate) const HOST_HELP: &[&str] = &[
     "/list: who is here. /color: your colors.",
+    "/name <new name> renames you.",
     "/kick <player>, /ban <player>.",
-    "/mod <player>, /unmod <player>.",
-    "/host <player> makes them the host.",
+    "/mod, /unmod, /host <player>.",
     "<player>: a name, or a number in /list.",
     "/end ends the session for everyone.",
 ];
+/// How long a player waits between two changes of name: long enough that nobody can flicker
+/// through names to confuse whoever moderates.
+pub(crate) const RENAME_INTERVAL: Duration = Duration::from_secs(10);
 
 /// A player named in a chat command: by number, as `/list` shows, or by name.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -60,6 +67,8 @@ pub enum ChatCommand {
     Host(Target),
     /// Wear the outfit named, or list the outfits if none is.
     Color(String),
+    /// Take the name given, or be told one's own if none is.
+    Name(String),
     /// End the session for everyone.
     End,
 }
@@ -95,6 +104,8 @@ struct Member {
     joined: Instant,
     /// Whether the bridge has introduced itself: it may once.
     introduced: bool,
+    /// When the player last changed their name with `/name`.
+    renamed: Option<Instant>,
     /// Which of the player's messages have been taken, so repeats are dropped.
     says: Inbox,
     /// How many messages the player may still send.
@@ -144,6 +155,7 @@ impl People {
                 outfit: None,
                 joined: now,
                 introduced: false,
+                renamed: None,
                 says: Inbox::default(),
                 say_allowance: Bucket::full(SAY_BURST, now),
                 lines: Outbox::default(),
@@ -179,18 +191,24 @@ impl People {
             .map_or(Role::Player, |member| member.role)
     }
 
+    /// Who has the name `wanted`, whatever the case of its letters, other than `player`, who
+    /// may have it themself.
+    #[must_use]
+    pub fn holder_of(&self, wanted: &str, player: PlayerId) -> Option<PlayerId> {
+        let index = self.members.iter().enumerate().position(|(index, slot)| {
+            index != usize::from(player.get())
+                && slot
+                    .as_ref()
+                    .and_then(|member| member.name.as_ref())
+                    .is_some_and(|name| name.as_str().eq_ignore_ascii_case(wanted))
+        })?;
+        PlayerId::new(u8::try_from(index).ok()?)
+    }
+
     /// `wanted`, or `wanted` with the lowest number after it that makes it unlike every other
     /// player's name, whatever the case of the letters.
     fn unlike_the_others(&self, player: PlayerId, wanted: &Name) -> Name {
-        let taken = |candidate: &str| {
-            self.members.iter().enumerate().any(|(index, slot)| {
-                index != usize::from(player.get())
-                    && slot
-                        .as_ref()
-                        .and_then(|member| member.name.as_ref())
-                        .is_some_and(|name| name.as_str().eq_ignore_ascii_case(candidate))
-            })
-        };
+        let taken = |candidate: &str| self.holder_of(candidate, player).is_some();
         if !taken(wanted.as_str()) {
             return wanted.clone();
         }
@@ -263,7 +281,69 @@ impl People {
         }
         let fallback = Name::new(&default_name(player))?;
         self.set_name(player, name.unwrap_or(&fallback));
-        self.member(player)?.name.clone()
+        let given = self.member(player)?.name.clone()?;
+        // Said, or a player would only wonder at the number after their name.
+        if let Some(wanted) = name.filter(|&wanted| *wanted != given) {
+            self.tell(
+                player,
+                &format!(
+                    "{} is taken, so you are {}. /name changes it.",
+                    wanted.as_str(),
+                    given.as_str()
+                ),
+            );
+        }
+        Some(given)
+    }
+
+    /// Carries out `/name` for a player: gives them the name `wanted` and tells everyone, or
+    /// tells them the name they have if it asks for none. Returns the new name, if there is
+    /// one.
+    ///
+    /// # Errors
+    /// Fails, with a line for the player, if the name is not one a player can have, is another
+    /// player's, is their own already, or comes too soon after their last change.
+    pub fn rename(
+        &mut self,
+        player: PlayerId,
+        wanted: &str,
+        now: Instant,
+    ) -> Result<Option<Name>, String> {
+        let current = self.name_of(player);
+        if wanted.is_empty() {
+            self.tell(
+                player,
+                &format!("You are {current}. /name and a new name changes it."),
+            );
+            return Ok(None);
+        }
+        // Asked for by name, so refused where a name at joining would be cut or cleaned.
+        let name = Name::new(wanted)
+            .filter(|name| name.as_str() == wanted)
+            .ok_or_else(|| {
+                format!("A name is 1 to {MAX_NAME_LENGTH} plain characters, with no accents.")
+            })?;
+        if name.as_str() == current {
+            return Err(format!("You are {current} already."));
+        }
+        if self.holder_of(name.as_str(), player).is_some() {
+            return Err(format!(
+                "{} is taken; /list shows the names in use.",
+                name.as_str()
+            ));
+        }
+        let member = self
+            .member_mut(player)
+            .ok_or_else(|| format!("There is no player {}.", player.get()))?;
+        let is_due = |last: Instant| now.saturating_duration_since(last) >= RENAME_INTERVAL;
+        if !member.renamed.is_none_or(is_due) {
+            return Err("Wait a moment before changing your name again.".to_owned());
+        }
+        member.renamed = Some(now);
+        member.name = Some(name.clone());
+        self.roster_version += 1;
+        self.announce(&format!("{current} is now {}", name.as_str()));
+        Ok(Some(name))
     }
 
     /// Passes the host's role to a player and tells everyone. Whoever had it is an ordinary

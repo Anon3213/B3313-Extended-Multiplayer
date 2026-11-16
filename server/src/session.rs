@@ -49,8 +49,9 @@ pub const OBJECT_REFRESH_TICKS: u32 = 10;
 /// `max_hit_distance`.
 pub const INTERACTION_REACH: f32 = 1000.0;
 
-/// How long nothing may have come from the host before a player who joins with the host
-/// password takes the role from them. A bridge sends some thirty packets a second, paused or
+/// How long nothing may have come from a player before another who joins takes their place:
+/// the name, from whoever has the one the newcomer asks for, and the role, from the host if
+/// the newcomer has the host password. A bridge sends some thirty packets a second, paused or
 /// not, so this long without one means the host's connection is gone, and whoever comes with
 /// the password is most likely the host coming back, ahead of `player_timeout` removing
 /// what they left behind. A host who is heard keeps the role from anyone else who has the
@@ -454,6 +455,14 @@ impl Session {
         host_password: &str,
         now: Instant,
     ) {
+        // Whoever has the name and has gone silent is most likely this player's own game from
+        // before it was closed or lost the server, not yet timed out: it goes now, so that the
+        // player has their name back and not a number after it.
+        let namesake = name.and_then(|name| self.people.holder_of(name.as_str(), player));
+        if let Some(stale) = namesake.filter(|&stale| self.is_silent(stale, now)) {
+            let how = "lost their connection";
+            self.remove(usize::from(stale.get()), Event::TimedOut, how);
+        }
         let knows =
             !self.config.host_password.is_empty() && host_password == self.config.host_password;
         let holder = self.people.host().filter(|&holder| holder != player);
@@ -500,7 +509,7 @@ impl Session {
             text: said.clone(),
         });
         if let Spoken::Command(command, allowed) = spoken
-            && let Err(why) = self.run_chat_command(player, &command, allowed)
+            && let Err(why) = self.run_chat_command(player, &command, allowed, now)
         {
             self.people.tell(player, &why);
         }
@@ -512,6 +521,7 @@ impl Session {
         actor: PlayerId,
         command: &ChatCommand,
         allowed: Rule,
+        now: Instant,
     ) -> Result<(), String> {
         let role = self.people.role_of(actor);
         if !allowed.may.allows(role) {
@@ -550,6 +560,11 @@ impl Session {
                 self.make_host(target)?;
             }
             ChatCommand::Color(wanted) => self.people.choose_outfit(actor, wanted)?,
+            ChatCommand::Name(wanted) => {
+                if let Some(name) = self.people.rename(actor, wanted, now)? {
+                    self.events.push(Event::Named(actor, name));
+                }
+            }
             ChatCommand::End => self.orders.push(Command::End),
         }
         Ok(())
@@ -1078,6 +1093,7 @@ mod tests {
         INTERACTION_REACH, Session, TICK_INTERVAL, Verdict, WORLD_RESEND_TICKS,
     };
     use crate::limits::LOG_INTERVAL;
+    use crate::people::RENAME_INTERVAL;
     use b3313_protocol::metrics::REPORT_INTERVAL;
     use b3313_protocol::{
         Ack, Coin, Hit, HitKind, Interaction, Message, Name, OBJECT_STATE_SIZE, ObjectSet, Outfit,
@@ -2135,6 +2151,92 @@ mod tests {
         join_knowing_the_host_password(&mut session, 3, now);
 
         assert_eq!(hosts(&session), ["Wario"]);
+    }
+
+    /// Has a player join from `port` asking to be called `name`.
+    fn join_as(session: &mut Session, port: u16, name: &str, now: Instant) {
+        send(session, client(port), &hello(), now);
+        let introduce = Packet::Introduce {
+            name: Name::new(name),
+            outfit: None,
+            host_password: String::new(),
+        };
+        send(session, client(port), &introduce, now);
+    }
+
+    /// Everyone's name, in order of their numbers.
+    fn names(session: &Session) -> Vec<String> {
+        let roster = session.roster();
+        let names = roster.iter().map(|entry| entry.name.as_str().to_owned());
+        names.collect()
+    }
+
+    #[test]
+    fn a_name_someone_here_has_gets_a_number_and_its_player_is_told_why() {
+        let now = Instant::now();
+        let mut session = named_session(now);
+
+        join_as(&mut session, 3, "mario", now);
+
+        assert_eq!(names(&session), ["Mario", "Luigi", "Peach", "mario 2"]);
+        let told = chat_for(&mut session, 3, now).join(" ");
+        assert!(
+            told.contains("mario is taken, so you are mario 2. /name changes it."),
+            "{told}"
+        );
+        // Nobody who got the name they asked for is told anything of the kind.
+        assert!(!chat_for(&mut session, 1, now).join(" ").contains("taken"));
+    }
+
+    #[test]
+    fn a_player_who_comes_back_has_their_name_from_the_silent_self_they_left() {
+        let now = Instant::now();
+        let mut session = named_session(now);
+        session.take_events();
+
+        // As after a bridge is closed and started again, before the server gave the old one up.
+        join_as(&mut session, 3, "Mario", now + HOST_SILENT_AFTER);
+
+        // One Mario, with no number after the name: the newcomer, listed by their own number.
+        assert_eq!(names(&session), ["Luigi", "Peach", "Mario"]);
+        let events = session.take_events();
+        assert!(events.contains(&Event::TimedOut(id(0))), "{events:?}");
+        // The one who came is the Mario there now, and not the one who went.
+        assert_eq!(session.players().len(), 3);
+        assert!(session.is_player(client(3)) && !session.is_player(client(0)));
+    }
+
+    #[test]
+    fn a_player_takes_a_new_name_that_is_free_and_fit_and_not_too_often() {
+        let now = Instant::now();
+        let mut session = named_session(now);
+        for port in 0..3 {
+            chat_for(&mut session, port, now);
+        }
+        session.take_events();
+        let told = |session: &mut Session, id: u16, line: &str| {
+            say(session, 1, id, line, now);
+            chat_for(session, 1, now).join(" ")
+        };
+
+        let renamed = told(&mut session, 0, "/name Wario");
+        assert!(renamed.contains("Luigi is now Wario"), "{renamed}");
+        assert_eq!(names(&session), ["Mario", "Wario", "Peach"]);
+        let events = session.take_events();
+        let named = Name::new("Wario").map(|name| Event::Named(id(1), name));
+        assert!(named.is_some_and(|named| events.contains(&named)));
+        // Everyone is told, by the name they knew.
+        assert_eq!(chat_for(&mut session, 2, now), ["Luigi is now Wario"]);
+
+        // Another's name in any case, one too long, and a change too soon are each refused.
+        assert!(told(&mut session, 1, "/name mario").contains("mario is taken"));
+        assert!(told(&mut session, 2, "/name Seventeen letters").contains("1 to 16"));
+        assert!(told(&mut session, 3, "/name Waluigi").contains("Wait a moment"));
+        assert!(told(&mut session, 4, "/name").contains("You are Wario"));
+        assert_eq!(names(&session), ["Mario", "Wario", "Peach"]);
+
+        say(&mut session, 1, 5, "/name Waluigi", now + RENAME_INTERVAL);
+        assert_eq!(names(&session), ["Mario", "Waluigi", "Peach"]);
     }
 
     #[test]
