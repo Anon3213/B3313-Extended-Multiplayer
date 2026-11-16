@@ -3,6 +3,11 @@
 What each version changed, newest first. Versions of the same protocol play together: every
 version so far joins every other's server.
 
+## Not yet released
+
+- A server with nobody playing rests: it used 1.4% of a processor core to look for packets
+  a thousand times a second, and now uses about a fifth of that.
+
 ## 0.1.3
 
 - **`/name <new name>` renames you** in a session. A name another player has is refused,

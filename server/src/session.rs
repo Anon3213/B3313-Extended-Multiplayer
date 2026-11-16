@@ -165,6 +165,12 @@ impl Session {
         Self::default()
     }
 
+    /// Whether anyone is in the session.
+    #[must_use]
+    pub fn has_players(&self) -> bool {
+        self.players.iter().any(Option::is_some)
+    }
+
     /// Whether the player at `address` is in the session.
     #[must_use]
     pub fn is_player(&self, address: SocketAddr) -> bool {

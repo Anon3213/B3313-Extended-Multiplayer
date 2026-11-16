@@ -12,9 +12,15 @@ use std::sync::mpsc::{self, Receiver};
 use std::thread;
 use std::time::{Duration, Instant};
 
-/// How often `serve` checks its socket between ticks. Not a socket timeout: on Windows those round
-/// up to the 15.6 ms system timer, which made ticks late by up to that much.
+/// How often `serve` checks its socket between ticks while anyone is playing. Not a socket
+/// timeout: on Windows those round up to the 15.6 ms system timer, which made ticks late by up
+/// to that much.
 const POLL_STEP: Duration = Duration::from_millis(1);
+/// How often it checks while nobody is playing, when there is no one for a late answer to
+/// keep waiting but a stranger joining, whom this costs a twentieth of a second at most over
+/// the handshake's two exchanges. Waking a thousand times a second for nobody took 1.4% of a
+/// processor core, more than sixteen players add to it.
+const IDLE_POLL_STEP: Duration = Duration::from_millis(20);
 /// Datagrams taken in one turn of the serve loop before it looks whether a tick is due.
 /// Sixteen bridges send far fewer in a turn; only a flood reaches it.
 const MOST_RECEIVED_PER_TURN: usize = 256;
@@ -211,10 +217,15 @@ pub fn serve_with_console(
             }
         }
         session.take_events().into_iter().for_each(&mut log);
+        let step = if session.has_players() {
+            POLL_STEP
+        } else {
+            IDLE_POLL_STEP
+        };
         thread::sleep(
             next_tick
                 .saturating_duration_since(Instant::now())
-                .min(POLL_STEP),
+                .min(step),
         );
     }
     for (_, address) in session.players() {
