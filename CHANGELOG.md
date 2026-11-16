@@ -3,6 +3,11 @@
 What each version changed, newest first. Versions of the same protocol play together: a
 0.1.0 game joins a 0.1.1 server, and the other way round.
 
+## Not yet released
+
+- The panel's server settings show the host password under a new "Advanced" heading, which
+  says that hosting from the panel needs nothing typed there.
+
 ## 0.1.1
 
 - **A session has one host.** A second player who joined with the host password used to

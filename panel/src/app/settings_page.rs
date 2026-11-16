@@ -82,7 +82,7 @@ impl Panel {
             let card = card(&theme)
                 .p_5()
                 .gap_1()
-                .child(card_header(&theme, group.title, None))
+                .child(card_header(&theme, group.title, group.detail))
                 .children(fields)
                 .into_any_element();
             Some((panel.key, Some(card)))

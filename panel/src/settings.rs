@@ -28,8 +28,18 @@ pub struct Field {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Group {
     pub title: &'static str,
+    /// Said under the title, where the group as a whole wants a word.
+    pub detail: Option<&'static str>,
     pub fields: &'static [Field],
 }
+
+/// Under "Advanced": why its settings are there and not with the others, for a user who
+/// hosts from the panel and would otherwise wonder what to type.
+const ADVANCED_DETAIL: &str = "Leave these as they are unless you run a server without this \
+    panel. When you host here and join on Play, the panel makes you the host by itself, with a \
+    host password it makes up and never shows. To let another player be the host, pass the role \
+    on with /host <player> in the chat, or name them with /host <player> in the Server chat: no \
+    password is needed for either.";
 
 const fn number(key: &'static str, label: &'static str, unit: &'static str) -> Field {
     Field {
@@ -40,9 +50,10 @@ const fn number(key: &'static str, label: &'static str, unit: &'static str) -> F
 }
 
 /// How the editor lays the settings out; every one of `SETTINGS` appears once.
-pub const GROUPS: [Group; 5] = [
+pub const GROUPS: [Group; 6] = [
     Group {
         title: "Session",
+        detail: None,
         fields: &[
             number("max_players", "Player limit", "players"),
             number("player_timeout_seconds", "Timeout", "seconds"),
@@ -51,15 +62,11 @@ pub const GROUPS: [Group; 5] = [
                 label: "Password",
                 kind: FieldKind::Password,
             },
-            Field {
-                key: "host_password",
-                label: "Host password",
-                kind: FieldKind::Password,
-            },
         ],
     },
     Group {
         title: "Combat",
+        detail: None,
         fields: &[
             number("max_hit_distance", "Hit reach", "units"),
             number("min_hit_interval_ms", "Time between hits", "ms"),
@@ -67,6 +74,7 @@ pub const GROUPS: [Group; 5] = [
     },
     Group {
         title: "Movement checks",
+        detail: None,
         fields: &[
             number("flag_speed", "Flag speed", "units/s"),
             number("jump_distance", "Jump distance", "units"),
@@ -75,6 +83,7 @@ pub const GROUPS: [Group; 5] = [
     },
     Group {
         title: "Rate limits",
+        detail: None,
         fields: &[
             number("packets_per_second", "Packets per address", "per second"),
             number("joins_per_second", "Join attempts", "per second"),
@@ -82,10 +91,20 @@ pub const GROUPS: [Group; 5] = [
     },
     Group {
         title: "Bans",
+        detail: None,
         fields: &[Field {
             key: "ban_file",
             label: "Ban file",
             kind: FieldKind::Path,
+        }],
+    },
+    Group {
+        title: "Advanced",
+        detail: Some(ADVANCED_DETAIL),
+        fields: &[Field {
+            key: "host_password",
+            label: "Host password",
+            kind: FieldKind::Password,
         }],
     },
 ];

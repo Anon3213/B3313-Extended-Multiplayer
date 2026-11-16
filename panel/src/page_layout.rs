@@ -68,6 +68,7 @@ impl ArrangedPage {
             panel("movement checks", "Movement checks"),
             panel("rate limits", "Rate limits"),
             panel("bans", "Bans"),
+            panel("advanced", "Advanced"),
         ];
         const PREFERENCES: &[PagePanel] = &[
             panel("appearance", "Appearance"),
