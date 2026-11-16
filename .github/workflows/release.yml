@@ -20,11 +20,13 @@ jobs:
       - uses: astral-sh/setup-uv@v6
       - run: uv sync
       - run: uv run --no-sync python scripts/release.py
-      # The draft's text is this version's part of CHANGELOG.md, from its heading to the next.
+      # The draft is titled with the version, and its text is this version's part of
+      # CHANGELOG.md, from its heading to the next.
       - run: |
           version="${GITHUB_REF_NAME#v}"
           awk -v heading="## $version" '/^## /{wanted = ($0 == heading)} wanted' CHANGELOG.md > notes.md
-          gh release create "$GITHUB_REF_NAME" --draft --notes-file notes.md dist/*.zip dist/*.sha256
+          gh release create "$GITHUB_REF_NAME" --draft --title "B3313 Extended Multiplayer $version" \
+            --notes-file notes.md dist/*.zip dist/*.sha256
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
