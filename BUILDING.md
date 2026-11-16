@@ -62,6 +62,10 @@ and nowhere else. After changing it, run `uv run --no-sync python scripts/make_l
 commit `bridge/src/layout.rs` with it, which the bridge takes every address from; a test
 fails while it is out of date.
 
+The programs' icons are drawn by `scripts/make_icons.py`, from shapes in the script itself.
+After changing it, run `uv run --no-sync python scripts/make_icons.py` and commit what it
+writes in `icons/`; `--preview icons.png` draws them all into one picture to look at first.
+
 If you change an engine file outside `Multiplayer/`, run `python scripts/engine.py patch` and
 commit `engine-hooks.patch`: git ignores the engine files themselves.
 

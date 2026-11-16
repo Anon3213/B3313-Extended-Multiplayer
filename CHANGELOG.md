@@ -5,6 +5,8 @@ What each version changed, newest first. Versions of the same protocol play toge
 
 ## Not yet released
 
+- The panel, the bridge and the server have an icon: two pairs of eyes in the dark, one
+  pair to a player. The panel's window and taskbar button show it too.
 - The panel's server settings show the host password under a new "Advanced" heading, which
   says that hosting from the panel needs nothing typed there.
 - In the Players table, the lines between the headings follow the mouse that drags them, as
