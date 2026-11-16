@@ -237,7 +237,7 @@ fn gather(what: &What, backtrace: Option<&str>, dump: Option<Result<&str, &str>>
     let commit = env!("B3313_PANEL_COMMIT");
     let build = format!(
         "b3313-panel {}, commit {}, {} build",
-        env!("CARGO_PKG_VERSION"),
+        crate::VERSION,
         if commit.is_empty() { "unknown" } else { commit },
         if cfg!(debug_assertions) {
             "debug"

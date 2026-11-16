@@ -78,6 +78,7 @@ impl ArrangedPage {
             panel("alerts", "Alerts"),
             panel("startup", "Startup"),
             panel("shortcuts", "Keyboard shortcuts"),
+            panel("about", "About"),
             panel("reset", "Reset"),
         ];
         match self {
@@ -252,15 +253,17 @@ mod tests {
     #[test]
     fn a_panel_added_since_an_order_was_saved_takes_its_usual_place() {
         let page = ArrangedPage::Preferences;
-        // Saved before the page had its chat panel, which usually follows Behavior.
+        // Saved before the page had its chat panel, which usually follows Behavior, and its
+        // About, which usually follows the shortcuts.
         let saved = "appearance,privacy,behavior,alerts,startup,shortcuts,reset";
         assert_eq!(PageLayout::parse(page, saved), PageLayout::usual(page));
-        // The user's own order is kept, and the new panel still follows Behavior there.
+        // The user's own order is kept, and each new panel still follows its neighbor there.
         let moved = "shortcuts,behavior,appearance,privacy,alerts,startup,reset";
         assert_eq!(
             keys(&PageLayout::parse(page, moved)),
             [
                 "shortcuts",
+                "about",
                 "behavior",
                 "chat",
                 "appearance",

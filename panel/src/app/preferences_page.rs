@@ -27,6 +27,7 @@ impl Panel {
             ("alerts", Some(self.render_alerts(&theme, cx))),
             ("startup", Some(self.render_startup(&theme, cx))),
             ("shortcuts", Some(render_shortcuts(&theme))),
+            ("about", Some(Self::render_about(&theme, cx))),
             ("reset", Some(self.render_reset(&theme, cx))),
         ];
         let body = self.arranged(&theme, ArrangedPage::Preferences, panels, cx);

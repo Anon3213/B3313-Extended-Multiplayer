@@ -3,6 +3,11 @@
 What each version changed, newest first. Versions of the same protocol play together: every
 version so far joins every other's server.
 
+## Not yet released
+
+- The panel shows its version: at the foot of the sidebar, and in a new "About" panel on the
+  Preferences page, which also opens the project's page.
+
 ## 0.1.2
 
 - The panel, the bridge and the server have an icon: two pairs of eyes in the dark, one

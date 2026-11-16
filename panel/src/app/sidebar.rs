@@ -490,6 +490,18 @@ impl Panel {
                         .right(scaled(5.)),
                 )
             });
+        // The panel's version, last of all: the number alone where there is room for no more.
+        let version = div()
+            .id("panel-version")
+            .tip(
+                format!(
+                    "This panel is version {}. Preferences has more.",
+                    crate::VERSION
+                ),
+                cx,
+            )
+            .max_w_full()
+            .text_color(theme.text_faint);
         if collapsed {
             // In a column as wide as the icons above, centered under them.
             return div()
@@ -507,13 +519,18 @@ impl Panel {
                 )
                 .child(history)
                 .child(toggle)
+                .child(
+                    version
+                        .text_size(scaled(10.))
+                        .child(div().one_line().child(crate::VERSION)),
+                )
                 .into_any_element();
         }
         let file = self
             .form
             .path()
             .map_or_else(|| NOT_SAVED.to_owned(), display_name);
-        div()
+        let file_and_buttons = div()
             .flex()
             .items_center()
             .gap_1()
@@ -532,7 +549,18 @@ impl Panel {
                     .child(div().text_color(theme.text_muted).one_line().child(file)),
             )
             .child(history)
-            .child(toggle)
+            .child(toggle);
+        let version = version.text_size(scaled(12.)).child(
+            div()
+                .one_line()
+                .child(format!("Version {}", crate::VERSION)),
+        );
+        div()
+            .flex()
+            .flex_col()
+            .gap_3()
+            .child(file_and_buttons)
+            .child(version)
             .into_any_element()
     }
 

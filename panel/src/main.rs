@@ -47,6 +47,12 @@ use std::time::Duration;
 use theme::Theme;
 use zoom::Zoom;
 
+/// The panel's version, as its release is named: the sidebar and the Preferences page show
+/// it, and a crash report names it.
+const VERSION: &str = env!("CARGO_PKG_VERSION");
+/// Where the project is kept, which the Preferences page opens.
+const PROJECT_PAGE: &str = "https://github.com/Anon3213/B3313-Extended-Multiplayer";
+
 /// Where the window opens: where it was last time, as Windows apps do, if that is still on a
 /// screen; otherwise centered, larger at a larger interface size but never beyond the screen.
 fn starting_bounds(saved: Option<WindowPlacement>, zoom: Zoom, cx: &App) -> WindowBounds {

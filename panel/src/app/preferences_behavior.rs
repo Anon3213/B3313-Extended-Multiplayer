@@ -18,6 +18,12 @@ const RESET_MEANING: &str = "Everything on this page back to how it came. The wi
                              recent files and the Overview's layout stay; the Overview has its \
                              own Reset.";
 
+/// What the About card says of the project, as its README does.
+const ABOUT_MEANING: &str = "An unofficial project, not affiliated with Nintendo or the B3313 \
+                             team. Released as it is, free to use, change and pass on, with no \
+                             promise of support or further development. The panel never checks \
+                             for a newer version by itself.";
+
 impl Panel {
     /// How long messages stay, whether stopping asks first, and whether views are kept.
     pub(super) fn render_behavior(&self, theme: &Theme, cx: &mut Context<Self>) -> AnyElement {
@@ -373,6 +379,38 @@ impl Panel {
                     )
                     .child(div().flex().flex_wrap().gap_2().children(pages)),
             )
+            .into_any_element()
+    }
+
+    /// What this program is and which version of it, with the way to the project's page.
+    pub(super) fn render_about(theme: &Theme, cx: &mut Context<Self>) -> AnyElement {
+        let version = format!("B3313 Extended Multiplayer, version {}", crate::VERSION);
+        card(theme)
+            .p_5()
+            .gap_3()
+            .child(
+                div()
+                    .flex()
+                    .flex_wrap()
+                    .items_center()
+                    .gap_4()
+                    .child(div().flex_1().min_w(scaled(240.)).child(card_header(
+                        theme,
+                        "About",
+                        Some(&version),
+                    )))
+                    .child(
+                        Button::new("project-page", "Project page")
+                            .icon(IconName::Globe)
+                            .tooltip(format!(
+                                "Opens {} in your browser: the newest version, what each \
+                                 changed, and the source",
+                                crate::PROJECT_PAGE
+                            ))
+                            .on_click(cx.listener(|_, _, _, cx| cx.open_url(crate::PROJECT_PAGE))),
+                    ),
+            )
+            .child(hint(theme, ABOUT_MEANING))
             .into_any_element()
     }
 
