@@ -217,7 +217,7 @@ pub fn serve_with_console(
             }
         }
         session.take_events().into_iter().for_each(&mut log);
-        let step = if session.has_players() {
+        let longest_wait = if session.has_players() {
             POLL_STEP
         } else {
             IDLE_POLL_STEP
@@ -225,7 +225,7 @@ pub fn serve_with_console(
         thread::sleep(
             next_tick
                 .saturating_duration_since(Instant::now())
-                .min(step),
+                .min(longest_wait),
         );
     }
     for (_, address) in session.players() {
