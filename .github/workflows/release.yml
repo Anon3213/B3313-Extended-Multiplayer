@@ -20,7 +20,11 @@ jobs:
       - uses: astral-sh/setup-uv@v6
       - run: uv sync
       - run: uv run --no-sync python scripts/release.py
-      - run: gh release create "${{ github.ref_name }}" --draft --generate-notes dist/*.zip dist/*.sha256
+      # The draft's text is this version's part of CHANGELOG.md, from its heading to the next.
+      - run: |
+          version="${GITHUB_REF_NAME#v}"
+          awk -v heading="## $version" '/^## /{wanted = ($0 == heading)} wanted' CHANGELOG.md > notes.md
+          gh release create "$GITHUB_REF_NAME" --draft --notes-file notes.md dist/*.zip dist/*.sha256
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}

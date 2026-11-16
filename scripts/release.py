@@ -167,6 +167,7 @@ def main() -> None:
         tools / "b3313-bridge.exe": "b3313-bridge.exe",
         ROOT / "server" / "server.example.conf": "server.example.conf",
         ROOT / "README.md": "README.md",
+        ROOT / "CHANGELOG.md": "CHANGELOG.md",
         ROOT / "LICENSE.txt": "LICENSE.txt",
         ROOT / "NOTICE.md": "NOTICE.md",
     }

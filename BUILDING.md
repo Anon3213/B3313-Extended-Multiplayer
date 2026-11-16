@@ -69,14 +69,16 @@ Never commit a ROM, the A2AE patch, or an engine file.
 
 ## Releasing
 
-Set the version in `panel/Cargo.toml`, then:
+Set the version in `panel/Cargo.toml`, and say what changed under a heading `## <version>` in
+`CHANGELOG.md`, then:
 
 ```bash
 uv run --no-sync python scripts/release.py
 ```
 
 It writes the players' zip and its SHA-256 under `dist/`. Pushing a tag `v<version>` has
-GitHub build the same zip and a Linux server and attach them to a draft release.
+GitHub build the same zip and a Linux server and attach them to a draft release, whose text
+is that version's part of the changelog.
 
 A release is built from the files git has, committed or staged, in a folder of its own,
 `C:\b3313-release` unless `B3313_RELEASE_DIR` names another, with a Rust toolchain and crates
