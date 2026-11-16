@@ -146,7 +146,8 @@ impl Kind {
             Event::Flagged(..)
             | Event::CoinsRefused(_)
             | Event::ProgressRefused(..)
-            | Event::HostPasswordWrong(_) => Self::Flag,
+            | Event::HostPasswordWrong(_)
+            | Event::HostRefused(..) => Self::Flag,
             Event::Chat { .. } => Self::Chat,
             Event::Hit { .. } | Event::HitRejected { .. } | Event::ProgressAdded(..) => {
                 Self::Gameplay
@@ -386,7 +387,8 @@ fn players_in(event: &Event) -> Vec<PlayerId> {
         | Event::CoinsRefused(id)
         | Event::Named(id, _)
         | Event::RoleChanged(id, _)
-        | Event::HostPasswordWrong(id) => vec![*id],
+        | Event::HostPasswordWrong(id)
+        | Event::HostRefused(id, _) => vec![*id],
         // The server owner's own lines are about nobody.
         Event::Chat { from, .. } => from.iter().copied().collect(),
         Event::Hit {
@@ -470,7 +472,8 @@ impl Dashboard {
             Event::Flagged(id, _)
             | Event::CoinsRefused(id)
             | Event::ProgressRefused(id, _)
-            | Event::HostPasswordWrong(id) => {
+            | Event::HostPasswordWrong(id)
+            | Event::HostRefused(id, _) => {
                 if let Some(row) = self.players.get_mut(&id.get()) {
                     row.flags += 1;
                 }

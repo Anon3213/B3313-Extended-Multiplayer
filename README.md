@@ -67,7 +67,7 @@ list and `/color green` to wear one. Everyone sees you in them, and so do you.
 |---|---|---|---|
 | **Player** | Everyone who joins | None | Play, chat, `/help`, `/list`, `/color` |
 | **Moderator** | A player the host appoints with `/mod` | Blue shield | Also `/kick` and `/ban` ordinary players. Lasts until they leave |
-| **Host** | The one player in charge of the session | Gold crown | Also `/mod`, `/unmod`, remove anyone, and `/end` the session |
+| **Host** | The one player in charge of the session | Gold crown | Also `/mod`, `/unmod`, remove anyone, pass the role on with `/host`, and `/end` the session |
 | **Server owner** | Whoever runs the server, on their PC or elsewhere | Server icon; lines show as `[Server]` | Everything, from outside the game: the panel's **Server chat**, Players and Bans pages, or the server's console |
 
 The host and the server owner are usually the same person, and are still two things. The
@@ -75,7 +75,14 @@ server owner is whoever started the server, and need not be playing. The host is
 If you host from the panel and join your own server on **Play**, the panel makes your player
 the host, so you are both: you speak as `[Server]` in the Server chat, and as yourself, with
 the crown, on **Play** and in the game. A server run by itself has a host only if a player
-is given its host password.
+is given its host password, or its owner names one with `host <player>`.
+
+A session has one host. The first player to join with the host password keeps the role: anyone
+who joins with it later is an ordinary player, and the server owner is told. The host hands
+the role to another player with `/host <player>` and is an ordinary player from then on. If
+the host leaves without doing so, the session has no host until the server owner names one or
+a player joins with the host password. A host whose connection drops has the role again when
+they are back.
 
 ### Chat
 
@@ -90,6 +97,7 @@ lines and take the same commands.
 | `/color [name]` | Anyone | Wears the colors named, or lists them |
 | `/kick <player>`, `/ban <player>` | Host, moderators | Removes a player, by name or by their number in `/list` |
 | `/mod <player>`, `/unmod <player>` | Host | Makes a player a moderator, or an ordinary player again |
+| `/host <player>` | Host | Makes that player the host in the host's place |
 | `/end` | Host | Ends the session for everyone, and stops the server |
 
 While the chat is open, the game ignores the controller and the keys bound to it, so typing
@@ -138,7 +146,7 @@ invite. If the router refuses, forward the server's UDP port to your PC by hand,
 
 ## Building
 
-See [BUILDING.md](BUILDING.md).
+See [BUILDING.md](BUILDING.md). [CHANGELOG.md](CHANGELOG.md) lists what each version changed.
 
 ## License
 

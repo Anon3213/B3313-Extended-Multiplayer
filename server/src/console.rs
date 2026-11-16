@@ -6,7 +6,8 @@ use std::net::IpAddr;
 
 /// What the console's `help` prints.
 pub const HELP: &str = "Commands: list | kick <player> | ban <player or IP address> | \
-                        unban <IP address> | mod <player> | unmod <player> | say <message> | end";
+                        unban <IP address> | mod <player> | unmod <player> | host <player> | \
+                        say <message> | end";
 
 /// The longest message `say` takes: a line of the chat, less the mark before it that tells
 /// the players it is the server's.
@@ -28,6 +29,8 @@ pub enum Command {
     Mod(PlayerId),
     /// Make a moderator an ordinary player again.
     Unmod(PlayerId),
+    /// Make a player the host; whoever was is an ordinary player again.
+    Host(PlayerId),
     /// Say something to everyone in the chat, as the server.
     Say(Message),
     /// End the session: every player is told it has ended, and the server stops.
@@ -60,6 +63,7 @@ impl Command {
             ["kick", number] => Ok(Self::Kick(player(number)?)),
             ["mod", number] => Ok(Self::Mod(player(number)?)),
             ["unmod", number] => Ok(Self::Unmod(player(number)?)),
+            ["host", number] => Ok(Self::Host(player(number)?)),
             // The message as typed, with its own spacing, after the word.
             ["say", _, ..] => {
                 let said = line.trim_start().strip_prefix("say").unwrap_or_default();
@@ -114,6 +118,7 @@ mod tests {
         assert_eq!(ipv6, Some(Command::BanAddress(Ipv6Addr::LOCALHOST.into())));
         assert_eq!(Command::parse("mod 2"), Ok(Command::Mod(id(2))));
         assert_eq!(Command::parse("unmod 2"), Ok(Command::Unmod(id(2))));
+        assert_eq!(Command::parse("host 2"), Ok(Command::Host(id(2))));
         let said = Command::parse(" say  back in  five ");
         assert_eq!(
             said,

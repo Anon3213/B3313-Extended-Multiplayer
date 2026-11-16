@@ -75,6 +75,14 @@ pub const OBJECT_REFRESH_TICKS: u32 = 10;
 /// `max_hit_distance`.
 pub const INTERACTION_REACH: f32 = 1000.0;
 
+/// How long nothing may have come from the host before a player who joins with the host
+/// password takes the role from them. A bridge sends some thirty packets a second, paused or
+/// not, so this long without one means the host's connection is gone, and whoever comes with
+/// the password is most likely the host coming back, ahead of `player_timeout` removing
+/// what they left behind. A host who is heard keeps the role from anyone else who has the
+/// password.
+const HOST_SILENT_AFTER: Duration = Duration::from_secs(2);
+
 /// What a line in the chat from the server's owner is marked as, typed at the console or in
 /// the panel. Not "Host": that is the player in the session who holds the host's role, who
 /// may be someone else, or nobody.
@@ -254,6 +262,9 @@ pub enum Event {
     },
     /// A bridge gave a host password that is not the server's; its player is an ordinary one.
     HostPasswordWrong(PlayerId),
+    /// A bridge gave the host password while the second player named was the host; its player
+    /// is an ordinary one.
+    HostRefused(PlayerId, PlayerId),
     /// The session was ended, by the host in the chat or the server's owner at the console;
     /// the server stops after this.
     Ended,
@@ -327,6 +338,33 @@ impl fmt::Display for Event {
                  shares it",
                 player.get()
             ),
+            Self::CoinsRefused(_)
+            | Self::ProgressRefused(..)
+            | Self::HostPasswordWrong(_)
+            | Self::HostRefused(..) => self.fmt_refusal(f),
+            Self::Named(player, name) => {
+                write!(f, "Player {} is {}", player.get(), name.as_str())
+            }
+            Self::RoleChanged(player, Role::Host) => {
+                write!(f, "Player {} is the host", player.get())
+            }
+            Self::RoleChanged(player, Role::Moderator) => {
+                write!(f, "Player {} is now a moderator", player.get())
+            }
+            Self::RoleChanged(player, Role::Player) => {
+                write!(f, "Player {} is an ordinary player again", player.get())
+            }
+            Self::Chat { name, text, .. } => write!(f, "<{name}> {}", text.as_str()),
+            Self::Ended => write!(f, "The session was ended"),
+        }
+    }
+}
+
+impl Event {
+    /// Writes the line for something a player asked or reported that the session refused; a
+    /// part of `Display`, which is long enough without these.
+    fn fmt_refusal(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
             Self::CoinsRefused(player) => write!(
                 f,
                 "FLAG: player {} collected coins faster than play allows; those did not count. \
@@ -341,25 +379,20 @@ impl fmt::Display for Event {
                 player.get(),
                 player.get()
             ),
-            Self::Named(player, name) => {
-                write!(f, "Player {} is {}", player.get(), name.as_str())
-            }
-            Self::RoleChanged(player, Role::Host) => {
-                write!(f, "Player {} is the host", player.get())
-            }
-            Self::RoleChanged(player, Role::Moderator) => {
-                write!(f, "Player {} is now a moderator", player.get())
-            }
-            Self::RoleChanged(player, Role::Player) => {
-                write!(f, "Player {} is no longer a moderator", player.get())
-            }
-            Self::Chat { name, text, .. } => write!(f, "<{name}> {}", text.as_str()),
             Self::HostPasswordWrong(player) => write!(
                 f,
                 "FLAG: player {} gave a wrong host password, and is an ordinary player",
                 player.get()
             ),
-            Self::Ended => write!(f, "The session was ended"),
+            Self::HostRefused(player, host) => write!(
+                f,
+                "FLAG: player {} gave the host password while player {} is the host, and is an \
+                 ordinary player; `host {}` makes them the host",
+                player.get(),
+                host.get(),
+                player.get()
+            ),
+            _ => Ok(()),
         }
     }
 }
@@ -472,7 +505,8 @@ impl Session {
                 },
                 Some(index),
             ) => {
-                self.introduce(Self::id(index)?, name.as_ref(), outfit, &host_password);
+                let player = Self::id(index)?;
+                self.introduce(player, name.as_ref(), outfit, &host_password, now);
                 None
             }
             // Sent again until the roster shows it, so most of these change nothing.
@@ -662,17 +696,28 @@ impl Session {
         }
     }
 
+    /// Whether nothing has come from a player for `HOST_SILENT_AFTER`.
+    fn is_silent(&self, player: PlayerId, now: Instant) -> bool {
+        let slot = self.players.get(usize::from(player.get()));
+        slot.and_then(Option::as_ref).is_none_or(|player| {
+            now.saturating_duration_since(player.last_heard) >= HOST_SILENT_AFTER
+        })
+    }
+
     /// Takes a bridge's word on its player's name, and makes the player the host if the bridge
-    /// knows the host password.
+    /// knows the host password and no host is here to be heard: a session has one host.
     fn introduce(
         &mut self,
         player: PlayerId,
         name: Option<&Name>,
         outfit: Option<Outfit>,
         host_password: &str,
+        now: Instant,
     ) {
-        let is_host =
+        let knows =
             !self.config.host_password.is_empty() && host_password == self.config.host_password;
+        let holder = self.people.host().filter(|&holder| holder != player);
+        let is_host = knows && holder.is_none_or(|holder| self.is_silent(holder, now));
         let Some(name) = self.people.introduce(player, name, is_host) else {
             return;
         };
@@ -682,10 +727,25 @@ impl Session {
         }
         self.events.push(Event::Named(player, name));
         if is_host {
-            self.events.push(Event::RoleChanged(player, Role::Host));
+            self.report_host(player, holder);
+        } else if let (true, Some(holder)) = (knows, holder) {
+            let line = format!(
+                "{} is the host, so you are a player.",
+                self.people.name_of(holder)
+            );
+            self.people.tell(player, &line);
+            self.events.push(Event::HostRefused(player, holder));
         } else if !host_password.is_empty() {
             self.events.push(Event::HostPasswordWrong(player));
         }
+    }
+
+    /// Reports that `player` has the host's role, and that `former` has it no longer.
+    fn report_host(&mut self, player: PlayerId, former: Option<PlayerId>) {
+        if let Some(former) = former {
+            self.events.push(Event::RoleChanged(former, Role::Player));
+        }
+        self.events.push(Event::RoleChanged(player, Role::Host));
     }
 
     /// Takes something a player typed: chat, which goes to everyone, or a command.
@@ -743,6 +803,13 @@ impl Session {
                 let target = self.people.find(target)?;
                 self.set_moderator(target, matches!(command, ChatCommand::Mod(_)))?;
             }
+            ChatCommand::Host(target) => {
+                if role != Role::Host {
+                    return Err("Only the host can pass the host's role on.".to_owned());
+                }
+                let target = self.people.find(target)?;
+                self.make_host(target)?;
+            }
             ChatCommand::Color(wanted) => self.people.choose_outfit(actor, wanted)?,
             ChatCommand::End => {
                 if role != Role::Host {
@@ -762,6 +829,17 @@ impl Session {
         self.people.set_moderator(player, moderator)?;
         self.events
             .push(Event::RoleChanged(player, self.people.role_of(player)));
+        Ok(())
+    }
+
+    /// Makes a player the host and tells everyone; whoever was the host is an ordinary player
+    /// again.
+    ///
+    /// # Errors
+    /// Fails, with why, if the player is not here or is the host already.
+    pub fn make_host(&mut self, player: PlayerId) -> Result<(), String> {
+        let former = self.people.make_host(player)?;
+        self.report_host(player, former);
         Ok(())
     }
 
@@ -1357,6 +1435,7 @@ fn obey(
             .set_moderator(player, false)
             .err()
             .map(Event::CommandFailed),
+        Command::Host(player) => session.make_host(player).err().map(Event::CommandFailed),
         Command::Say(text) => {
             session.say_as_server(&text);
             None
@@ -1465,8 +1544,8 @@ pub fn serve_with_console(
 #[cfg(test)]
 mod tests {
     use super::{
-        Command, Config, Event, FAR_UPDATE_TICKS, HitRejection, INTERACTION_REACH, Session,
-        TICK_INTERVAL, Verdict, WORLD_RESEND_TICKS,
+        Command, Config, Event, FAR_UPDATE_TICKS, HOST_SILENT_AFTER, HitRejection,
+        INTERACTION_REACH, Session, TICK_INTERVAL, Verdict, WORLD_RESEND_TICKS,
     };
     use crate::limits::LOG_INTERVAL;
     use b3313_protocol::metrics::REPORT_INTERVAL;
@@ -2463,6 +2542,117 @@ mod tests {
             session.roster().last().map(|entry| entry.role),
             Some(Role::Player)
         );
+    }
+
+    /// Has a player join from `port` as Wario, whose bridge knows the host password.
+    fn join_knowing_the_host_password(session: &mut Session, port: u16, now: Instant) {
+        send(session, client(port), &hello(), now);
+        let introduce = Packet::Introduce {
+            name: Name::new("Wario"),
+            outfit: None,
+            host_password: "my own".to_owned(),
+        };
+        send(session, client(port), &introduce, now);
+    }
+
+    /// Who is the host, by name: everyone who is, so that two would show.
+    fn hosts(session: &Session) -> Vec<String> {
+        let roster = session.roster();
+        let hosts = roster.iter().filter(|entry| entry.role == Role::Host);
+        hosts.map(|entry| entry.name.as_str().to_owned()).collect()
+    }
+
+    #[test]
+    fn a_host_who_is_heard_keeps_the_role_from_another_who_knows_the_password() {
+        let now = Instant::now();
+        let mut session = named_session(now);
+        session.take_events();
+
+        join_knowing_the_host_password(&mut session, 3, now);
+
+        assert_eq!(hosts(&session), ["Mario"]);
+        let events = session.take_events();
+        assert!(
+            events.contains(&Event::HostRefused(id(3), id(0))),
+            "{events:?}"
+        );
+        let told = chat_for(&mut session, 3, now).join(" ");
+        assert!(told.contains("Mario is the host"), "{told}");
+    }
+
+    #[test]
+    fn a_host_gone_silent_gives_way_to_whoever_comes_with_the_password() {
+        let now = Instant::now();
+        let mut session = named_session(now);
+        session.take_events();
+
+        // As the host's own bridge does, joining again once its connection came back.
+        join_knowing_the_host_password(&mut session, 3, now + HOST_SILENT_AFTER);
+
+        assert_eq!(hosts(&session), ["Wario"]);
+        let events = session.take_events();
+        assert!(events.contains(&Event::RoleChanged(id(0), Role::Player)));
+        assert!(events.contains(&Event::RoleChanged(id(3), Role::Host)));
+    }
+
+    #[test]
+    fn the_hosts_role_is_free_once_the_host_has_left() {
+        let now = Instant::now();
+        let mut session = named_session(now);
+        session.kick(id(0), RemoveReason::Kicked);
+        assert_eq!(hosts(&session), [""; 0]);
+
+        join_knowing_the_host_password(&mut session, 3, now);
+
+        assert_eq!(hosts(&session), ["Wario"]);
+    }
+
+    #[test]
+    fn the_host_passes_the_role_on_and_its_powers_with_it() {
+        let now = Instant::now();
+        let mut session = named_session(now);
+        for port in 0..3 {
+            chat_for(&mut session, port, now);
+        }
+        session.take_events();
+
+        // Not Luigi's to give, and not to oneself.
+        say(&mut session, 1, 0, "/host Peach", now);
+        say(&mut session, 0, 0, "/host Mario", now);
+        assert_eq!(hosts(&session), ["Mario"]);
+        let refused = chat_for(&mut session, 1, now).join(" ");
+        assert!(refused.contains("Only the host can pass"), "{refused}");
+        let refused = chat_for(&mut session, 0, now).join(" ");
+        assert!(refused.contains("is the host already"), "{refused}");
+
+        say(&mut session, 0, 1, "/host luigi", now);
+        assert_eq!(hosts(&session), ["Luigi"]);
+        let events = session.take_events();
+        assert!(events.contains(&Event::RoleChanged(id(0), Role::Player)));
+        assert!(events.contains(&Event::RoleChanged(id(1), Role::Host)));
+        assert_eq!(chat_for(&mut session, 2, now), ["Luigi is now the host"]);
+
+        // Mario can end nothing now, and Luigi can.
+        say(&mut session, 0, 2, "/end", now);
+        assert_eq!(session.take_orders(), []);
+        say(&mut session, 1, 1, "/end", now);
+        assert_eq!(session.take_orders(), [Command::End]);
+    }
+
+    #[test]
+    fn the_servers_owner_names_the_host_and_there_is_still_one() {
+        let now = Instant::now();
+        let mut session = named_session(now);
+
+        assert_eq!(session.make_host(id(2)), Ok(()));
+        assert_eq!(hosts(&session), ["Peach"]);
+        assert!(session.make_host(id(2)).is_err());
+        assert!(session.make_host(id(9)).is_err());
+
+        // And where nobody was the host, as on a server with no host password.
+        session.kick(id(2), RemoveReason::Kicked);
+        assert_eq!(session.make_host(id(1)), Ok(()));
+        assert_eq!(hosts(&session), ["Luigi"]);
     }
 
     #[test]

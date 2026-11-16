@@ -2,7 +2,8 @@
 //! host and moderators give in the chat.
 //!
 //! The server cannot see who is at a keyboard, so a name is only what a bridge sent, made unlike
-//! everyone else's, and the host is whoever's bridge knew the host password.
+//! everyone else's, and the host is whoever's bridge knew the host password first, or whoever
+//! the host or the server's owner passed the role to.
 
 use crate::limits::Bucket;
 use b3313_protocol::{
@@ -31,6 +32,7 @@ const HOST_HELP: &[&str] = &[
     "/list: who is here. /color: your colors.",
     "/kick <player>, /ban <player>.",
     "/mod <player>, /unmod <player>.",
+    "/host <player> makes them the host.",
     "<player>: a name, or a number in /list.",
     "/end ends the session for everyone.",
 ];
@@ -53,6 +55,8 @@ pub enum ChatCommand {
     Mod(Target),
     /// Make a moderator an ordinary player again.
     Unmod(Target),
+    /// Pass the host's role on to a player.
+    Host(Target),
     /// Wear the outfit named, or list the outfits if none is.
     Color(String),
     /// End the session for everyone.
@@ -85,6 +89,7 @@ impl ChatCommand {
             "ban" => target().map(Self::Ban),
             "mod" => target().map(Self::Mod),
             "unmod" => target().map(Self::Unmod),
+            "host" => target().map(Self::Host),
             "color" | "colour" => Ok(Self::Color(rest.to_owned())),
             "end" | "stop" => Ok(Self::End),
             _ => Err(format!("/{word} is not a command; /help lists them.")),
@@ -237,8 +242,32 @@ impl People {
         }
     }
 
+    /// The host, if the session has one. There is never more than one.
+    #[must_use]
+    pub fn host(&self) -> Option<PlayerId> {
+        let index = self
+            .members
+            .iter()
+            .position(|slot| slot.as_ref().is_some_and(|m| m.role == Role::Host))?;
+        PlayerId::new(u8::try_from(index).ok()?)
+    }
+
+    /// Gives `player` the host's role, which whoever had it loses, so that one player has it.
+    fn crown(&mut self, player: PlayerId) {
+        for member in self.members.iter_mut().flatten() {
+            if member.role == Role::Host {
+                member.role = Role::Player;
+            }
+        }
+        if let Some(member) = self.member_mut(player) {
+            member.role = Role::Host;
+        }
+        self.roster_version += 1;
+    }
+
     /// Takes a bridge's word on who its player is: the name, or one made up if it gave none, and
-    /// the host's role if `is_host`. A bridge may say once; anything after is ignored.
+    /// the host's role if `is_host`, from whoever had it. A bridge may say once; anything after
+    /// is ignored.
     ///
     /// Returns the name the player now has, if this was their introduction.
     pub fn introduce(
@@ -253,11 +282,30 @@ impl People {
         }
         member.introduced = true;
         if is_host {
-            member.role = Role::Host;
+            self.crown(player);
         }
         let fallback = Name::new(&default_name(player))?;
         self.set_name(player, name.unwrap_or(&fallback));
         self.member(player)?.name.clone()
+    }
+
+    /// Passes the host's role to a player and tells everyone. Whoever had it is an ordinary
+    /// player again, and is returned.
+    ///
+    /// # Errors
+    /// Fails, with a line for whoever asked, if the player is not here or is the host already.
+    pub fn make_host(&mut self, player: PlayerId) -> Result<Option<PlayerId>, String> {
+        let name = self.name_of(player);
+        let member = self
+            .member(player)
+            .ok_or_else(|| format!("There is no player {}.", player.get()))?;
+        if member.role == Role::Host {
+            return Err(format!("{name} is the host already."));
+        }
+        let former = self.host();
+        self.crown(player);
+        self.announce(&format!("{name} is now the host"));
+        Ok(former)
     }
 
     /// Names the players whose bridges have had long enough to say and have not, and returns
@@ -617,6 +665,10 @@ mod tests {
         assert_eq!(
             ChatCommand::parse("/mod  7 "),
             Ok(ChatCommand::Mod(Target::Number(7)))
+        );
+        assert_eq!(
+            ChatCommand::parse("/host Luigi"),
+            Ok(ChatCommand::Host(Target::Name("Luigi".to_owned())))
         );
         assert_eq!(ChatCommand::parse("/list"), Ok(ChatCommand::List));
         assert_eq!(ChatCommand::parse("/end"), Ok(ChatCommand::End));

@@ -1866,7 +1866,7 @@ fn by_number<'a>(
     let line = typed.trim();
     let (command, who) = line.split_once(' ').unwrap_or((line, ""));
     let who = who.trim();
-    let takes_a_player = matches!(command, "/kick" | "/ban" | "/mod" | "/unmod");
+    let takes_a_player = matches!(command, "/kick" | "/ban" | "/mod" | "/unmod" | "/host");
     // A number is a player's already, and an address is one to ban.
     let is_named =
         !who.is_empty() && who.parse::<u8>().is_err() && who.parse::<std::net::IpAddr>().is_err();
@@ -2019,6 +2019,10 @@ mod tests {
         assert_eq!(
             by_number(" /mod  Luigi ", players()),
             Ok("/mod 3".to_owned())
+        );
+        assert_eq!(
+            by_number("/host Luigi", players()),
+            Ok("/host 3".to_owned())
         );
         // A number, an address and a command that names nobody are as typed.
         assert_eq!(by_number("/kick 5", players()), Ok("/kick 5".to_owned()));

@@ -68,11 +68,12 @@ pub const SETTINGS: [Setting; 12] = [
     },
     Setting {
         key: "host_password",
-        help: "The host's own password: the player whose bridge gives it is the host, who may \
-               appoint moderators\nand end the session from the chat. The control panel makes \
-               one up for whoever hosts and joins\nfrom it; a bridge run by hand gives it as \
-               B3313_HOST_PASSWORD. Empty, a server run without the\npanel has no host. At \
-               most 64 plain characters, and it cannot contain #.",
+        help: "The host's own password: the first player whose bridge gives it is the host, who \
+               may appoint\nmoderators, pass the role on and end the session from the chat. The \
+               control panel makes one up\nfor whoever hosts and joins from it; a bridge run by \
+               hand gives it as B3313_HOST_PASSWORD.\nEmpty, a server run without the panel has \
+               no host until its owner names one. At most 64 plain\ncharacters, and it cannot \
+               contain #.",
     },
     Setting {
         key: "ban_file",
@@ -109,8 +110,9 @@ pub struct Config {
     pub joins_per_second: u32,
     /// The session password. Empty lets anyone join; traffic is encrypted either way.
     pub password: String,
-    /// The password that makes the player whose bridge gives it the host. Empty means no player
-    /// is the host, and moderators are appointed from the console only.
+    /// The password that makes the first player whose bridge gives it the host. Empty means no
+    /// player is the host until the console names one, and moderators are appointed from the
+    /// console only.
     pub host_password: String,
     /// A file of banned IP addresses, one a line, read at startup and kept up to date as
     /// players are banned and unbanned. None keeps bans only until the server stops.
