@@ -3,7 +3,7 @@
 What each version changed, newest first. Versions of the same protocol play together: every
 version so far joins every other's server.
 
-## Not yet released
+## 0.1.4
 
 - **Joining no longer costs the emulator 1.5 GB of memory.** To find the game, the bridge
   read all of the emulator's memory, including what the emulator had only set aside, which
