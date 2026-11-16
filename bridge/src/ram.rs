@@ -38,8 +38,14 @@ pub trait ProcessMemory {
     /// Fails if the whole range cannot be written.
     fn write(&self, address: usize, data: &[u8]) -> io::Result<()>;
 
-    /// Returns each region worth scanning.
+    /// Returns each committed, readable region.
     fn readable_regions(&self) -> Vec<Region>;
+
+    /// Returns the parts of those regions the process has in use: the memory it has touched
+    /// and still holds. All of them, for a process that cannot tell.
+    fn regions_in_use(&self) -> Vec<Region> {
+        self.readable_regions()
+    }
 }
 
 /// A committed, readable range of another process's memory.
@@ -47,8 +53,19 @@ pub trait ProcessMemory {
 pub struct Region {
     pub address: usize,
     pub size: usize,
-    /// Whether the range belongs to a loaded module, such as the emulator core's DLL.
-    pub image: bool,
+}
+
+/// How much of an emulator's memory is searched for the game.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Search {
+    /// Only the memory the emulator has in use, which a running game's RAM is. An emulator
+    /// sets aside far more than it uses, and Windows gives it real memory for none of that
+    /// until it is touched; reading it counts. Searching all of the emulator took 5 seconds
+    /// and left it holding 1.5 GB more, for as long as it ran.
+    InUse,
+    /// All of it, at that price: for a game whose code Windows has taken out of memory, as
+    /// it may from a program long idle or a PC short of memory.
+    Everything,
 }
 
 /// Converts a game address such as `0x8033_B170` into an offset from the start of RAM.
@@ -139,11 +156,11 @@ impl<'a, M: ProcessMemory> N64Ram<'a, M> {
     }
 }
 
-/// Returns every RAM base whose code matches `rom`, searching only the regions `regions` accepts.
+/// Returns every RAM base whose code matches `rom`, searching `regions`.
 fn find_signature_bases<M: ProcessMemory>(
     memory: &M,
     rom: &[u8],
-    regions: impl Fn(&Region) -> bool,
+    regions: &[Region],
 ) -> io::Result<Vec<usize>> {
     let mut needle = rom
         .get(CODE_SIGNATURE_ROM_RANGE)
@@ -162,7 +179,7 @@ fn find_signature_bases<M: ProcessMemory>(
     // Each chunk begins this far after the last: one word less than would leave a signature
     // that ends a chunk to be found again at the start of the next.
     let step = SCAN_CHUNK - needle.len() + WORD_SIZE;
-    for region in memory.readable_regions().into_iter().filter(regions) {
+    for region in regions {
         // A chunk at a time: a region may be gigabytes, and reading it whole took as much
         // memory again here.
         for offset in (0..region.size).step_by(step) {
@@ -212,19 +229,22 @@ fn choose_live_base<M: ProcessMemory>(
         })
 }
 
-/// Locates the live N64 RAM inside an emulator running `rom`.
+/// Locates the live N64 RAM inside an emulator running `rom`, looking through as much of its
+/// memory as `search` says.
 ///
 /// # Errors
 /// Fails if the ROM is too small, or no copy of its code belongs to a running game.
-pub fn attach<'a, M: ProcessMemory>(memory: &'a M, rom: &[u8]) -> io::Result<N64Ram<'a, M>> {
-    // ParallelN64 keeps RAM inside the core's own DLL, a fraction of the process's memory, so
-    // searching loaded modules first finds it in well under a second. Other cores may not.
-    let in_modules = find_signature_bases(memory, rom, |region| region.image)?;
-    if let Ok(base) = choose_live_base(memory, &in_modules, LIVE_CHECK_DELAY) {
-        return Ok(N64Ram::new(memory, base));
-    }
-    let elsewhere = find_signature_bases(memory, rom, |region| !region.image)?;
-    let base = choose_live_base(memory, &elsewhere, LIVE_CHECK_DELAY)?;
+pub fn attach<'a, M: ProcessMemory>(
+    memory: &'a M,
+    rom: &[u8],
+    search: Search,
+) -> io::Result<N64Ram<'a, M>> {
+    let regions = match search {
+        Search::InUse => memory.regions_in_use(),
+        Search::Everything => memory.readable_regions(),
+    };
+    let bases = find_signature_bases(memory, rom, &regions)?;
+    let base = choose_live_base(memory, &bases, LIVE_CHECK_DELAY)?;
     Ok(N64Ram::new(memory, base))
 }
 
@@ -242,6 +262,8 @@ pub mod testing {
         /// Where each write went, in the order they were made: the game reads the same
         /// memory at any moment, so the order of a record's writes is part of what is right.
         pub written: RefCell<Vec<usize>>,
+        /// The parts of the region the process has in use, if it is not all of it.
+        pub in_use: RefCell<Option<Vec<Region>>>,
     }
 
     impl FakeProcess {
@@ -251,6 +273,7 @@ pub mod testing {
                 start,
                 bytes: RefCell::new(vec![0; size]),
                 written: RefCell::new(Vec::new()),
+                in_use: RefCell::new(None),
             }
         }
     }
@@ -281,8 +304,12 @@ pub mod testing {
             vec![Region {
                 address: self.start,
                 size: self.bytes.borrow().len(),
-                image: false,
             }]
+        }
+
+        fn regions_in_use(&self) -> Vec<Region> {
+            let in_use = self.in_use.borrow().clone();
+            in_use.unwrap_or_else(|| self.readable_regions())
         }
     }
 }
@@ -369,7 +396,8 @@ mod tests {
             .write(0x1000_0000 + 0x10 + 0x24_6000, &host_order)
             .unwrap_or_default();
 
-        let bases = find_signature_bases(&process, &rom, |_| true).unwrap_or_default();
+        let everywhere = process.readable_regions();
+        let bases = find_signature_bases(&process, &rom, &everywhere).unwrap_or_default();
 
         assert_eq!(bases, [0x1000_0010]);
     }
@@ -398,7 +426,8 @@ mod tests {
             process
                 .write(0x1000_0000 + place, &host_order)
                 .unwrap_or_default();
-            let bases = find_signature_bases(&process, &rom, |_| true).unwrap_or_default();
+            let everywhere = process.readable_regions();
+            let bases = find_signature_bases(&process, &rom, &everywhere).unwrap_or_default();
             assert_eq!(bases, [0x1000_0000 + place - code], "at {place:#x}");
         }
     }
@@ -412,30 +441,40 @@ mod tests {
             .write(0x1000_0000 + 0x24_6000, signature)
             .unwrap_or_default();
 
+        let everywhere = process.readable_regions();
         assert_eq!(
-            find_signature_bases(&process, &rom, |_| true).ok(),
+            find_signature_bases(&process, &rom, &everywhere).ok(),
             Some(vec![])
         );
     }
 
     #[test]
-    fn signature_scan_skips_regions_the_filter_rejects() {
+    fn a_search_of_the_memory_in_use_finds_code_there_and_reads_nothing_else() {
         let rom = rom_with_signature();
         let mut host_order = rom
             .get(CODE_SIGNATURE_ROM_RANGE)
             .unwrap_or_default()
             .to_vec();
         swap_words_in_place(&mut host_order);
-        let process = FakeProcess::new(0x1000_0000, 0x0025_0000);
-        process
-            .write(0x1000_0000 + 0x24_6000, &host_order)
-            .unwrap_or_default();
+        let start = 0x1000_0000;
+        let process = FakeProcess::new(start, 0x0050_0000);
+        // The code twice: in the page the process has in use, and in memory it only set aside.
+        let (used, unused) = (0x24_6000, 0x40_0000);
+        for place in [used, unused] {
+            process
+                .write(start + place, &host_order)
+                .unwrap_or_default();
+        }
+        let page = Region {
+            address: start + used,
+            size: 0x1000,
+        };
+        *process.in_use.borrow_mut() = Some(vec![page]);
 
-        // The fake process has one region, and it is not a module image.
-        let in_modules = find_signature_bases(&process, &rom, |region: &Region| region.image);
-        assert_eq!(in_modules.ok(), Some(vec![]));
-        let elsewhere = find_signature_bases(&process, &rom, |region: &Region| !region.image);
-        assert_eq!(elsewhere.ok(), Some(vec![0x1000_0000]));
+        let found = |regions: Vec<Region>| find_signature_bases(&process, &rom, &regions).ok();
+        assert_eq!(found(process.regions_in_use()), Some(vec![start]));
+        let everywhere = found(process.readable_regions());
+        assert_eq!(everywhere, Some(vec![start, start + unused - used]));
     }
 
     #[test]

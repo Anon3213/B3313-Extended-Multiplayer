@@ -11,8 +11,11 @@ use windows_sys::Win32::System::Diagnostics::ToolHelp::{
     CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS,
 };
 use windows_sys::Win32::System::Memory::{
-    MEM_COMMIT, MEM_IMAGE, MEMORY_BASIC_INFORMATION, PAGE_EXECUTE_READ, PAGE_EXECUTE_READWRITE,
-    PAGE_READONLY, PAGE_READWRITE, PAGE_WRITECOPY, VirtualQueryEx,
+    MEM_COMMIT, MEMORY_BASIC_INFORMATION, PAGE_EXECUTE_READ, PAGE_EXECUTE_READWRITE, PAGE_READONLY,
+    PAGE_READWRITE, PAGE_WRITECOPY, VirtualQueryEx,
+};
+use windows_sys::Win32::System::ProcessStatus::{
+    K32QueryWorkingSetEx, PSAPI_WORKING_SET_EX_BLOCK, PSAPI_WORKING_SET_EX_INFORMATION,
 };
 use windows_sys::Win32::System::Threading::{
     OpenProcess, PROCESS_QUERY_INFORMATION, PROCESS_VM_OPERATION, PROCESS_VM_READ, PROCESS_VM_WRITE,
@@ -22,6 +25,12 @@ const READABLE_PROTECTIONS: u32 =
     PAGE_READONLY | PAGE_READWRITE | PAGE_WRITECOPY | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE;
 /// RDRAM is 8 MB, so regions this large only waste time and memory to scan.
 const MAX_SCANNED_REGION: usize = 1 << 31;
+/// The size of a page of memory, on every processor Windows runs on that this is built for.
+const PAGE_SIZE: usize = 4096;
+/// How many pages Windows is asked about at once: 64 MiB of them, in a list of 256 KiB.
+const PAGES_PER_QUERY: usize = 1 << 14;
+/// The flag, of those Windows gives for a page, that says the process has it in memory.
+const PAGE_IS_VALID: usize = 1;
 
 /// A handle to another process, closed on drop.
 #[derive(Debug)]
@@ -184,7 +193,6 @@ impl ProcessMemory for WindowsProcess {
                 regions.push(Region {
                     address: base,
                     size,
-                    image: info.Type == MEM_IMAGE,
                 });
             }
             let Some(next) = base.checked_add(size) else {
@@ -193,11 +201,110 @@ impl ProcessMemory for WindowsProcess {
             address = next;
         }
     }
+
+    fn regions_in_use(&self) -> Vec<Region> {
+        let mut in_use = Vec::new();
+        let mut pages = Vec::new();
+        for region in self.readable_regions() {
+            for offset in (0..region.size).step_by(PAGES_PER_QUERY * PAGE_SIZE) {
+                let start = region.address + offset;
+                let length = (region.size - offset).min(PAGES_PER_QUERY * PAGE_SIZE);
+                match self.pages_in_memory(start, length, &mut pages) {
+                    Some(()) => {
+                        let held = pages.iter().enumerate().filter(|(_, page)| {
+                            // SAFETY: every form of this union is one word of flags, so any
+                            // bits Windows wrote there are a valid `Flags`.
+                            let flags = unsafe { page.VirtualAttributes.Flags };
+                            flags & PAGE_IS_VALID != 0
+                        });
+                        for (index, _) in held {
+                            add_run(&mut in_use, start + index * PAGE_SIZE, PAGE_SIZE);
+                        }
+                    }
+                    // Windows would not say, so all of it is taken to be: the search then
+                    // costs what it did, and misses nothing.
+                    None => add_run(&mut in_use, start, length),
+                }
+            }
+        }
+        in_use
+    }
+}
+
+/// Adds the range to `runs`, as part of the last one if it begins where that ends.
+fn add_run(runs: &mut Vec<Region>, address: usize, size: usize) {
+    match runs.last_mut() {
+        Some(last) if last.address + last.size == address => last.size += size,
+        _ => runs.push(Region { address, size }),
+    }
+}
+
+impl WindowsProcess {
+    /// Asks Windows about each page of the `length` bytes at `start`, leaving in `pages` what
+    /// it says of each, in order. None if it will not say.
+    fn pages_in_memory(
+        &self,
+        start: usize,
+        length: usize,
+        pages: &mut Vec<PSAPI_WORKING_SET_EX_INFORMATION>,
+    ) -> Option<()> {
+        pages.clear();
+        pages.extend((0..length.div_ceil(PAGE_SIZE)).map(|page| {
+            PSAPI_WORKING_SET_EX_INFORMATION {
+                VirtualAddress: ptr::with_exposed_provenance_mut(start + page * PAGE_SIZE),
+                VirtualAttributes: PSAPI_WORKING_SET_EX_BLOCK { Flags: 0 },
+            }
+        }));
+        let bytes = u32::try_from(mem::size_of_val(pages.as_slice())).ok()?;
+        // SAFETY: `pages` is valid for reads and writes of the `bytes` passed, which is its
+        // whole length. The addresses in it are in the other process, and only asked about.
+        let ok = unsafe { K32QueryWorkingSetEx(self.handle, pages.as_mut_ptr().cast(), bytes) };
+        (ok != 0).then_some(())
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::find_processes;
+    use super::{PAGE_SIZE, WindowsProcess, find_processes};
+    use crate::ram::ProcessMemory;
+
+    #[test]
+    fn memory_set_aside_and_never_touched_is_not_in_use_and_a_touched_page_is()
+    -> std::io::Result<()> {
+        // Windows gives this no real memory until it is written to: it is only set aside.
+        let size = 64 << 20;
+        let mut set_aside = vec![0_u8; size];
+        let touched = size / 2;
+        if let Some(byte) = set_aside.get_mut(touched) {
+            *byte = 1;
+        }
+        let start = set_aside.as_ptr().addr();
+
+        let this_process = WindowsProcess::open(std::process::id())?;
+        let in_use = this_process.regions_in_use();
+        let overlap = |address: usize, length: usize| {
+            let end = (address + length).min(start + size);
+            end.saturating_sub(address.max(start))
+        };
+        let held: usize = in_use.iter().map(|r| overlap(r.address, r.size)).sum();
+        // The page written to, and little else of the 64 MiB: a page or two at its ends that
+        // the allocator shares with what is beside it.
+        let page = start + touched;
+        assert!(
+            in_use
+                .iter()
+                .any(|r| (r.address..r.address + r.size).contains(&page))
+        );
+        assert!(held < 16 * PAGE_SIZE, "{held} bytes of {size} are in use");
+
+        // All of it is still among the regions that can be read, as a full search needs.
+        let readable = this_process.readable_regions();
+        let whole: usize = readable.iter().map(|r| overlap(r.address, r.size)).sum();
+        assert_eq!(whole, size);
+        // Kept until here, so that it is not freed and handed to something else meanwhile.
+        assert_eq!(set_aside.get(touched), Some(&1));
+        Ok(())
+    }
 
     #[test]
     fn running_programs_are_found_by_name() -> std::io::Result<()> {

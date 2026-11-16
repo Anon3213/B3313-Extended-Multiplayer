@@ -5,6 +5,12 @@ version so far joins every other's server.
 
 ## Not yet released
 
+- **Joining no longer costs the emulator 1.5 GB of memory.** To find the game, the bridge
+  read all of the emulator's memory, including what the emulator had only set aside, which
+  made Windows give it real memory for all of it: about 2 GB held where 0.5 GB was in use.
+  It now reads only the memory in use.
+- **The game is found in under a second**, where it took five, and the bridge no longer
+  keeps a processor core busy while the game starts.
 - A server with nobody playing rests: it used 1.4% of a processor core to look for packets
   a thousand times a second, and now uses about a fifth of that.
 

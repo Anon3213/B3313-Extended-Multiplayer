@@ -13,7 +13,7 @@ use crate::objects::ObjectSync;
 use crate::pacing::{FRAME_INTERVAL, SEND_INTERVAL, Schedule};
 use crate::process::WindowsProcess;
 use crate::progress::ProgressSync;
-use crate::ram::{N64Ram, ProcessMemory, attach};
+use crate::ram::{N64Ram, ProcessMemory, Search, attach};
 use crate::text::{self, ROW_BYTES, TEXT_END};
 use crate::typing::{Draft, Key};
 use b3313_protocol::metrics::LinkReport;
@@ -56,6 +56,11 @@ const MOST_FAULTS: u32 = 3;
 const COUNTDOWN_STEP: u64 = 10;
 const BOOT_TIMEOUT: Duration = Duration::from_secs(60);
 const BOOT_POLL_INTERVAL: Duration = Duration::from_millis(250);
+/// How long the game is looked for only in the memory the emulator has in use, and how long
+/// between the searches of all its memory after that: see `Search`. A game boots well within
+/// this, so one that starts with its bridge is found the cheap way; only a game long running
+/// whose code Windows has taken out of memory waits this long and pays for a full search.
+const FULL_SEARCH_EVERY: Duration = Duration::from_secs(20);
 
 /// What a session needs: the multiplayer ROM's bytes, to find the game in the emulator's
 /// memory, the emulator's process, and the server to join.
@@ -420,12 +425,19 @@ fn attach_when_running<'a>(
     events: &mut impl FnMut(Event),
 ) -> io::Result<Option<N64Ram<'a, WindowsProcess>>> {
     let deadline = Instant::now() + BOOT_TIMEOUT;
+    let mut full_search_due = Instant::now() + FULL_SEARCH_EVERY;
     let mut waiting_said = false;
     loop {
         if stop.load(Ordering::Relaxed) {
             return Ok(None);
         }
-        match attach(process, rom) {
+        let search = if Instant::now() >= full_search_due {
+            full_search_due = Instant::now() + FULL_SEARCH_EVERY;
+            Search::Everything
+        } else {
+            Search::InUse
+        };
+        match attach(process, rom, search) {
             // The game's code is not in memory, or not running, until the emulator has booted it.
             Err(error) if error.kind() == io::ErrorKind::NotFound && Instant::now() < deadline => {
                 if !waiting_said {
