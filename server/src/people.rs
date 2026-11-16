@@ -5,6 +5,7 @@
 //! everyone else's, and the host is whoever's bridge knew the host password first, or whoever
 //! the host or the server's owner passed the role to.
 
+use crate::commands::{self, Rule};
 use crate::limits::Bucket;
 use b3313_protocol::{
     Ack, ChatLine, Inbox, MAX_LINES_PER_PACKET, MAX_MESSAGE_LENGTH, MAX_NAME_LENGTH, Message, Name,
@@ -28,7 +29,7 @@ const MODERATOR_HELP: &[&str] = &[
     "/kick <player>, /ban <player>.",
     "<player>: a name, or a number in /list.",
 ];
-const HOST_HELP: &[&str] = &[
+pub(crate) const HOST_HELP: &[&str] = &[
     "/list: who is here. /color: your colors.",
     "/kick <player>, /ban <player>.",
     "/mod <player>, /unmod <player>.",
@@ -64,36 +65,12 @@ pub enum ChatCommand {
 }
 
 impl ChatCommand {
-    /// Reads a chat message that starts with `/`.
+    /// Reads a chat message that starts with `/`, by the table of `commands`.
     ///
     /// # Errors
     /// Fails, with a line for the player who typed it, on anything that is not a command.
     pub fn parse(text: &str) -> Result<Self, String> {
-        let text = text.strip_prefix('/').unwrap_or(text);
-        let (word, rest) = text.split_once(' ').unwrap_or((text, ""));
-        let rest = rest.trim();
-        let target = || {
-            if rest.is_empty() {
-                return Err(format!(
-                    "/{word} needs a player: a number from /list, or a name."
-                ));
-            }
-            Ok(rest
-                .parse()
-                .map_or_else(|_| Target::Name(rest.to_owned()), Target::Number))
-        };
-        match word {
-            "help" => Ok(Self::Help),
-            "list" => Ok(Self::List),
-            "kick" => target().map(Self::Kick),
-            "ban" => target().map(Self::Ban),
-            "mod" => target().map(Self::Mod),
-            "unmod" => target().map(Self::Unmod),
-            "host" => target().map(Self::Host),
-            "color" | "colour" => Ok(Self::Color(rest.to_owned())),
-            "end" | "stop" => Ok(Self::End),
-            _ => Err(format!("/{word} is not a command; /help lists them.")),
-        }
+        commands::read(text).map(|(command, _)| command)
     }
 }
 
@@ -104,8 +81,8 @@ pub enum Spoken {
     Nothing,
     /// Sent on to everyone.
     Chat(Message),
-    /// A command, for the session to carry out.
-    Command(ChatCommand),
+    /// A command, for the session to carry out if the player's role is one that may give it.
+    Command(ChatCommand, Rule),
 }
 
 #[derive(Debug)]
@@ -519,8 +496,8 @@ impl People {
             return Spoken::Nothing;
         }
         if said.as_str().starts_with('/') {
-            return match ChatCommand::parse(said.as_str()) {
-                Ok(command) => Spoken::Command(command),
+            return match commands::read(said.as_str()) {
+                Ok((command, rule)) => Spoken::Command(command, rule),
                 Err(why) => {
                     self.tell(player, &why);
                     Spoken::Nothing
@@ -551,7 +528,7 @@ impl People {
             member.roster_resends = crate::SETTLING_RESENDS;
         }
         let is_resend_due =
-            resend && (crate::take_resend(&mut member.roster_resends) || quiet_resend);
+            resend && (crate::session::take_resend(&mut member.roster_resends) || quiet_resend);
         let mut packets = Vec::new();
         // Made only when it is to go: this is asked for every player on every tick, and the
         // roster is a name copied for each of them.
@@ -723,7 +700,7 @@ mod tests {
         assert_eq!(heard(&mut people, id(1)), ["Luigi: hello"]);
 
         let list = people.say(id(1), 1, &message("/list"), now);
-        assert_eq!(list, Spoken::Command(ChatCommand::List));
+        assert!(matches!(list, Spoken::Command(ChatCommand::List, _)));
         assert_eq!(
             people.say(id(1), 2, &message("/dance"), now),
             Spoken::Nothing

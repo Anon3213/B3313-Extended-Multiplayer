@@ -1866,7 +1866,9 @@ fn by_number<'a>(
     let line = typed.trim();
     let (command, who) = line.split_once(' ').unwrap_or((line, ""));
     let who = who.trim();
-    let takes_a_player = matches!(command, "/kick" | "/ban" | "/mod" | "/unmod" | "/host");
+    let takes_a_player = command
+        .strip_prefix('/')
+        .is_some_and(b3313_server::commands::names_a_player);
     // A number is a player's already, and an address is one to ban.
     let is_named =
         !who.is_empty() && who.parse::<u8>().is_err() && who.parse::<std::net::IpAddr>().is_err();

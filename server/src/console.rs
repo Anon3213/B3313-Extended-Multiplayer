@@ -1,6 +1,8 @@
-//! Commands the server's owner types into its console.
+//! Commands the server's owner types into its console: its own, and by the table of
+//! `commands` those it shares with the chat.
 
 use crate::SERVER_NAME;
+use crate::commands::{self, AtConsole};
 use b3313_protocol::{MAX_MESSAGE_LENGTH, Message, PlayerId};
 use std::net::IpAddr;
 
@@ -58,12 +60,6 @@ impl Command {
                 .ok_or_else(|| format!("{word} is not a player number; `list` shows them"))
         };
         match words.as_slice() {
-            ["list"] => Ok(Self::List),
-            ["end" | "stop"] => Ok(Self::End),
-            ["kick", number] => Ok(Self::Kick(player(number)?)),
-            ["mod", number] => Ok(Self::Mod(player(number)?)),
-            ["unmod", number] => Ok(Self::Unmod(player(number)?)),
-            ["host", number] => Ok(Self::Host(player(number)?)),
             // The message as typed, with its own spacing, after the word.
             ["say", _, ..] => {
                 let said = line.trim_start().strip_prefix("say").unwrap_or_default();
@@ -89,7 +85,13 @@ impl Command {
                 .parse()
                 .map(Self::Unban)
                 .map_err(|_| format!("{address} is not an IP address")),
-            _ => Err(HELP.to_owned()),
+            // The words the console shares with the chat, taking a player by number.
+            [word, rest @ ..] => match (commands::at_console(word), rest) {
+                (Some(AtConsole::Alone(command)), []) => Ok(command()),
+                (Some(AtConsole::Player(command)), [number]) => Ok(command(player(number)?)),
+                _ => Err(HELP.to_owned()),
+            },
+            [] => Err(HELP.to_owned()),
         }
     }
 }
