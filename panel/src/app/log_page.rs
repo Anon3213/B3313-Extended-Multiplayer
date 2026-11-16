@@ -3,7 +3,7 @@
 use super::column_resize::TableColumn;
 use super::overview::{hint, kind_chip, kind_icon};
 use super::{Panel, ToastTone, before_dialog, display_name, page_frame};
-use crate::columns::Widths;
+use crate::columns::{self, Widths};
 use crate::dashboard::{Kind, LogColumn, LogEntry};
 use crate::icons::{IconName, icon};
 use crate::sort::SortOrder;
@@ -145,7 +145,10 @@ impl Panel {
             let Some(width) = widths.of(column) else {
                 return cell.flex_1().into_any_element();
             };
-            // With the line at its right edge that changes the column's width.
+            // With the line at its right edge that changes a column's width.
+            let line = columns::line_after(column).map(|(changed, rightward)| {
+                self.column_handle(theme, (TableColumn::Log(changed), rightward), cx)
+            });
             div()
                 .relative()
                 .flex_none()
@@ -156,7 +159,7 @@ impl Panel {
                 .overflow_hidden()
                 .pr(px(COLUMN_HANDLE_WIDTH))
                 .child(cell)
-                .child(self.column_handle(theme, TableColumn::Log(column), cx))
+                .children(line)
                 .into_any_element()
         };
         let time = heading(

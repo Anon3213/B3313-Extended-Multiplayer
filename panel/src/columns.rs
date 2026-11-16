@@ -1,5 +1,5 @@
-//! The widths of a table's columns, which the user changes by dragging the line at a column's
-//! right edge, and the preferences keep. One column of each table has no width of its own: it
+//! The widths of a table's columns, which the user changes by dragging the line between two
+//! columns' headings, and the preferences keep. One column of each table has no width of its own: it
 //! takes the room the others leave, so the table always fills its card.
 
 use crate::dashboard::{LogColumn, PlayerColumn};
@@ -53,6 +53,44 @@ impl Resizable for LogColumn {
             Self::Entry => None,
         }
     }
+}
+
+/// What moving a line between two columns to the right does to the column whose width the
+/// line changes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Rightward {
+    Widens,
+    Narrows,
+}
+
+impl Rightward {
+    /// What a move of the line `right` wide, or left if negative, adds to the column's width.
+    #[must_use]
+    pub fn change(self, right: f32) -> f32 {
+        match self {
+            Self::Widens => right,
+            Self::Narrows => -right,
+        }
+    }
+}
+
+/// The line between `column` and the one after it: the column whose width it changes, and
+/// which way. Before the column that takes the rest, a line changes the column it ends, as
+/// its left edge stays where it is. After it, the columns are held against the table's right
+/// side, so it is a column's left edge that moves: there a line changes the column it begins,
+/// which is wider the further left the line goes. Either way the line stays under the mouse
+/// that drags it. None after the last column, where there is no line.
+#[must_use]
+pub fn line_after<C: Resizable>(column: C) -> Option<(C, Rightward)> {
+    let place = C::ALL.iter().position(|known| *known == column)?;
+    let rest = C::ALL
+        .iter()
+        .position(|known| known.usual_width().is_none());
+    if rest.is_none_or(|rest| place < rest) {
+        return Some((column, Rightward::Widens));
+    }
+    let next = C::ALL.get(place + 1)?;
+    Some((*next, Rightward::Narrows))
 }
 
 /// A width a column may have: `width` rounded and kept within the limits.
@@ -151,7 +189,9 @@ impl<C: Resizable> Widths<C> {
 
 #[cfg(test)]
 mod tests {
-    use super::{PLAYER, Resizable, WIDTH_MAX, WIDTH_MIN, Widths, allowed_width};
+    use super::{
+        PLAYER, Resizable, Rightward, WIDTH_MAX, WIDTH_MIN, Widths, allowed_width, line_after,
+    };
     use crate::dashboard::{LogColumn, PlayerColumn};
     use crate::sort::Column;
 
@@ -191,6 +231,35 @@ mod tests {
         let players: Vec<_> = PlayerColumn::ALL.iter().map(|c| c.usual_width()).collect();
         let log: Vec<_> = LogColumn::ALL.iter().map(|c| c.usual_width()).collect();
         assert_eq!((rest(&players), rest(&log)), (1, 1));
+    }
+
+    #[test]
+    fn every_line_between_two_columns_changes_one_width_and_follows_the_mouse() {
+        use PlayerColumn::{Address, Connected, Flags, Gap, Loss, Player, Traffic};
+        // Left of the address, which takes the rest, a line changes the column it ends.
+        assert_eq!(line_after(Player), Some((Player, Rightward::Widens)));
+        // From the address on, the column it begins, wider as the line goes left.
+        assert_eq!(line_after(Address), Some((Connected, Rightward::Narrows)));
+        assert_eq!(line_after(Connected), Some((Gap, Rightward::Narrows)));
+        assert_eq!(line_after(Traffic), Some((Flags, Rightward::Narrows)));
+        assert_eq!(line_after(Flags), None);
+        // So each column with a width has one line, and no two lines change the same one.
+        let lines = PlayerColumn::ALL.iter().filter_map(|&c| line_after(c));
+        let mut changed: Vec<PlayerColumn> = lines.map(|(column, _)| column).collect();
+        assert_eq!(changed, [Player, Connected, Gap, Loss, Traffic, Flags]);
+        changed.dedup();
+        assert_eq!(changed.len(), 6);
+
+        // The Log's last column takes the rest, so its lines are all of the first kind.
+        let log: Vec<_> = LogColumn::ALL.iter().map(|&c| line_after(c)).collect();
+        let widens = |column| Some((column, Rightward::Widens));
+        assert_eq!(
+            log,
+            [widens(LogColumn::Time), widens(LogColumn::Kind), None]
+        );
+
+        assert!((Rightward::Widens.change(8.) - 8.).abs() < f32::EPSILON);
+        assert!((Rightward::Narrows.change(8.) + 8.).abs() < f32::EPSILON);
     }
 
     #[test]

@@ -839,8 +839,8 @@ fn cell(column: Div) -> Div {
 }
 
 impl Panel {
-    /// Column headings, each sorting by its column and explaining it on hover, with the line
-    /// at its right edge that changes the column's width.
+    /// Column headings, each sorting by its column and explaining it on hover, with a line
+    /// between each two that changes a column's width.
     fn players_header(&self, theme: &Theme, cx: &Context<Self>) -> AnyElement {
         let sort = self.player_sort;
         let widths = &self.preferences.player_widths;
@@ -858,10 +858,16 @@ impl Panel {
                 }),
                 cx,
             );
-            let Some(width) = widths.of(sorts) else {
-                return cell.flex_1().into_any_element();
+            // As wide as its column in the rows: the address takes the rest there too.
+            let column = match widths.of(sorts) {
+                Some(width) => column_of(f32::from(width)),
+                None => div().flex_1().min_w_0(),
             };
-            column_of(f32::from(width))
+            // The line at its right edge, between it and the next column's heading.
+            let line = columns::line_after(sorts).map(|(changed, rightward)| {
+                self.column_handle(theme, (TableColumn::Player(changed), rightward), cx)
+            });
+            column
                 .relative()
                 .h_full()
                 .flex()
@@ -869,7 +875,7 @@ impl Panel {
                 .overflow_hidden()
                 .pr(px(COLUMN_HANDLE_WIDTH))
                 .child(cell)
-                .child(self.column_handle(theme, TableColumn::Player(sorts), cx))
+                .children(line)
                 .into_any_element()
         };
         header_row(theme, heading)

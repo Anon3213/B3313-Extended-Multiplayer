@@ -347,25 +347,25 @@ pub fn sort_heading(
 /// words keep clear of.
 pub const COLUMN_HANDLE_WIDTH: f32 = 11.;
 
-/// What the user does with the line at a column's right edge.
+/// What the user does with the line between two columns' headings.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ColumnAction {
     /// Pressed with the mouse, here across the window, to be dragged.
     Grab(Pixels),
-    /// Made this much wider, or narrower, with the keyboard.
+    /// Moved this far right, or left if negative, with the keyboard.
     Nudge(f32),
-    /// Given its usual width back.
+    /// Its column given its usual width back.
     Reset,
 }
 
 /// How far a key press moves a column's edge, in the panel's units.
 const COLUMN_NUDGE: f32 = 8.;
 
-/// The line at the right edge of a column's heading, which changes the column's width: dragged,
-/// or with the Left and Right keys while it has the focus, and back to the usual width on a
-/// double click or Delete. It goes last in the heading's cell, which must be `relative`, and
-/// shows while the mouse is over it, it has the focus, or `active`, as while it is dragged.
-/// `name` tells the table's handles apart.
+/// The line at the right edge of a column's heading, between it and the next, which changes
+/// the width of one of the two: dragged, or with the Left and Right keys while it has the
+/// focus, and back to the usual width on a double click or Delete. It goes last in the
+/// heading's cell, which must be `relative`, and shows while the mouse is over it, it has the
+/// focus, or `active`, as while it is dragged. `name` tells the table's handles apart.
 pub fn column_handle(
     theme: &Theme,
     name: impl Into<SharedString>,
@@ -381,8 +381,8 @@ pub fn column_handle(
         .id(name.clone())
         .group(name.clone())
         .tip(
-            "Drag to change this column's width, or select it and use the Left and Right \
-             keys. Double-click it, or press Delete, for its usual width.",
+            "Drag to move this line and change the column's width, or select it and use the \
+             Left and Right keys. Double-click it, or press Delete, for the usual width.",
             cx,
         )
         .absolute()

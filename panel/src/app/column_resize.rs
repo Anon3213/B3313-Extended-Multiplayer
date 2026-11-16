@@ -1,7 +1,9 @@
-//! Changing a table column's width by the line at its heading's right edge: dragged, moved
-//! with the keys, or set back to the usual width. The widths are the preferences' own.
+//! Changing a table column's width by the line between two headings: dragged, moved with the
+//! keys, or set back to the usual width. The widths are the preferences' own, and
+//! `columns::line_after` says which column each line changes.
 
 use super::Panel;
+use crate::columns::Rightward;
 use crate::dashboard::{LogColumn, PlayerColumn};
 use crate::theme::{BASE_REM, Theme};
 use crate::widgets::{ColumnAction, column_handle};
@@ -14,11 +16,12 @@ pub(super) enum TableColumn {
     Log(LogColumn),
 }
 
-/// A column's edge being dragged: where the mouse took hold of it, across the window, and
-/// how wide the column was then.
+/// A line between two columns being dragged: the column it changes and which way, where the
+/// mouse took hold of it, across the window, and how wide the column was then.
 #[derive(Clone, Copy, Debug)]
 pub(super) struct ColumnDrag {
     column: TableColumn,
+    rightward: Rightward,
     from: Pixels,
     width: u16,
 }
@@ -38,22 +41,30 @@ impl Panel {
         }
     }
 
-    /// The line at the right edge of `column`'s heading, for the heading's cell.
+    /// The line at the right edge of a heading's cell, which changes the width of `column`,
+    /// wider or narrower as it goes right by `rightward`: what `columns::line_after` gives
+    /// for the heading's own column.
     pub(super) fn column_handle(
         &self,
         theme: &Theme,
-        column: TableColumn,
+        (column, rightward): (TableColumn, Rightward),
         cx: &Context<Self>,
     ) -> AnyElement {
         let panel = cx.entity().downgrade();
         let dragged = self.column_drag.is_some_and(|drag| drag.column == column);
         let name = SharedString::from(format!("column-edge-{column:?}"));
         column_handle(theme, name, dragged, cx, move |action, _, cx| {
-            let _ = panel.update(cx, |this, cx| this.act_on_column(column, action, cx));
+            let line = (column, rightward);
+            let _ = panel.update(cx, |this, cx| this.act_on_column(line, action, cx));
         })
     }
 
-    fn act_on_column(&mut self, column: TableColumn, action: ColumnAction, cx: &mut Context<Self>) {
+    fn act_on_column(
+        &mut self,
+        (column, rightward): (TableColumn, Rightward),
+        action: ColumnAction,
+        cx: &mut Context<Self>,
+    ) {
         let Some(width) = self.column_width(column) else {
             return;
         };
@@ -62,12 +73,13 @@ impl Panel {
                 // The window follows the mouse from here: see `window_listeners`.
                 self.column_drag = Some(ColumnDrag {
                     column,
+                    rightward,
                     from,
                     width,
                 });
             }
-            ColumnAction::Nudge(by) => {
-                self.set_column_width(column, f32::from(width) + by);
+            ColumnAction::Nudge(right) => {
+                self.set_column_width(column, f32::from(width) + rightward.change(right));
                 self.save_preferences();
             }
             ColumnAction::Reset => {
@@ -82,8 +94,8 @@ impl Panel {
         cx.notify();
     }
 
-    /// Follows the mouse while a column's edge is dragged: the column is as much wider, or
-    /// narrower, as the mouse has gone right or left of where it took hold.
+    /// Follows the mouse while a line is dragged: the column it changes is as much wider, or
+    /// narrower, as the mouse has gone from where it took hold, so the line stays under it.
     pub(super) fn drag_column(
         &mut self,
         event: &MouseMoveEvent,
@@ -100,7 +112,8 @@ impl Panel {
         }
         let moved = (event.position.x - drag.from) / window.rem_size() * BASE_REM;
         let before = self.column_width(drag.column);
-        self.set_column_width(drag.column, f32::from(drag.width) + moved);
+        let width = f32::from(drag.width) + drag.rightward.change(moved);
+        self.set_column_width(drag.column, width);
         if self.column_width(drag.column) != before {
             cx.notify();
         }

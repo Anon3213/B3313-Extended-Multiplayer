@@ -7,6 +7,9 @@ What each version changed, newest first. Versions of the same protocol play toge
 
 - The panel's server settings show the host password under a new "Advanced" heading, which
   says that hosting from the panel needs nothing typed there.
+- In the Players table, the lines between the headings follow the mouse that drags them, as
+  the Log's do: right of the address they moved the other way. There is now a line between
+  Address and Connected, and none after Flags, the last column.
 
 ## 0.1.1
 
