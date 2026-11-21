@@ -209,7 +209,8 @@ mod tests {
         assert_eq!(list.update(&Event::AddressBanned(ip)), Ok(()));
         assert_eq!(list.bans(), [ip], "one ban, however written");
         assert_eq!(list.update(&Event::Unbanned(mapped)), Ok(()));
-        assert!(list.bans().is_empty());
+        let none: [IpAddr; 0] = [];
+        assert_eq!(list.bans(), none);
     }
 
     #[test]
