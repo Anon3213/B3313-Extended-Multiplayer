@@ -145,7 +145,8 @@ has other times, from 5 seconds to a minute. Opening the chat shows the last six
 
 The emulator has hotkeys of its own on some keys you type with: with Parallel Launcher's
 settings, P pauses it and ~ resets the game. The panel turns those off in a game it starts,
-and leaves the rest, such as Escape and the function keys, as they are. If you start the
+and leaves the rest, such as the menu's F1, as they are, but for those in the table under
+"What the panel changes in your emulator". If you start the
 emulator yourself, take its hotkeys off the typing keys first, or chat in the panel.
 
 Stars, keys and doors that anyone gets in a session are added to every player's own save file.

@@ -359,6 +359,8 @@ impl Panel {
                             self.shown_text(&format!("World from {owner}"))
                         }
                         (None, 0) => "Nobody has joined".to_owned(),
+                        // The session keeps its world after whoever gave it has left.
+                        (None, _) if self.dashboard.has_world() => "World shared".to_owned(),
                         (None, _) => "No world shared yet".to_owned(),
                     },
                     health: limit

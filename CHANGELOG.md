@@ -28,7 +28,9 @@ In the game:
   not drawn, and a hit on the other landed on both.
 - The other players no longer turn see-through or metal when you put on such a cap.
 - A player who takes the number of one who just left is no longer shown frozen where that
-  one stood.
+  one stood for minutes; for a second at most.
+- **A game no longer stands still for good** when another player talks to a character
+  while it is speaking to you.
 
 In the server:
 
@@ -62,7 +64,13 @@ In the panel and the bridge:
   calls a second in a busy area.
 - The game the panel builds is written whole or not at all.
 - The panel says when it found no save of the game to copy aside before a session.
-- Restart no longer risks closing the router's port just after opening it again.
+- Restart waits for the router to close the port before it asks for it again, which made
+  it less likely, not impossible, that the port just opened is closed.
+- A host password taken out of the settings no longer lives on through Restart.
+- A setting in your emulator's file that is not valid text no longer stops every join, and
+  a file far too large to be a ROM or a patch is refused unread.
+- A network that fails again each time the bridge has joined again ends the session with
+  those words, and not as "The game closed".
 - A line in the Server chat too long for the game's chat is refused, where players lost
   its end; `/list` there shows its answer.
 

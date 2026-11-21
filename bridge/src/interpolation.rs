@@ -241,8 +241,9 @@ struct Track {
 }
 
 /// How far behind a player's newest state another must be to be taken for a new sender's:
-/// ten seconds of states, far more than any packet arrives late by.
-const FROM_ANOTHER_SENDER: u32 = 300;
+/// a second of states. The server passes on only each player's newest, so none arrives
+/// that much behind one already had, late or out of order.
+const FROM_ANOTHER_SENDER: u32 = 30;
 
 impl Track {
     /// Adds a state if it is newer than any so far. Every snapshot repeats a player's newest

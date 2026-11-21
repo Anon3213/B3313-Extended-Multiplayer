@@ -245,6 +245,8 @@ pub struct Dashboard {
     opened_time_of_day: Duration,
     players: BTreeMap<u8, PlayerRow>,
     world_from: Option<PlayerId>,
+    /// Whether the session has a world, which it keeps after whoever gave it has left.
+    has_world: bool,
     ticks: Option<TickReport>,
     trends: SessionTrends,
     log: VecDeque<LogEntry>,
@@ -420,6 +422,7 @@ impl Dashboard {
             opened_time_of_day: Duration::ZERO,
             players: BTreeMap::new(),
             world_from: None,
+            has_world: false,
             ticks: None,
             trends: SessionTrends::default(),
             log: VecDeque::new(),
@@ -464,7 +467,10 @@ impl Dashboard {
                     self.world_from = None;
                 }
             }
-            Event::WorldSet(id) => self.world_from = Some(*id),
+            Event::WorldSet(id) => {
+                self.world_from = Some(*id);
+                self.has_world = true;
+            }
             Event::Link(id, report) => {
                 if let Some(row) = self.players.get_mut(&id.get()) {
                     row.link = Some(**report);
@@ -601,6 +607,7 @@ impl Dashboard {
     pub fn server_stopped(&mut self) {
         self.players.clear();
         self.world_from = None;
+        self.has_world = false;
         self.ticks = None;
         self.trends = SessionTrends::default();
     }
@@ -682,6 +689,12 @@ impl Dashboard {
     pub fn world_from(&self) -> Option<PlayerId> {
         self.world_from
             .filter(|id| self.players.contains_key(&id.get()))
+    }
+
+    /// Whether the session has a world, whoever it came from.
+    #[must_use]
+    pub const fn has_world(&self) -> bool {
+        self.has_world
     }
 
     #[must_use]
