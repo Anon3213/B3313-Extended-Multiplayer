@@ -10,7 +10,7 @@ under dist/:
     B3313-Extended-Multiplayer-<version>-windows-x64.zip.sha256
 
 The version is the panel's, in panel/Cargo.toml. The zip holds no ROM: the panel carries only
-this project's own patch (run make_patch.py first if the ROM changed) and builds the game on
+this project's own patches (run make_patch.py first if a ROM changed) and builds the game on
 the player's PC.
 """
 

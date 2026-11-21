@@ -4,7 +4,7 @@
 #include "Multiplayer/mailbox.h"
 
 // The rest of the multiplayer code lives in its own segment, Multiplayer/segment.asm: the engine's
-// own segments have no room left. It sits past the end of the base ROM and loads into RAM the
+// own segments have no room left. It sits past the end of the game's ROM and loads into RAM the
 // survey found unused, before anything can call into it.
 
 extern void troll_setup(void);
@@ -13,8 +13,10 @@ extern u8 mpseg_romstart[];
 extern u8 mpseg_romend[];
 extern u8 mpseg2_romstart[];
 extern u8 mpseg2_romend[];
+// Not a place in memory but a number: the version's file gives this name its game number.
+extern u8 mp_game_number[];
 
-// Runs once at boot instead of troll_setup; see AI/ai segment.asm. Marking the mailbox this early
+// Runs once at boot instead of troll_setup; see Multiplayer/hooks.asm. Marking the mailbox this early
 // lets the bridge deliver the session's world before the first level generates.
 void mp_setup(void) {
     dma_read((u8 *) MP_CODE_ADDR, mpseg_romstart, mpseg_romend);
@@ -26,4 +28,5 @@ void mp_setup(void) {
     troll_setup();
     gMpMailbox->magic = MP_MAILBOX_MAGIC;
     gMpMailbox->version = MP_MAILBOX_VERSION;
+    gMpMailbox->game = (u32) mp_game_number;
 }

@@ -15,7 +15,7 @@ pub const CODE2_ADDR: u32 = 0x807D_1600;
 pub const CODE2_END: u32 = 0x807D_2700;
 pub const ANIM_CACHE_END: u32 = 0x807E_0000;
 pub const MAILBOX_MAGIC: u32 = 0x4233_4D50;
-pub const MAILBOX_VERSION: u32 = 0x14;
+pub const MAILBOX_VERSION: u32 = 0x15;
 pub const PLAYER_SLOTS: u32 = 0x10;
 pub const PUPPETS: u32 = 0xF;
 pub const HIT_PUNCH: u32 = 1;
@@ -145,6 +145,7 @@ pub const CHAT_DRAFT_OFFSET: u32 = 0x1A8;
 pub const MAILBOX_MAGIC_OFFSET: u32 = 0;
 pub const MAILBOX_VERSION_OFFSET: u32 = 4;
 pub const MAILBOX_BRIDGE_LEASE_OFFSET: u32 = 8;
+pub const MAILBOX_GAME_OFFSET: u32 = 0xC;
 pub const MAILBOX_HITS_OUT_OFFSET: u32 = 0x10;
 pub const MAILBOX_HITS_IN_OFFSET: u32 = 0x40;
 pub const MAILBOX_LOCAL_OFFSET: u32 = 0x100;
@@ -198,7 +199,7 @@ pub mod len {
     pub const CODE2_END: usize = 0x807D_2700;
     pub const ANIM_CACHE_END: usize = 0x807E_0000;
     pub const MAILBOX_MAGIC: usize = 0x4233_4D50;
-    pub const MAILBOX_VERSION: usize = 0x14;
+    pub const MAILBOX_VERSION: usize = 0x15;
     pub const PLAYER_SLOTS: usize = 0x10;
     pub const PUPPETS: usize = 0xF;
     pub const HIT_PUNCH: usize = 1;
@@ -328,6 +329,7 @@ pub mod len {
     pub const MAILBOX_MAGIC_OFFSET: usize = 0;
     pub const MAILBOX_VERSION_OFFSET: usize = 4;
     pub const MAILBOX_BRIDGE_LEASE_OFFSET: usize = 8;
+    pub const MAILBOX_GAME_OFFSET: usize = 0xC;
     pub const MAILBOX_HITS_OUT_OFFSET: usize = 0x10;
     pub const MAILBOX_HITS_IN_OFFSET: usize = 0x40;
     pub const MAILBOX_LOCAL_OFFSET: usize = 0x100;
@@ -369,7 +371,7 @@ pub mod len {
 
 /// Those of the numbers that are a byte's worth, as bytes.
 pub mod byte {
-    pub const MAILBOX_VERSION: u8 = 0x14;
+    pub const MAILBOX_VERSION: u8 = 0x15;
     pub const PLAYER_SLOTS: u8 = 0x10;
     pub const PUPPETS: u8 = 0xF;
     pub const HIT_PUNCH: u8 = 1;
@@ -496,6 +498,7 @@ pub mod byte {
     pub const MAILBOX_MAGIC_OFFSET: u8 = 0;
     pub const MAILBOX_VERSION_OFFSET: u8 = 4;
     pub const MAILBOX_BRIDGE_LEASE_OFFSET: u8 = 8;
+    pub const MAILBOX_GAME_OFFSET: u8 = 0xC;
     pub const MAILBOX_HITS_OUT_OFFSET: u8 = 0x10;
     pub const MAILBOX_HITS_IN_OFFSET: u8 = 0x40;
     pub const PLAYER_SLOT_SIZE: u8 = 0x80;

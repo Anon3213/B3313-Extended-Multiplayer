@@ -1,8 +1,14 @@
 # B3313 Extended Multiplayer
 
 Online multiplayer for B3313, the Super Mario 64 ROM hack: up to 16
-players in one world, with shared enemies, coins, stars and chat. It plays the real game, the
-Unabandoned A2 Anniversary Edition, in an emulator on each player's PC.
+players in one world, with shared enemies, coins, stars and chat. It plays the real game in an
+emulator on each player's PC, in any of three versions:
+
+- Unabandoned A2 Anniversary Edition
+- 1.0.2 hotfix 3
+- 1.0.2 hotfix 3 with Unabandoned tweaks, which some downloads of "1.0.2 hotfix 3" are
+
+Everyone in a session plays the same version; see "Versions of the game".
 
 This is an unofficial project. It is not affiliated with Nintendo or the B3313 team, and it
 contains no ROM.
@@ -33,8 +39,9 @@ What to know as you play:
   aside each time you join, and the multiplayer game has a save of its own; see "Chat".
 - While your game is paused, the others see your Mario stand where he was. Nobody can hit
   him, and the enemies your game was running are run by another player's until you go on.
-- Every game in a session must be the same build. The panel builds the game for you and
-  says so if the game running is another one.
+- Every game in a session must be the same version of B3313, built by the same version of
+  this program. The panel builds the game for you and says so if the game running is another
+  one.
 
 ## What you need
 
@@ -44,7 +51,8 @@ What to know as you play:
   the game runs in. Start any game in Parallel Launcher once, so it sets RetroArch up; after
   that the panel starts the game in it for you.
 - Your own Super Mario 64 (USA) ROM.
-- The B3313 Unabandoned A2 Anniversary Edition patch (`.bps`), from romhacking.com.
+- A B3313 patch (`.bps`) of one of the three versions above, the one your session plays. The
+  Unabandoned A2 Anniversary Edition's is on romhacking.com.
 
 ## Playing
 
@@ -57,6 +65,18 @@ What to know as you play:
    your own server on **Play**.
 
 In the game, hold the D-pad down to see who is in the session.
+
+### Versions of the game
+
+The versions of B3313 have different levels, so players can only share a session if their
+games are the same version. The first player into a session decides which it plays, and
+anyone who then joins with another is not let in and is told which version the session plays.
+Once everyone has left, the session takes whichever version comes next.
+
+The panel tells which version a patch is by the game it makes, not by the file's name: two
+files both called "1.0.2 hotfix 3" can be different versions. It says which one it built when
+the game is ready. Each version has a multiplayer ROM and a save of its own, so you can set
+up more than one and change between them by choosing another patch.
 
 Pick your Mario's colors from the swatches on **Play**, or type `/color` in the chat for the
 list and `/color green` to wear one. Everyone sees you in them, and so do you.

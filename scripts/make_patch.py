@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Write the patch the panel carries: what turns the unshifted A2AE base into the multiplayer ROM.
+"""Write the patches the panel carries: what turns each version of B3313 into its multiplayer ROM.
 
-Usage: make_patch.py [multiplayer ROM]    (default: Bee/b3313 multiplayer.z64)
+Usage: make_patch.py [version]...    (default: every version in game_versions.py)
 
-Writes panel/assets/multiplayer.bps and multiplayer.bps.sha256, the SHA-256 of the ROM the patch
-makes, which the panel checks after patching. Run it after every multiplayer ROM build that is
-to be released, and commit both files: the panel, its bridge and this ROM must stay one version.
+For each version, reads Bee/<version>.z64 and Bee/<version>-multiplayer.z64 and writes
+panel/assets/<version>.bps and <version>.bps.sha256, the SHA-256 of the ROM the patch makes,
+which the panel checks after patching. Run it after every multiplayer ROM build that is to be
+released, and commit the files: the panel, its bridge and these ROMs must stay one version.
 """
 
 import hashlib
@@ -14,7 +15,8 @@ import sys
 import zlib
 from pathlib import Path
 
-from setup_base_rom import BEE_DIR, UNSHIFTED_SHA256, apply_bps, require_sha256
+from game_versions import VERSIONS, GameVersion, by_key
+from setup_base_rom import apply_bps, require_sha256
 
 ASSETS = Path(__file__).resolve().parent.parent / "panel" / "assets"
 _SOURCE_READ, _TARGET_READ = 0, 1
@@ -57,22 +59,25 @@ def make_bps(source: bytes, target: bytes) -> bytes:
     return bytes(patch)
 
 
-def main() -> None:
-    if len(sys.argv) > 2:
-        raise SystemExit(__doc__)
-    rom = Path(sys.argv[1]) if len(sys.argv) == 2 else BEE_DIR / "b3313 multiplayer.z64"
-    base = (BEE_DIR / "b3313 a2ae-unshifted-clean.z64").read_bytes()
-    require_sha256(base, UNSHIFTED_SHA256, "Unshifted base ROM")
-    target = rom.read_bytes()
+def write_patch(version: GameVersion) -> None:
+    base = version.base_path.read_bytes()
+    require_sha256(base, version.base_sha256, f"The ROM of {version.name}")
+    target = version.multiplayer_path.read_bytes()
 
     patch = make_bps(base, target)
     if apply_bps(patch, base) != target:
-        raise SystemExit("The patch does not reproduce the multiplayer ROM")
+        raise SystemExit(f"The patch does not reproduce the multiplayer ROM of {version.name}")
     ASSETS.mkdir(exist_ok=True)
-    (ASSETS / "multiplayer.bps").write_bytes(patch)
+    (ASSETS / f"{version.key}.bps").write_bytes(patch)
     digest = hashlib.sha256(target).hexdigest()
-    (ASSETS / "multiplayer.bps.sha256").write_bytes(f"{digest}\n".encode())
-    print(f"Wrote {len(patch)} bytes; the patched ROM's SHA-256 is {digest}")
+    (ASSETS / f"{version.key}.bps.sha256").write_bytes(f"{digest}\n".encode())
+    print(f"{version.name}: {len(patch)} bytes; the patched ROM's SHA-256 is {digest}")
+
+
+def main() -> None:
+    versions = [by_key(key) for key in sys.argv[1:]] or list(VERSIONS)
+    for version in versions:
+        write_patch(version)
 
 
 if __name__ == "__main__":

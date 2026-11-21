@@ -1,5 +1,6 @@
 //! Builds the multiplayer ROM on the player's PC, from the two files only they can supply: their
-//! Super Mario 64 ROM and the B3313 patch. The panel carries only this project's own patch.
+//! Super Mario 64 ROM and a B3313 patch, of any version in `GAMES`. The panel carries only this
+//! project's own patches, one for each version.
 //!
 //! Every stage is checked by SHA-256, so a wrong or damaged file is named, never played. The
 //! patch files are read as untrusted data: nothing here indexes past what a file holds.
@@ -8,18 +9,59 @@ use sha2::{Digest, Sha256};
 use std::fmt;
 use std::path::{Path, PathBuf};
 
-/// The multiplayer patch, made by `scripts/make_patch.py` from the ROM this panel's bridge was
-/// built for.
-const MULTIPLAYER_PATCH: &[u8] = include_bytes!("../assets/multiplayer.bps");
-/// The SHA-256 of the ROM that patch makes.
-const MULTIPLAYER_SHA256: &str = include_str!("../assets/multiplayer.bps.sha256");
+/// One version of B3313 this panel can make the multiplayer ROM of. A version is one released
+/// ROM: two patches that make different ROMs are two versions, whatever their names say.
+pub struct Game {
+    pub name: &'static str,
+    /// The file the panel builds. Each game has a name of its own, as the emulator names a
+    /// save after its ROM, and one game's save is no use to another.
+    rom_name: &'static str,
+    /// The ROM the player's patch makes of Super Mario 64.
+    released_sha256: &'static str,
+    /// Whether the release moved the ROM's data, which is undone before this project's patch.
+    shifted: bool,
+    /// That ROM with any shift undone: what this project's patch is made for.
+    base_sha256: &'static str,
+    /// This project's patch, made by `scripts/make_patch.py` from the ROM this panel's bridge
+    /// was built for, and the SHA-256 of the ROM it makes.
+    patch: &'static [u8],
+    multiplayer_sha256: &'static str,
+}
+
+/// Every version, as `scripts/game_versions.py` decides them: a test there keeps the two equal.
+pub const GAMES: [Game; 3] = [
+    Game {
+        name: "Unabandoned A2 Anniversary Edition",
+        // The name from before there were other versions, which its players' saves have.
+        rom_name: "B3313 Extended Multiplayer.z64",
+        released_sha256: "def0f5dd465b3a3bac6961cdfbccdb2f994b9de423c247802f9ad27695dd2176",
+        shifted: true,
+        base_sha256: "f8c482f5086349c5dc9054958b97f8ad8bb4d34323f8d2725858d33452898412",
+        patch: include_bytes!("../assets/a2ae.bps"),
+        multiplayer_sha256: include_str!("../assets/a2ae.bps.sha256"),
+    },
+    Game {
+        name: "1.0.2 hotfix 3",
+        rom_name: "B3313 Extended Multiplayer (1.0.2 hotfix 3).z64",
+        released_sha256: "2980ddda4248d0276d2a59325e0eceaa2461ad9532f7c92772901cb84ab88f28",
+        shifted: false,
+        base_sha256: "2980ddda4248d0276d2a59325e0eceaa2461ad9532f7c92772901cb84ab88f28",
+        patch: include_bytes!("../assets/v102h3.bps"),
+        multiplayer_sha256: include_str!("../assets/v102h3.bps.sha256"),
+    },
+    Game {
+        name: "1.0.2 hotfix 3 with Unabandoned tweaks",
+        rom_name: "B3313 Extended Multiplayer (1.0.2 hotfix 3 with Unabandoned tweaks).z64",
+        released_sha256: "ced3fb37cdff3e5dc9606412211db3ac9805631bf8abc5511823fddc215a721a",
+        shifted: false,
+        base_sha256: "ced3fb37cdff3e5dc9606412211db3ac9805631bf8abc5511823fddc215a721a",
+        patch: include_bytes!("../assets/v102h3ua.bps"),
+        multiplayer_sha256: include_str!("../assets/v102h3ua.bps.sha256"),
+    },
+];
 
 /// Super Mario 64 (USA), in .z64 byte order.
 const VANILLA_SHA256: &str = "17ce077343c6133f8c9f2d6d6d9a4ab62c8cd2aa57c40aea1f490b4c8bb21d91";
-/// B3313 Unabandoned A2 Anniversary Edition as released, and with its release shift undone;
-/// `scripts/setup_base_rom.py` makes the same two for the ROM build.
-const RELEASED_SHA256: &str = "def0f5dd465b3a3bac6961cdfbccdb2f994b9de423c247802f9ad27695dd2176";
-const UNSHIFTED_SHA256: &str = "f8c482f5086349c5dc9054958b97f8ad8bb4d34323f8d2725858d33452898412";
 
 /// The release build inserts this marker, then patches `osPiStartDma` to skip it.
 const SHIFT_MARKER: &[u8] = b"YAHAAAAAAAAAAAAA";
@@ -30,8 +72,11 @@ const OS_PI_START_DMA: std::ops::Range<usize> = 0xD_F460..0xD_F570;
 /// No N64 ROM is larger than this; a patch that asks for more is not one of ours.
 const LARGEST_ROM: usize = 128 << 20;
 
-/// The file the panel builds, kept under one name so the emulator keeps one save for it.
-pub const ROM_NAME: &str = "B3313 Extended Multiplayer.z64";
+/// The versions' names in a row, for telling a player which patches will do.
+#[must_use]
+pub fn game_names() -> String {
+    GAMES.map(|game| game.name).join(", ")
+}
 
 /// Why the ROM could not be built, in words for the player.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -54,7 +99,12 @@ impl fmt::Display for SetupError {
             }
             Self::NotAPatch => "The second file is not a BPS patch",
             Self::WrongPatch => {
-                "The patch is not B3313 Unabandoned A2 Anniversary Edition, or it is damaged"
+                return write!(
+                    f,
+                    "The patch is damaged, or is for a version of B3313 this panel does not \
+                     play; it plays {}",
+                    game_names()
+                );
             }
             Self::Damaged => "This copy of the panel is damaged; download it again",
         })
@@ -198,11 +248,15 @@ fn unshift(released: &[u8], vanilla: &[u8]) -> Option<Vec<u8>> {
     Some(rom)
 }
 
-/// The multiplayer ROM, from the player's Super Mario 64 ROM and the B3313 patch.
+/// The multiplayer ROM, from the player's Super Mario 64 ROM and a B3313 patch, and which
+/// version of the game the patch turned out to be.
 ///
 /// # Errors
 /// Says which file is not the one needed.
-pub fn build_rom(vanilla: &[u8], b3313_patch: &[u8]) -> Result<Vec<u8>, SetupError> {
+pub fn build_rom(
+    vanilla: &[u8],
+    b3313_patch: &[u8],
+) -> Result<(&'static Game, Vec<u8>), SetupError> {
     let vanilla = to_big_endian(vanilla).ok_or(SetupError::NotARom)?;
     if !has_sha256(&vanilla, VANILLA_SHA256) {
         return Err(SetupError::WrongRom);
@@ -210,24 +264,57 @@ pub fn build_rom(vanilla: &[u8], b3313_patch: &[u8]) -> Result<Vec<u8>, SetupErr
     if !b3313_patch.starts_with(b"BPS1") {
         return Err(SetupError::NotAPatch);
     }
-    let released = apply_bps(b3313_patch, &vanilla)
-        .filter(|rom| has_sha256(rom, RELEASED_SHA256))
+    // A patch's name says little: the ROM it makes is what tells the versions apart.
+    let released = apply_bps(b3313_patch, &vanilla).ok_or(SetupError::WrongPatch)?;
+    let released_sha256 = sha256_hex(&released);
+    let game = GAMES
+        .iter()
+        .find(|game| game.released_sha256 == released_sha256)
         .ok_or(SetupError::WrongPatch)?;
     // Both inputs are now known to the byte, so anything that fails from here is this panel's.
-    let base = unshift(&released, &vanilla)
-        .filter(|rom| has_sha256(rom, UNSHIFTED_SHA256))
-        .ok_or(SetupError::Damaged)?;
-    apply_bps(MULTIPLAYER_PATCH, &base)
-        .filter(|rom| has_sha256(rom, MULTIPLAYER_SHA256))
+    let base = if game.shifted {
+        unshift(&released, &vanilla).ok_or(SetupError::Damaged)?
+    } else {
+        released
+    };
+    if !has_sha256(&base, game.base_sha256) {
+        return Err(SetupError::Damaged);
+    }
+    apply_bps(game.patch, &base)
+        .filter(|rom| game.is_current(rom))
+        .map(|rom| (game, rom))
         .ok_or(SetupError::Damaged)
 }
 
-/// Where the built ROM is kept: beside the panel's preferences. None where there is no such
-/// folder.
+impl Game {
+    /// Where this game's built ROM is kept: beside the panel's preferences. None where there
+    /// is no such folder.
+    #[must_use]
+    pub fn rom_path(&self) -> Option<PathBuf> {
+        let folder = crate::preferences::path()?.parent()?.join("game");
+        Some(folder.join(self.rom_name))
+    }
+
+    /// Whether `rom` is the ROM of this game that this panel's bridge was built for. One
+    /// built by an older panel is not, and must be built again.
+    #[must_use]
+    pub fn is_current(&self, rom: &[u8]) -> bool {
+        has_sha256(rom, self.multiplayer_sha256)
+    }
+}
+
+/// The game whose ROM the panel keeps at `rom`, if it is one the panel built.
 #[must_use]
-pub fn rom_path() -> Option<PathBuf> {
-    let folder = crate::preferences::path()?.parent()?.join("game");
-    Some(folder.join(ROM_NAME))
+pub fn built_at(rom: &Path) -> Option<&'static Game> {
+    GAMES
+        .iter()
+        .find(|game| game.rom_path().is_some_and(|built| built == rom))
+}
+
+/// A ROM the panel built: where it is, and which version of the game.
+pub struct Built {
+    pub rom: PathBuf,
+    pub game: &'static Game,
 }
 
 /// Where copies of the game's save are kept, one made at each join. None where there is no
@@ -237,36 +324,31 @@ pub fn backups_path() -> Option<PathBuf> {
     Some(crate::preferences::path()?.parent()?.join("save-backups"))
 }
 
-/// Whether `rom` is the ROM this panel's bridge was built for. One built by an older panel is
-/// not, and must be built again.
-#[must_use]
-pub fn is_current(rom: &[u8]) -> bool {
-    has_sha256(rom, MULTIPLAYER_SHA256)
-}
-
-/// Builds the ROM from the two files and writes it to `rom_path`.
+/// Builds the ROM from the two files and writes it to its game's `rom_path`.
 ///
 /// # Errors
 /// Says, in a sentence for the player, which file could not be read or is not the one needed.
-pub fn set_up(vanilla: &Path, b3313_patch: &Path) -> Result<PathBuf, String> {
+pub fn set_up(vanilla: &Path, b3313_patch: &Path) -> Result<Built, String> {
     let read = |path: &Path| {
         std::fs::read(path).map_err(|error| format!("Could not read {}: {error}.", path.display()))
     };
-    let rom =
+    let (game, rom) =
         build_rom(&read(vanilla)?, &read(b3313_patch)?).map_err(|error| format!("{error}."))?;
-    let path = rom_path().ok_or("There is no folder to keep the game in.")?;
+    let path = game
+        .rom_path()
+        .ok_or("There is no folder to keep the game in.")?;
     path.parent()
         .map_or(Ok(()), std::fs::create_dir_all)
         .and_then(|()| std::fs::write(&path, rom))
         .map_err(|error| format!("Could not write {}: {error}.", path.display()))?;
-    Ok(path)
+    Ok(Built { rom: path, game })
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        OS_PI_START_DMA, SHIFT_MARKER, SHIFT_MARKER_OFFSET, SetupError, apply_bps, build_rom,
-        to_big_endian, unshift,
+        GAMES, OS_PI_START_DMA, SHIFT_MARKER, SHIFT_MARKER_OFFSET, SetupError, apply_bps,
+        build_rom, to_big_endian, unshift,
     };
 
     fn number(mut value: usize) -> Vec<u8> {
@@ -386,27 +468,62 @@ mod tests {
 
     #[test]
     fn the_wrong_files_are_named() {
-        assert_eq!(build_rom(b"not a rom", b"BPS1"), Err(SetupError::NotARom));
+        let not_a_rom = build_rom(b"not a rom", b"BPS1").err();
+        assert_eq!(not_a_rom, Some(SetupError::NotARom));
         let other_rom = [0x80, 0x37, 0x12, 0x40, 0, 0, 0, 0];
-        assert_eq!(build_rom(&other_rom, b"BPS1"), Err(SetupError::WrongRom));
+        let wrong_rom = build_rom(&other_rom, b"BPS1").err();
+        assert_eq!(wrong_rom, Some(SetupError::WrongRom));
+    }
+
+    #[test]
+    fn every_game_has_a_name_and_a_file_of_its_own() {
+        for (index, game) in GAMES.iter().enumerate() {
+            for other in GAMES.iter().skip(index + 1) {
+                assert_ne!(game.name, other.name);
+                assert_ne!(game.rom_name, other.rom_name);
+                assert_ne!(game.released_sha256, other.released_sha256);
+            }
+        }
     }
 
     /// The whole path, with the real files. They are Nintendo's and the B3313 team's, so they
     /// cannot be in the repository: run this by hand, with them in place, after a ROM build.
     #[test]
-    #[ignore = "needs the Super Mario 64 ROM and the B3313 patch, which cannot be committed"]
-    fn the_real_files_make_the_multiplayer_rom() {
+    #[ignore = "needs the Super Mario 64 ROM and the B3313 patches, which cannot be committed"]
+    fn the_real_files_make_each_games_multiplayer_rom() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
-        let vanilla = std::fs::read(root.join("ROM/Super Mario 64 (USA).n64"));
-        let b3313 = std::fs::read(root.join("patches/B3313_ua_a2_anniversary_edition.bps"));
-        let (Ok(vanilla), Ok(b3313)) = (vanilla, b3313) else {
-            unreachable!("the ROM and the patch must be in place to run this test");
+        let Ok(vanilla) = std::fs::read(root.join("ROM/Super Mario 64 (USA).n64")) else {
+            unreachable!("the ROM must be in place to run this test");
         };
-        assert!(build_rom(&vanilla, &b3313).is_ok());
-        assert_eq!(build_rom(&vanilla, &vanilla), Err(SetupError::NotAPatch));
+        let patches = [
+            (
+                "B3313_ua_a2_anniversary_edition.bps",
+                "Unabandoned A2 Anniversary Edition",
+            ),
+            ("B3313 [1.0.2, hotfix 3].bps", "1.0.2 hotfix 3"),
+            (
+                "B3313-1.0.2-hotfix3.bps",
+                "1.0.2 hotfix 3 with Unabandoned tweaks",
+            ),
+        ];
+        for (file, game) in patches {
+            let Ok(patch) = std::fs::read(root.join("patches").join(file)) else {
+                unreachable!("the patch {file} must be in place to run this test");
+            };
+            let built = build_rom(&vanilla, &patch).map(|(built, _)| built.name);
+            assert_eq!(built, Ok(game), "{file}");
+        }
         assert_eq!(
-            build_rom(&vanilla, super::MULTIPLAYER_PATCH),
-            Err(SetupError::WrongPatch)
+            build_rom(&vanilla, &vanilla).err(),
+            Some(SetupError::NotAPatch)
+        );
+        // A patch that fits the ROM and makes none of the games: this project's own.
+        let Some(own) = GAMES.first() else {
+            unreachable!("there is at least one game");
+        };
+        assert_eq!(
+            build_rom(&vanilla, own.patch).err(),
+            Some(SetupError::WrongPatch)
         );
     }
 }

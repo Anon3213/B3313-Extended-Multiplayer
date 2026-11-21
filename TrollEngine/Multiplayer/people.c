@@ -343,7 +343,7 @@ static void draw_list(void) {
     }
 }
 
-// The game's HUD, and then the other players' part of it. See MP_HUD in Multiplayer/people.h.
+// The game's HUD, and then the other players' part of it. See Multiplayer/people.h.
 void mp_render_hud(void) {
     s32 rows;
     s32 typing;

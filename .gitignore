@@ -10,10 +10,10 @@
 ROM/
 Bee/*
 !Bee/.gitkeep
-# The A2AE patch, wherever it was downloaded to. The multiplayer patch the panel carries is
-# this project's own and is the one exception.
+# B3313's patches, wherever they were downloaded to. The multiplayer patches the panel carries
+# are this project's own and are the one exception.
 *.bps
-!/panel/assets/multiplayer.bps
+!/panel/assets/*.bps
 
 # Troll Engine is fetched by scripts/engine.py, not kept here: only Multiplayer/ is ours.
 /.engine/

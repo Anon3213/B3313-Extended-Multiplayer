@@ -24,34 +24,74 @@ panel is a workspace of its own:
 cargo run --manifest-path panel/Cargo.toml
 ```
 
-## The ROM
+## The ROMs
 
-Only needed to change the code that runs inside the game, `TrollEngine/Multiplayer/`.
+Only needed to change the code that runs inside the game, `TrollEngine/Multiplayer/`. There
+is one multiplayer ROM for each version of B3313 the mod plays, listed in
+`scripts/game_versions.py`, and all are built the same way: the multiplayer code is added to
+the game's ROM, and the game's own code is left as it is.
 
-1. Fetch Troll Engine, B3313's engine, which this repository builds on but does not contain:
+1. Fetch Troll Engine, B3313's engine, whose compiler, assembler and headers the build uses.
+   This repository does not contain it:
 
    ```bash
    python scripts/engine.py setup
    ```
 
-2. Put your own Super Mario 64 (USA) ROM and the B3313 Unabandoned A2 Anniversary Edition
-   patch somewhere outside git's reach (`ROM/` is ignored), and make the base ROM:
+   Then build its tools once, on Linux or in WSL (`build-essential` is all it needs), from
+   `TrollEngine/`:
 
    ```bash
-   python scripts/setup_base_rom.py <the A2AE .bps> <your Super Mario 64 ROM>
+   make tools
    ```
 
-3. Build, on Linux or in WSL (`build-essential` is all it needs), from `TrollEngine/`:
+2. Put your own Super Mario 64 (USA) ROM and the B3313 patches somewhere outside git's reach
+   (`ROM/` and every `.bps` are ignored), and make each version's ROM. The script tells which
+   version a patch is by the ROM it makes:
 
    ```bash
-   make clean && make -j DEBUG=0 MULTIPLAYER=1
+   python scripts/setup_base_rom.py <a B3313 .bps> <your Super Mario 64 ROM>
    ```
 
-4. Make the patch the panel carries from the new ROM, and commit it:
+3. Build every version's multiplayer ROM, or only those you name. On Windows this runs the
+   build in WSL:
+
+   ```bash
+   uv run --no-sync python scripts/build_game.py
+   ```
+
+4. Make the patches the panel carries from the new ROMs, and commit them:
 
    ```bash
    uv run --no-sync python scripts/make_patch.py
    ```
+
+### Another version of B3313
+
+Most versions of B3313 were built from engine sources nobody published, so where a version
+keeps the engine functions and variables the multiplayer code uses is read out of its ROM.
+To add a version:
+
+1. Give it a row in `scripts/game_versions.py`, with a number no version has had, and make
+   its ROM as in step 2 above.
+2. Build Troll Engine's objects at one or more commits near the version's date: check each
+   commit out somewhere, and run `make objs` there. A function the version changed after one
+   commit may still match another, so several commits find more.
+3. Read the addresses out of the ROM, which writes the version's file in
+   `TrollEngine/Multiplayer/versions/`:
+
+   ```bash
+   uv run --no-sync python scripts/find_engine_symbols.py <version> Bee/<version>.z64 <tree>...
+   ```
+
+   It stops rather than guess. If the version loads the engine differently, or a function
+   the hooks rely on is not as expected, it says which, and that part needs work by hand.
+4. Build it and make its patch, as above, then give the panel its row (`GAMES` in the panel's
+   `game_setup` module) and the bridge and server its name (the protocol crate's `game`
+   module). Tests fail while those two differ from `scripts/game_versions.py`.
+
+The build checks each instruction it changes against the ROM first, and stops if the ROM
+holds something else there.
 
 The font for names and chat is drawn in `TrollEngine/Multiplayer/font.txt`. After changing it,
 run `uv run --no-sync python scripts/make_font.py` and commit `font.bin` with it; add
@@ -66,10 +106,7 @@ The programs' icons are drawn by `scripts/make_icons.py`, from shapes in the scr
 After changing it, run `uv run --no-sync python scripts/make_icons.py` and commit what it
 writes in `icons/`; `--preview icons.png` draws them all into one picture to look at first.
 
-If you change an engine file outside `Multiplayer/`, run `python scripts/engine.py patch` and
-commit `engine-hooks.patch`: git ignores the engine files themselves.
-
-Never commit a ROM, the A2AE patch, or an engine file.
+Never commit a ROM, a B3313 patch, or an engine file.
 
 ## Releasing
 

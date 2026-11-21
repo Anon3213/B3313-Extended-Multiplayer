@@ -200,11 +200,12 @@ impl Request {
             std::fs::read(&self.rom)
                 .map_err(|error| format!("Could not read the ROM {}: {error}.", self.rom.display()))
         };
-        let built_here = game_setup::rom_path().is_some_and(|built| built == self.rom);
+        let built_here = game_setup::built_at(&self.rom);
         match read() {
-            Ok(rom) if !built_here || game_setup::is_current(&rom) => Ok(rom),
+            Ok(rom) if built_here.is_none_or(|game| game.is_current(&rom)) => Ok(rom),
             outdated => {
-                let Some((sm64, patch)) = self.sources.as_ref().filter(|_| built_here) else {
+                let rebuilt = built_here.and(self.sources.as_ref());
+                let Some((sm64, patch)) = rebuilt else {
                     return outdated.and(Err(
                         "This panel is newer than its game. Set the game up again on the Play \
                          page."

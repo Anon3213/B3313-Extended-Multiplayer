@@ -39,7 +39,7 @@
 #define MP_ANIM_CACHE_END 0x807E0000
 
 #define MP_MAILBOX_MAGIC 0x42334D50 // "B3MP"
-#define MP_MAILBOX_VERSION 20
+#define MP_MAILBOX_VERSION 21
 #define MP_PLAYER_SLOTS 16
 // Every other player in a full session. Slot 15 stays unused.
 #define MP_PUPPETS 15
@@ -345,7 +345,9 @@ struct MpMailbox {
     // frame, paused or not; at 0 it removes what the session left for it to act on (mp_read_pads),
     // as a bridge does when it leaves, since one that was killed could not. 0 before any bridge.
     /*0x0008*/ u32 bridgeLease;
-    /*0x000C*/ u8 reserved[0x010 - 0x00C];
+    // Which version of B3313 this is, by its number in scripts/game_versions.py: players can
+    // share a session only if their games are the same. Set at boot, with the magic.
+    /*0x000C*/ u32 game;
     /*0x0010*/ struct MpHitRing hitsOut; // Written by the game.
     /*0x0034*/ u8 reserved1[0x040 - 0x034];
     /*0x0040*/ struct MpHitRing hitsIn; // Written by the bridge.

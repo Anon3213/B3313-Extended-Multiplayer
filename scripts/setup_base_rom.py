@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Build the unshifted A2AE base ROM that Troll Engine patches.
+"""Make the ROM of a B3313 version that the multiplayer code is added to.
 
-Usage: setup_base_rom.py <A2AE .bps> <vanilla SM64 US ROM>
+Usage: setup_base_rom.py <B3313 .bps> <vanilla SM64 US ROM>
 
-Writes two files to Bee/: a clean copy, and "b3313 silved.z64", the input that
-`make` overwrites. Re-running resets that input to the clean base.
+Tells which version the patch is by the ROM it makes (game_versions.py) and writes that ROM to
+Bee/<version>.z64, with the 16-byte shift of its release undone if it has one.
 """
 
 import hashlib
@@ -13,16 +13,13 @@ import sys
 import zlib
 from pathlib import Path
 
-PATCHED_SHA256 = "def0f5dd465b3a3bac6961cdfbccdb2f994b9de423c247802f9ad27695dd2176"
-UNSHIFTED_SHA256 = "f8c482f5086349c5dc9054958b97f8ad8bb4d34323f8d2725858d33452898412"
+from game_versions import VERSIONS, GameVersion
 
 # `make release` inserts this marker, then patches osPiStartDma to add 0x10 to cart addresses.
 SHIFT_MARKER = b"YAHAAAAAAAAAAAAA"
 SHIFT_MARKER_OFFSET = 0xF5580
 OS_PI_START_DMA_OFFSET = 0x80324460 - 0x80245000
 OS_PI_START_DMA_SIZE = 0x80324570 - 0x80324460
-
-BEE_DIR = Path(__file__).resolve().parent.parent / "Bee"
 
 
 def to_big_endian(rom: bytes) -> bytes:
@@ -120,6 +117,16 @@ def require_sha256(data: bytes, expected: str, label: str) -> None:
         raise SystemExit(f"{label} SHA-256 mismatch: got {actual}, expected {expected}")
 
 
+def released_version(patched: bytes) -> GameVersion:
+    """Which version of the game a patched ROM is."""
+    digest = hashlib.sha256(patched).hexdigest()
+    for version in VERSIONS:
+        if version.released_sha256 == digest:
+            return version
+    names = ", ".join(version.name for version in VERSIONS)
+    raise SystemExit(f"The patch makes a ROM that is none of: {names}. Its SHA-256 is {digest}")
+
+
 def main() -> None:
     if len(sys.argv) != 3:
         raise SystemExit(__doc__)
@@ -127,13 +134,12 @@ def main() -> None:
     vanilla = to_big_endian(Path(sys.argv[2]).read_bytes())
 
     patched = apply_bps(patch, vanilla)
-    require_sha256(patched, PATCHED_SHA256, "Patched ROM")
-    base = unshift(patched, vanilla)
-    require_sha256(base, UNSHIFTED_SHA256, "Unshifted ROM")
+    version = released_version(patched)
+    base = unshift(patched, vanilla) if version.shifted else patched
+    require_sha256(base, version.base_sha256, f"The ROM of {version.name}")
 
-    (BEE_DIR / "b3313 a2ae-unshifted-clean.z64").write_bytes(base)
-    (BEE_DIR / "b3313 silved.z64").write_bytes(base)
-    print(f"Wrote the unshifted A2AE base to {BEE_DIR}")
+    version.base_path.write_bytes(base)
+    print(f"Wrote {version.name} to {version.base_path}")
 
 
 if __name__ == "__main__":

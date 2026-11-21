@@ -8,10 +8,11 @@ Two things it is built from are other people's work, under their own terms.
 
 ## Troll Engine
 
-The multiplayer ROM patch is built with Troll Engine, B3313's engine, which this repository
-fetches (`scripts/engine.py`) and does not contain. `TrollEngine/Multiplayer/engine-hooks.patch`
-quotes a few lines of it around each change, and the patch the panel carries holds engine
-functions compiled again with those changes. Both are covered by Troll Engine's license:
+The multiplayer ROM patches are built with Troll Engine, B3313's engine, which this repository
+fetches (`scripts/engine.py`) and does not contain. The multiplayer code is compiled against
+its headers, and `TrollEngine/Multiplayer/world.c` restates a few lines of two of its
+functions, which the patches the panel carries hold compiled. Those are covered by Troll
+Engine's license:
 
 > Copyright © 2022-2025 Chlorobyte
 >

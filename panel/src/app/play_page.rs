@@ -565,10 +565,12 @@ impl Panel {
             let _ = this.update(cx, |this, cx| {
                 this.play.building = false;
                 match built {
-                    Ok(rom) => {
-                        this.preferences.rom = Some(rom);
+                    Ok(built) => {
+                        this.preferences.rom = Some(built.rom);
                         this.save_preferences();
-                        this.show_toast(ToastTone::Success, "The game is ready".to_owned());
+                        // Which version it is decides who the player can share a session with.
+                        let ready = format!("The game is ready: B3313 {}", built.game.name);
+                        this.show_toast(ToastTone::Success, ready);
                     }
                     Err(message) => this.report_problem(message),
                 }
@@ -1243,21 +1245,25 @@ impl Panel {
                 "Super Mario 64 ROM",
                 preferences.sm64_rom.as_deref(),
                 "Not chosen yet",
-                "Picks your own Super Mario 64 (USA) ROM, in any dump format",
+                "Picks your own Super Mario 64 (USA) ROM, in any dump format".to_owned(),
             ),
             GameFile::B3313Patch => (
                 "b3313-patch",
                 "B3313 patch",
                 preferences.b3313_patch.as_deref(),
                 "Not chosen yet",
-                "Picks the B3313 Unabandoned A2 Anniversary Edition patch, a .bps file",
+                format!(
+                    "Picks a B3313 patch, a .bps file, of the version the session plays: {}",
+                    game_setup::game_names()
+                ),
             ),
             GameFile::OwnRom => (
                 "multiplayer-rom",
                 "Multiplayer ROM",
                 preferences.rom.as_deref(),
                 "Made when the two files above are chosen",
-                "Picks a multiplayer ROM you built yourself, in place of the one made here",
+                "Picks a multiplayer ROM you built yourself, in place of the one made here"
+                    .to_owned(),
             ),
         };
         let text = match path {
@@ -1265,7 +1271,7 @@ impl Panel {
             Some(path) => display_name(path),
             None => missing.to_owned(),
         };
-        let tip = path.map_or_else(|| tooltip.to_owned(), |path| self.shown_path(path));
+        let tip = path.map_or_else(|| tooltip.clone(), |path| self.shown_path(path));
         div()
             .flex()
             .flex_col()

@@ -94,6 +94,8 @@ typedef char WorldStashSizeCheck[sizeof(struct WorldStash) <= MP_OBJECT_IDS_ADDR
 
 extern u16 gRandomSeed16;
 extern void addMoreObjects(void);
+// A function only the engine's own file can name; each version's file says where it is.
+extern void interceptBgSegLoad(u8 **segStart, u8 **segEnd);
 
 static void read_trackers(f32 *out) {
     s32 i = 0;
@@ -238,16 +240,16 @@ void mp_world_end(void) {
     gRandomSeed16 = sStash->randomSeed;
 }
 
-s32 mp_world_total_stars(s32 own) {
+static s32 mp_world_total_stars(s32 own) {
     return sStash->active ? sStash->sessionTotalStars : own;
 }
 
-s32 mp_world_red_stars(s32 own) {
+static s32 mp_world_red_stars(s32 own) {
     return sStash->active ? sStash->sessionRedStars : own;
 }
 
 // The session's clock, fixed when it began, so day or night is the same for everyone.
-s32 mp_world_take_rtc(u8 *hour, u8 *minute, u8 *second) {
+static s32 mp_world_take_rtc(u8 *hour, u8 *minute, u8 *second) {
     if (!sStash->active) {
         return FALSE;
     }
@@ -257,10 +259,46 @@ s32 mp_world_take_rtc(u8 *hour, u8 *minute, u8 *second) {
     return TRUE;
 }
 
-// Wrappers for each generation entry point. MP_WORLD renames a call to one of these, so a call site
-// costs no more space: some sit in vanilla functions' fixed-size areas.
+// Run by updateRTC before anything of its own (Multiplayer/hooks.asm). With a session's clock
+// there is nothing left for it to do: the hour is the one a player's game ended with, and day
+// or night follows from it as at the end of updateRTC, in every version of the engine.
+s32 mp_update_rtc(void) {
+    if (!mp_world_take_rtc(&rtcHour, &rtcMinute, &rtcSecond)) {
+        return FALSE;
+    }
+    nightTimeButReal = nightTime = rtcHour <= 4 || rtcHour >= 20;
+    if (nightModeSetting >= 2) {
+        nightTime ^= TRUE;
+    }
+    return TRUE;
+}
 
-// load_area calls this instead of postObjectLoadPass; see AI/ai.asm.
+// The engine's get_red_star_count, which jumps here (Multiplayer/hooks.asm): the same count,
+// from the same two bytes of the save, unless a level is generating with a session's.
+s32 mp_get_red_star_count(s32 fileIndex) {
+    return mp_world_red_stars(
+        save_file_masked_get_course_star_count(fileIndex, (COURSE_MAX - 1) + 15 - 1, 0xF8)
+        + save_file_masked_get_course_star_count(fileIndex, (COURSE_MAX - 1) + 15, 0xFF));
+}
+
+// troll_geo_layout calls this where it called save_file_get_total_star_count.
+s32 mp_geo_total_stars(s32 fileIndex, s32 minCourse, s32 maxCourse) {
+    return mp_world_total_stars(save_file_get_total_star_count(fileIndex, minCourse, maxCourse));
+}
+
+// Each generation step, run with the session's world. The game calls these where it called
+// the steps themselves (Multiplayer/hooks.asm).
+#define MP_WORLD_CALL(call) \
+    do {                    \
+        mp_world_begin();   \
+        call;               \
+        mp_world_end();     \
+    } while (0)
+
+void mp_intercept_bg_seg_load(u8 **segStart, u8 **segEnd) {
+    MP_WORLD_CALL(interceptBgSegLoad(segStart, segEnd));
+}
+
 void mp_post_object_load_pass(void) {
     MP_WORLD_CALL(postObjectLoadPass());
     mp_number_area_objects();
