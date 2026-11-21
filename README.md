@@ -63,7 +63,7 @@ What to know as you play:
 ## Playing
 
 1. Start `B3313 Extended Multiplayer.exe` and open **Play**.
-2. Under **Game**, choose your Super Mario 64 ROM and the B3313 patch. The panel checks both,
+2. Under **Game**, choose your Super Mario 64 ROM and a B3313 patch. The panel checks both,
    builds the multiplayer ROM and keeps it, and says which version of B3313 it is; this is
    needed once for each version you play.
 3. To join someone, copy the invite they sent you, select **Paste invite**, then **Join**. The

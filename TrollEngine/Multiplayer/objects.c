@@ -847,7 +847,7 @@ static void run_behavior(struct Object *obj) {
     }
 }
 
-// Every object's update goes through here instead of cur_obj_update; see Multiplayer/segment.asm.
+// Every object's update goes through here instead of cur_obj_update; see Multiplayer/hooks.asm.
 void mp_cur_obj_update(void) {
     struct Object *obj = gCurrentObject;
     struct MpCopy *copy = following(obj);

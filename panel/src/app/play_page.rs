@@ -34,7 +34,7 @@ const LOOK_INTERVAL: Duration = Duration::from_secs(2);
 /// Things that happened in the session, listed newest first.
 const EVENTS: usize = 8;
 /// Where the game comes from and what runs it, under the Game heading here and on the Overview.
-pub(super) const GAME_MEANING: &str = "Built once from your own Super Mario 64 ROM and the B3313 \
+pub(super) const GAME_MEANING: &str = "Built once from your own Super Mario 64 ROM and a B3313 \
                                        patch, and run in Parallel Launcher's emulator.";
 
 /// A file the Game card asks the player for.
@@ -366,7 +366,7 @@ impl Panel {
         } else if self.play.building {
             Some("The game is still being built")
         } else if self.preferences.rom.is_none() {
-            Some("Set up the game first: choose your Super Mario 64 ROM and the B3313 patch")
+            Some("Set up the game first: choose your Super Mario 64 ROM and a B3313 patch")
         } else if self.play.emulators.is_empty() && self.play.launcher.is_none() {
             Some("Install Parallel Launcher, or start the multiplayer ROM yourself")
         } else if !self.play.emulators.is_empty() && self.play.emulator().is_none() {

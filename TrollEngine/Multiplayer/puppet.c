@@ -578,7 +578,7 @@ static Gfx *with_player_colors(Gfx *gfx) {
 }
 
 // These two stand in for the game's own in Mario's model, where it reads that state: once for
-// how see-through to draw him, and once for which of his bodies to draw. See segment.asm.
+// how see-through to draw him, and once for which of his bodies to draw. See hooks.asm.
 Gfx *mp_mario_set_alpha(s32 callContext, struct GraphNode *node, Mat4 *mtx) {
     if (gCurGraphNodeCamFrustum != NULL) {
         sPrivate->fov = gCurGraphNodeCamFrustum->fov;

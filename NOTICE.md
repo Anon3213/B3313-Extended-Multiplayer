@@ -2,7 +2,7 @@
 
 B3313 Extended Multiplayer is under the BSD Zero Clause License; see `LICENSE.txt`. It is not
 affiliated with or endorsed by Nintendo or by the B3313 team. It contains no ROM: a legal copy
-of Super Mario 64 and the B3313 patch are needed to use it.
+of Super Mario 64 and a B3313 patch are needed to use it.
 
 Two things it is built from are other people's work, under their own terms.
 

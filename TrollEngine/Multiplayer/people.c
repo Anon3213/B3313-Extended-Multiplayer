@@ -374,7 +374,7 @@ void mp_render_hud(void) {
 }
 
 // The game reads its controllers through this, in place of the library's own routine: see
-// where it is hooked in, beside the other hooks. While the player types a line of chat it
+// where it is hooked in, Multiplayer/hooks.asm. While the player types a line of chat it
 // shows the game no button held and no stick moved, whatever is: the keys they type with may
 // be the ones they play with, and Mario is not to run about for a "w", nor the game to pause
 // for the Enter that sends the line.
