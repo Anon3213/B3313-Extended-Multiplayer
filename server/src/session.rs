@@ -160,8 +160,9 @@ pub struct Session {
     progress: SessionProgress,
     people: People,
     /// Removals the host or a moderator asked for in the chat, for `serve` to carry out: it
-    /// holds the socket and the bans.
-    orders: Vec<Command>,
+    /// holds the socket and the bans. A removal is with the place in the order of joining
+    /// of the player it is of: a number is another player's once its own has left.
+    orders: Vec<(Command, Option<u64>)>,
 }
 
 impl Session {
@@ -631,10 +632,11 @@ impl Session {
                 if matches!(command, ChatCommand::Ban(_)) {
                     self.may_ban_address_of(actor, target)?;
                 }
-                self.orders.push(match command {
+                let order = match command {
                     ChatCommand::Ban(_) => Command::Ban(target),
                     _ => Command::Kick(target),
-                });
+                };
+                self.orders.push((order, self.joined_of(target)));
             }
             ChatCommand::Mod(target) | ChatCommand::Unmod(target) => {
                 let target = self.people.find(target)?;
@@ -650,7 +652,7 @@ impl Session {
                     self.events.push(Event::Named(actor, name));
                 }
             }
-            ChatCommand::End => self.orders.push(Command::End),
+            ChatCommand::End => self.orders.push((Command::End, None)),
         }
         Ok(())
     }
@@ -688,9 +690,23 @@ impl Session {
         });
     }
 
+    /// Where the player numbered `player` is in the order of joining, if one is here.
+    fn joined_of(&self, player: PlayerId) -> Option<u64> {
+        let slot = self.players.get(usize::from(player.get()))?;
+        slot.as_ref().map(|player| player.joined)
+    }
+
     /// The removals asked for in the chat since the last call, for `serve` to carry out.
+    /// Not one of a player who has left since: whoever has their number now was not meant.
     pub fn take_orders(&mut self) -> Vec<Command> {
-        std::mem::take(&mut self.orders)
+        let orders = std::mem::take(&mut self.orders);
+        let still_meant = |(order, joined): (Command, Option<u64>)| match order {
+            Command::Kick(player) | Command::Ban(player) => {
+                (self.joined_of(player) == joined).then_some(order)
+            }
+            _ => Some(order),
+        };
+        orders.into_iter().filter_map(still_meant).collect()
     }
 
     /// Everyone listed, with their roles and names.
@@ -2498,6 +2514,14 @@ mod tests {
         // The host may: Luigi goes with Toad, which removing the player then sees to.
         say(&mut session, 0, 3, "/ban Toad", now);
         assert_eq!(session.take_orders(), [Command::Ban(id(4))]);
+
+        // A removal is of the player it named. If they leave before it is carried out and a
+        // newcomer has their number, the newcomer is not the one removed.
+        say(&mut session, 0, 4, "/kick Toad", now);
+        send(&mut session, from_address_of(1), &Packet::Bye, now);
+        send(&mut session, client(7), &hello(), now);
+        assert!(session.is_player(client(7)));
+        assert_eq!(session.take_orders(), []);
     }
 
     #[test]
