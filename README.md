@@ -73,6 +73,9 @@ What to know as you play:
 
 In the game, hold the D-pad down to see who is in the session.
 
+Pick your Mario's colors from the swatches on **Play**, or type `/color` in the chat for the
+list and `/color green` to wear one. Everyone sees you in them, and so do you.
+
 ### Versions of the game
 
 The versions of B3313 have different levels, so players can only share a session if their
@@ -85,9 +88,6 @@ files both called "1.0.2 hotfix 3" can be different versions. It says which one 
 the game is ready, and **Play** shows it under **Game** from then on, so players can compare
 before they join. Each version has a multiplayer ROM and a save of its own, so you can set up
 more than one and change between them by choosing another patch.
-
-Pick your Mario's colors from the swatches on **Play**, or type `/color` in the chat for the
-list and `/color green` to wear one. Everyone sees you in them, and so do you.
 
 ### Who is who
 
