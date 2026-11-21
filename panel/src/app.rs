@@ -241,6 +241,22 @@ struct Running {
     port: RouterPort,
 }
 
+/// What the panel has in hand for a server that is not running it yet, or is waiting to
+/// hear back about.
+#[derive(Debug, Default)]
+struct Pending {
+    /// The host password of a server stopped to be started again, for the next to take.
+    password: Option<String>,
+    /// The router's port of a server stopped to be started again, with the address on this
+    /// network it leads to, for the next to keep.
+    port: Option<(SocketAddr, PortMap)>,
+    /// The address the router has been asked to open a port for and has not yet answered.
+    port_asked: Option<SocketAddr>,
+    /// Bans and unbans asked for from the panel that the server has yet to report: news of
+    /// one beyond these is of someone else's doing, as a moderator's in the game.
+    bans_asked: u32,
+}
+
 /// The server's port on its owner's router.
 #[derive(Debug)]
 enum RouterPort {
@@ -304,13 +320,7 @@ pub struct Panel {
     page: Page,
     address: Entity<TextInput>,
     running: Option<Running>,
-    /// The host password of a server stopped to be started again, for the next to take.
-    restart_password: Option<String>,
-    /// The router's port of a server stopped to be started again, with the address on this
-    /// network it leads to, for the next to keep.
-    restart_port: Option<(SocketAddr, PortMap)>,
-    /// The address the router has been asked to open a port for and has not yet answered.
-    port_asked: Option<SocketAddr>,
+    pending: Pending,
     dashboard: Dashboard,
     bans: BanList,
     ban_input: Entity<TextInput>,
@@ -453,9 +463,7 @@ impl Panel {
             page: Page::from(preferences.start_page),
             address,
             running: None,
-            restart_password: None,
-            restart_port: None,
-            port_asked: None,
+            pending: Pending::default(),
             dashboard: Dashboard::new(now).with_time_of_day(system::local_time_of_day()),
             bans: BanList::default(),
             ban_input,
@@ -575,7 +583,7 @@ impl Panel {
         // The router's port of a server stopped to be started again: kept open for this
         // one if it listens where that one did, and closed as this returns if it does not
         // start, or listens elsewhere.
-        let kept_port = self.restart_port.take();
+        let kept_port = self.pending.port.take();
         let Some(config) = self.settings_to_serve(cx) else {
             return;
         };
@@ -586,7 +594,7 @@ impl Panel {
         }
         // A server started again keeps the host password it made up before, which the
         // host's own bridge still holds; the settings' own, if they have one, stands.
-        let made_up = self.restart_password.take().unwrap_or_default();
+        let made_up = self.pending.password.take().unwrap_or_default();
         let host_password = if config.host_password.is_empty() {
             made_up
         } else {
@@ -650,17 +658,17 @@ impl Panel {
         // The router was asked for this already, for a server since stopped, and has yet to
         // answer: that answer is this server's. A second asking would make two keepers of
         // one port, and the first to go would close it under the other.
-        if self.port_asked == Some(local) {
+        if self.pending.port_asked == Some(local) {
             return;
         }
-        self.port_asked = Some(local);
+        self.pending.port_asked = Some(local);
         let asked = cx
             .background_executor()
             .spawn(async move { port_map::open(local) });
         cx.spawn(async move |this, cx| {
             let answer = asked.await;
             let _ = this.update(cx, |this, cx| {
-                this.port_asked = None;
+                this.pending.port_asked = None;
                 let waiting = |running: &&mut Running| {
                     running.reach == Reach::Network(local)
                         && matches!(running.port, RouterPort::Asking)
@@ -789,12 +797,12 @@ impl Panel {
                 if let (RouterPort::Open(map), Reach::Network(local)) =
                     (running.port, running.reach)
                 {
-                    self.restart_port = Some((local, map));
+                    self.pending.port = Some((local, map));
                 }
                 // Only one the panel made up: the settings' own is theirs to change, and
                 // one taken out of them to revoke it must not live on in the next server.
                 if running.config.host_password.is_empty() {
-                    self.restart_password = Some(running.host.host_password().to_owned());
+                    self.pending.password = Some(running.host.host_password().to_owned());
                 }
                 running.host.stop_to_restart()
             } else {
@@ -893,10 +901,10 @@ impl Panel {
                         });
                     }
                     Event::Banned(_, ip) | Event::AddressBanned(ip) => {
-                        self.show_undoable(event.to_string(), Undo::Unban(*ip));
+                        self.report_ban(event.to_string(), Undo::Unban(*ip));
                     }
                     Event::Unbanned(ip) => {
-                        self.show_undoable(event.to_string(), Undo::Reban(*ip));
+                        self.report_ban(event.to_string(), Undo::Reban(*ip));
                     }
                     Event::CommandFailed(message) => {
                         self.show_toast(ToastTone::Error, message.clone());
@@ -1027,6 +1035,12 @@ impl Panel {
                 }
             }
         };
+        if matches!(
+            command,
+            Command::Ban(_) | Command::BanAddress(_) | Command::Unban(_)
+        ) {
+            self.pending.bans_asked += 1;
+        }
         if let Some(running) = &self.running {
             running.host.send(command);
         }
@@ -1061,6 +1075,7 @@ impl Panel {
                 this.show_toast(ToastTone::Error, gone);
                 cx.notify();
             } else if let Some(running) = &this.running {
+                this.pending.bans_asked += 1;
                 running.host.send(Command::Ban(player));
             }
         });
@@ -1117,6 +1132,7 @@ impl Panel {
 
     /// Refuses `ip`, removing anyone playing from it, without asking.
     fn ban_now(&mut self, ip: IpAddr) {
+        self.pending.bans_asked += 1;
         match &self.running {
             Some(running) => running.host.send(Command::BanAddress(ip)),
             None => self.handle(Notice::Event(Event::AddressBanned(ip))),
@@ -1124,6 +1140,7 @@ impl Panel {
     }
 
     fn unban(&mut self, ip: IpAddr, cx: &mut Context<Self>) {
+        self.pending.bans_asked += 1;
         match &self.running {
             Some(running) => running.host.send(Command::Unban(ip)),
             None => self.handle(Notice::Event(Event::Unbanned(ip))),
@@ -1529,6 +1546,24 @@ impl Panel {
             self.history.remember(ToastTone::Success, &text);
         } else {
             self.show_toast(ToastTone::Success, text);
+        }
+    }
+
+    /// Reports a ban or an unban, with its Undo. One the user asked for from the panel takes
+    /// the place of whatever message is up; one of someone else's doing, as a moderator's in
+    /// the game, does not take away a message whose own Undo the user may still want, and is
+    /// kept in the list behind the bell.
+    fn report_ban(&mut self, text: String, undo: Undo) {
+        let is_own = self.pending.bans_asked > 0;
+        self.pending.bans_asked = self.pending.bans_asked.saturating_sub(1);
+        let holds_undo = self
+            .toast
+            .as_ref()
+            .is_some_and(|shown| shown.undo.is_some() && shown.leaving.is_none());
+        if holds_undo && !is_own {
+            self.history.remember(ToastTone::Success, &text);
+        } else {
+            self.show_undoable(text, undo);
         }
     }
 
