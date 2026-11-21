@@ -204,7 +204,13 @@ pub fn run(
     };
     let mailbox = Mailbox::new(ram);
     events(Event::Joining);
-    let joined = Connection::join_unless(options.server, &options.password, JOIN_TIMEOUT, stop);
+    let joined = Connection::join_unless(
+        options.server,
+        &options.password,
+        mailbox.game()?,
+        JOIN_TIMEOUT,
+        stop,
+    );
     let mut connection = match joined {
         Ok(connection) => connection,
         // Left before the server answered.
@@ -344,8 +350,15 @@ fn rejoin<M: ProcessMemory>(
         // To a server that is there again but still has this player down as here: so the
         // name they had is free when they ask for it. One that started again ignores it.
         link.connection.leave();
-        let attempt =
-            Connection::join_unless(options.server, &options.password, REJOIN_ATTEMPT, stop);
+        // Read again each time: the player may have started another game meanwhile.
+        let game = mailbox.game().map_err(End::GameClosed)?;
+        let attempt = Connection::join_unless(
+            options.server,
+            &options.password,
+            game,
+            REJOIN_ATTEMPT,
+            stop,
+        );
         match attempt {
             Ok(joined) => break joined,
             Err(error) if error.kind() == io::ErrorKind::Interrupted => return Err(End::Left),
@@ -362,7 +375,8 @@ fn rejoin<M: ProcessMemory>(
                 }
                 thread::sleep(REJOIN_ATTEMPT.saturating_sub(now.elapsed()));
             }
-            // A password that is no longer right, a session now full, another version.
+            // A password that is no longer right, a session now full, another version, or a
+            // session that now plays another game.
             Err(error) => return Err(End::Refused(error)),
         }
     };
@@ -1099,7 +1113,7 @@ mod tests {
                 chat_seconds: 8,
             };
             let mut people = People::new(&options);
-            let mut connection = Connection::join(server, "")?;
+            let mut connection = Connection::join(server, "", 0)?;
             let me = connection.player();
             let (choose, input) = mpsc::channel();
             let wears = |roster: &[RosterEntry], name: &str| {
@@ -1201,7 +1215,7 @@ mod tests {
             make_ready(&process)?;
             let mailbox = Mailbox::new(N64Ram::new(&process, 0));
             let mut people = People::new(&options(server));
-            let mut connection = Connection::join(server, "")?;
+            let mut connection = Connection::join(server, "", 0)?;
             let me = connection.player();
             let now = Instant::now();
             let view = || raw(&process, CHAT_SHOWN, 4);
@@ -1305,7 +1319,7 @@ mod tests {
             make_ready(&process)?;
             let mailbox = Mailbox::new(N64Ram::new(&process, 0));
             let mut people = People::new(&options(server));
-            let mut connection = Connection::join(server, "")?;
+            let mut connection = Connection::join(server, "", 0)?;
             let me = connection.player();
             let now = Instant::now();
             let count = || Ok::<_, io::Error>(raw(&process, CHAT_COUNT, 4)?.last().copied());
@@ -1369,7 +1383,7 @@ mod tests {
                 ..options(server)
             };
             let mut people = People::new(&options);
-            let mut connection = Connection::join(server, "")?;
+            let mut connection = Connection::join(server, "", 0)?;
             let mut session = Session::new(Instant::now());
             // As if the session had given this game its world, which the first server did.
             session.world = Some(Box::new([7; WORLD_INPUTS_SIZE]));
@@ -1438,7 +1452,7 @@ mod tests {
             let mailbox = Mailbox::new(N64Ram::new(&process, 0));
             let options = options(server);
             let mut people = People::new(&options);
-            let mut connection = Connection::join(server, "")?;
+            let mut connection = Connection::join(server, "", 0)?;
             let mut session = Session::new(Instant::now());
             let me = connection.player();
             let other = PlayerId::new(1).ok_or_else(|| io::Error::other("no player 1"))?;
@@ -1664,7 +1678,7 @@ mod tests {
             make_ready(&process)?;
             let mailbox = Mailbox::new(N64Ram::new(&process, 0));
             let mut people = People::new(&options(server));
-            let mut connection = Connection::join(server, "")?;
+            let mut connection = Connection::join(server, "", 0)?;
             let mut session = Session::new(Instant::now());
             let mut advance = |session: &mut Session| {
                 let now = Instant::now();
@@ -1699,7 +1713,7 @@ mod tests {
             make_ready(&process)?;
             let mailbox = Mailbox::new(N64Ram::new(&process, 0));
             let mut people = People::new(&options(server));
-            let mut connection = Connection::join(server, "")?;
+            let mut connection = Connection::join(server, "", 0)?;
             let mut session = Session::new(Instant::now());
             let lease = || -> io::Result<Option<u8>> {
                 Ok(raw(&process, BRIDGE_LEASE, 4)?.last().copied())
@@ -1756,8 +1770,8 @@ mod tests {
             let process = game();
             let mailbox = Mailbox::new(N64Ram::new(&process, 0));
             let mut people = People::new(&options(server));
-            let mut connection = Connection::join(server, "")?;
-            let mut other = Connection::join(server, "")?;
+            let mut connection = Connection::join(server, "", 0)?;
+            let mut other = Connection::join(server, "", 0)?;
             let mut session = Session::new(Instant::now());
 
             // Long enough for the other player, who is elsewhere to a game in no level, to be

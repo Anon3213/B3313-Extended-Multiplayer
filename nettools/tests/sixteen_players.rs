@@ -40,13 +40,13 @@ fn await_snapshot(
 
 fn run(server: SocketAddr) -> io::Result<()> {
     let mut players = (0..16)
-        .map(|_| Connection::join(server, ""))
+        .map(|_| Connection::join(server, "", 0))
         .collect::<io::Result<Vec<_>>>()?;
     for player in &mut players {
         player.send_state(marked_state(player.player()))?;
     }
 
-    let latecomer = Connection::join(server, "").err();
+    let latecomer = Connection::join(server, "", 0).err();
     let refusal = latecomer.map(|error| error.to_string());
     assert_eq!(refusal.as_deref(), Some("the session is full"));
 

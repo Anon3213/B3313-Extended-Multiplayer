@@ -63,15 +63,34 @@ fn a_datagram_too_long_to_be_a_packet_is_dropped() -> io::Result<()> {
         let stranger = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0))?;
         stranger.send_to(&[0xA5; 2000], server)?;
 
-        Connection::join(server, "").map(|_| ())
+        Connection::join(server, "", 0).map(|_| ())
+    })
+}
+
+#[test]
+fn a_bridge_whose_game_is_another_version_is_told_which_the_session_plays() -> io::Result<()> {
+    with_server(|server| {
+        let _first = Connection::join(server, "", 2)?;
+        let Err(error) = Connection::join(server, "", 1) else {
+            return Err(io::Error::other("joined a session playing another game"));
+        };
+        // Both games by name, the session's first.
+        let told = error.to_string();
+        let session = told.find("B3313 1.0.2 hotfix 3,");
+        let own = told.find("B3313 Unabandoned A2 Anniversary Edition");
+        assert!(session.is_some() && session < own, "{told}");
+
+        // The same game, and one that is not known, are let in.
+        Connection::join(server, "", 2)?;
+        Connection::join(server, "", 0).map(|_| ())
     })
 }
 
 #[test]
 fn two_bridges_see_each_other() -> io::Result<()> {
     with_server(|server| {
-        let mut first = Connection::join(server, "")?;
-        let mut second = Connection::join(server, "")?;
+        let mut first = Connection::join(server, "", 0)?;
+        let mut second = Connection::join(server, "", 0)?;
         // In the same level and area, so each gets the other's every state.
         second.send_state(standing_at(0.0))?;
         first.send_state(standing_at(7.0))?;
@@ -93,7 +112,7 @@ fn two_bridges_see_each_other() -> io::Result<()> {
 #[test]
 fn a_ping_times_the_round_trip_and_the_report_counts_the_link() -> io::Result<()> {
     with_server(|server| {
-        let mut connection = Connection::join(server, "")?;
+        let mut connection = Connection::join(server, "", 0)?;
         let start = Instant::now();
         connection.ping_if_due(start)?;
         // Not due yet, so nothing is sent.
@@ -129,8 +148,8 @@ fn standing_at(x: f32) -> b3313_protocol::PlayerState {
 #[test]
 fn a_hit_sent_over_and_over_reaches_its_target_once() -> io::Result<()> {
     with_server(|server| {
-        let mut attacker = Connection::join(server, "")?;
-        let mut target = Connection::join(server, "")?;
+        let mut attacker = Connection::join(server, "", 0)?;
+        let mut target = Connection::join(server, "", 0)?;
         attacker.send_state(standing_at(0.0))?;
         target.send_state(standing_at(100.0))?;
         // Let both states reach the server before the hit is judged.
@@ -196,7 +215,7 @@ struct Chatter {
 
 impl Chatter {
     fn join(server: std::net::SocketAddr, name: &str, host_password: &str) -> io::Result<Self> {
-        let mut connection = Connection::join(server, "")?;
+        let mut connection = Connection::join(server, "", 0)?;
         connection.introduce(Name::new(name).as_ref(), None, host_password)?;
         Ok(Self {
             connection,
@@ -357,7 +376,7 @@ fn a_server_that_is_stopped_tells_its_players_the_session_has_ended() -> io::Res
     thread::scope(|scope| {
         scope.spawn(|| serve(&socket, Config::default(), &stop, |_| {}));
         let stopping = StopOnDrop(&stop);
-        let mut player = Connection::join(server, "")?;
+        let mut player = Connection::join(server, "", 0)?;
 
         drop(stopping);
 
@@ -404,8 +423,8 @@ fn an_outfit_a_bridge_asks_to_wear_is_shown_to_everyone() -> io::Result<()> {
 #[test]
 fn a_kicked_bridge_is_told_and_the_others_stay() -> io::Result<()> {
     with_console_server(|server, commands| {
-        let mut stayer = Connection::join(server, "")?;
-        let mut kicked = Connection::join(server, "")?;
+        let mut stayer = Connection::join(server, "", 0)?;
+        let mut kicked = Connection::join(server, "", 0)?;
         commands
             .send(Command::Kick(kicked.player()))
             .map_err(io::Error::other)?;
@@ -430,8 +449,8 @@ fn a_kicked_bridge_is_told_and_the_others_stay() -> io::Result<()> {
 #[test]
 fn banning_an_address_removes_everyone_playing_from_it() -> io::Result<()> {
     with_console_server(|server, commands| {
-        let mut first = Connection::join(server, "")?;
-        let mut second = Connection::join(server, "")?;
+        let mut first = Connection::join(server, "", 0)?;
+        let mut second = Connection::join(server, "", 0)?;
         commands
             .send(Command::BanAddress(Ipv4Addr::LOCALHOST.into()))
             .map_err(io::Error::other)?;
@@ -445,7 +464,7 @@ fn banning_an_address_removes_everyone_playing_from_it() -> io::Result<()> {
 #[test]
 fn a_bridge_with_nothing_to_send_stays_in_the_session() -> io::Result<()> {
     with_server(|server| {
-        let mut idle = Connection::join(server, "")?;
+        let mut idle = Connection::join(server, "", 0)?;
         let timeout = Config::default().player_timeout;
         let deadline = Instant::now() + timeout + Duration::from_secs(1);
         while Instant::now() < deadline {
@@ -454,7 +473,7 @@ fn a_bridge_with_nothing_to_send_stays_in_the_session() -> io::Result<()> {
             thread::sleep(Duration::from_millis(100));
         }
 
-        let mut newcomer = Connection::join(server, "")?;
+        let mut newcomer = Connection::join(server, "", 0)?;
         assert_ne!(
             newcomer.player(),
             idle.player(),

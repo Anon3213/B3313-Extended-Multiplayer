@@ -1,7 +1,20 @@
 # Changelog
 
-What each version changed, newest first. Versions of the same protocol play together: every
-version so far joins every other's server.
+What each version changed, newest first. Versions of the same protocol play together:
+those from 0.1.0 to 0.1.4 join each other's servers, and a version that does not play with
+the ones before it says so.
+
+## Not yet released
+
+- **The mod plays three versions of B3313:** Unabandoned A2 Anniversary Edition, 1.0.2
+  hotfix 3, and 1.0.2 hotfix 3 with Unabandoned tweaks.
+- **Everyone in a session plays the same version.** The first player in decides which, and
+  a session everyone has left takes whichever comes next.
+- A player whose game is another version is not let in, and is told which version the
+  session is playing and which theirs is. The server's log says so too.
+
+This version does not play with earlier ones: the panel, the bridge and the server must all
+be this version.
 
 ## 0.1.4
 

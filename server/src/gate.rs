@@ -116,19 +116,23 @@ impl Gate {
                 let reply = session.receive(from, inner, now)?;
                 self.seal(from, &reply)
             }
-            Packet::Hello { cookie, handshake } => {
-                self.hello(session, from, cookie, &handshake, now)
-            }
+            Packet::Hello {
+                cookie,
+                game,
+                handshake,
+            } => self.hello(session, from, cookie, game, &handshake, now),
             // Game packets must be sealed; the rest are the server's own.
             _ => None,
         }
     }
 
+    /// Answers a `Hello` from `from`, which gave `cookie` and plays `game`.
     fn hello(
         &mut self,
         session: &mut Session,
         from: SocketAddr,
         cookie: u64,
+        game: u8,
         handshake: &[u8],
         now: Instant,
     ) -> Option<Vec<u8>> {
@@ -157,11 +161,13 @@ impl Gate {
             self.record_failure(from.ip(), now);
             return Some(Packet::Rejected(RejectReason::WrongPassword).encode());
         };
+        // The game goes on to the session, which admits only those playing the same one.
         let join = Packet::Hello {
             cookie: 0,
+            game,
             handshake: Vec::new(),
         };
-        // A Welcome, or the session is full.
+        // A Welcome, or why not: the session is full, or plays another game.
         let admission = session.receive(from, join, now)?;
         let (channel, accept) = responder.finish(&admission.encode()).ok()?;
         if matches!(admission, Packet::Welcome { .. }) {
@@ -293,6 +299,7 @@ mod tests {
     ) -> (u64, [u8; 16]) {
         let hello = Packet::Hello {
             cookie: 0,
+            game: 0,
             handshake: vec![],
         };
         match decode(gate.receive(session, from, &hello.encode(), now)) {
@@ -310,10 +317,25 @@ mod tests {
         password: &str,
         now: Instant,
     ) -> Result<(Packet, Channel), Option<Packet>> {
+        join_playing(gate, session, from, (password, 0), now)
+    }
+
+    /// As `join`, by a client whose game is the version of B3313 numbered `playing`.
+    fn join_playing(
+        gate: &mut Gate,
+        session: &mut Session,
+        from: SocketAddr,
+        (password, playing): (&str, u8),
+        now: Instant,
+    ) -> Result<(Packet, Channel), Option<Packet>> {
         let (cookie, salt) = challenge(gate, session, from, now);
         let key = derive_key(password, &salt).map_err(|_| None)?;
         let (initiator, handshake) = Initiator::start(&key).map_err(|_| None)?;
-        let hello = Packet::Hello { cookie, handshake };
+        let hello = Packet::Hello {
+            cookie,
+            game: playing,
+            handshake,
+        };
         let reply = decode(gate.receive(session, from, &hello.encode(), now));
         let Some(Packet::Accept { handshake }) = reply else {
             return Err(reply);
@@ -388,6 +410,7 @@ mod tests {
         for (from, guess) in [(client(0), cookie ^ 2), (client(1), cookie)] {
             let hello = Packet::Hello {
                 cookie: guess,
+                game: 0,
                 handshake: vec![1; 48],
             };
             let reply = decode(gate.receive(&mut session, from, &hello.encode(), now));
@@ -398,6 +421,7 @@ mod tests {
         let stale = now + COOKIE_PERIOD * 2;
         let old = Packet::Hello {
             cookie,
+            game: 0,
             handshake: vec![1; 48],
         };
         let reply = decode(gate.receive(&mut session, client(0), &old.encode(), stale));
@@ -427,6 +451,31 @@ mod tests {
             state: [0; PLAYER_STATE_SIZE],
         };
         assert_eq!(gate.seal(client(1), &state), None);
+        Ok(())
+    }
+
+    #[test]
+    fn a_session_playing_another_game_says_which_inside_the_handshake() -> TestResult {
+        let now = Instant::now();
+        let mut gate = Gate::new(&with_password("hunter2"), now)?;
+        let mut session = Session::new();
+        let mut answer_to = |port: u16, game: u8| {
+            join_playing(
+                &mut gate,
+                &mut session,
+                client(port),
+                ("hunter2", game),
+                now,
+            )
+            .map(|(answer, _)| answer)
+            .ok()
+        };
+        assert_eq!(answer_to(0, 2), Some(Packet::Welcome { player: id(0) }));
+        let refused = Packet::Rejected(RejectReason::WrongGame(2));
+        assert_eq!(answer_to(1, 3), Some(refused));
+        assert_eq!(answer_to(2, 2), Some(Packet::Welcome { player: id(1) }));
+        // The refused client got no channel.
+        assert_eq!(gate.seal(client(1), &Packet::Ping { id: 1 }), None);
         Ok(())
     }
 
@@ -464,7 +513,7 @@ mod tests {
         let mut session = Session::new();
         let mut answer = |data: &[u8]| decode(gate.receive(&mut session, client(0), data, now));
         assert_eq!(answer(b"hello?"), None);
-        assert_eq!(answer(b"B3NP\x19\x04\0"), None);
+        assert_eq!(answer(b"B3NP\x1A\x04\0"), None);
         assert_eq!(
             answer(b"B3NP\x00\x01"),
             Some(Packet::Rejected(RejectReason::WrongVersion))
@@ -484,6 +533,7 @@ mod tests {
         let mut session = Session::new();
         let hello = Packet::Hello {
             cookie: 0,
+            game: 0,
             handshake: vec![],
         }
         .encode();

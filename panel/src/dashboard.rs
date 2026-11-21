@@ -137,6 +137,8 @@ impl Kind {
             | Event::TimedOut(_)
             | Event::WorldSet(_)
             | Event::Named(..)
+            // Nothing is wrong but the version of the game they chose.
+            | Event::WrongGame { .. }
             | Event::Ended => Self::Session,
             Event::Kicked(_)
             | Event::Banned(..)
@@ -402,6 +404,8 @@ fn players_in(event: &Event) -> Vec<PlayerId> {
         | Event::Unbanned(_)
         | Event::Players(_)
         | Event::CommandFailed(_)
+        // Whoever was refused for their game never became a player.
+        | Event::WrongGame { .. }
         | Event::Ended => Vec::new(),
     }
 }
@@ -504,6 +508,7 @@ impl Dashboard {
             | Event::CommandFailed(_)
             | Event::ProgressAdded(..)
             | Event::Chat { .. }
+            | Event::WrongGame { .. }
             | Event::Ended => {}
         }
         let kind = Kind::of(event);

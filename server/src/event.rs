@@ -3,7 +3,7 @@
 
 use crate::movement::{MovementReport, Verdict};
 use b3313_protocol::metrics::{LinkReport, Timings};
-use b3313_protocol::{HitKind, Message, Name, PlayerId, Role};
+use b3313_protocol::{HitKind, Message, Name, PlayerId, Role, game};
 use std::fmt;
 use std::net::{IpAddr, SocketAddr};
 
@@ -110,6 +110,13 @@ pub enum Event {
     /// A bridge gave the host password while the second player named was the host; its player
     /// is an ordinary one.
     HostRefused(PlayerId, PlayerId),
+    /// Someone at `address` was not let in: their game is the version of B3313 numbered
+    /// `game`, and the session plays the one numbered `session`.
+    WrongGame {
+        address: SocketAddr,
+        game: u8,
+        session: u8,
+    },
     /// The session was ended, by the host in the chat or the server's owner at the console;
     /// the server stops after this.
     Ended,
@@ -186,7 +193,8 @@ impl fmt::Display for Event {
             Self::CoinsRefused(_)
             | Self::ProgressRefused(..)
             | Self::HostPasswordWrong(_)
-            | Self::HostRefused(..) => self.fmt_refusal(f),
+            | Self::HostRefused(..)
+            | Self::WrongGame { .. } => self.fmt_refusal(f),
             Self::Named(player, name) => {
                 write!(f, "Player {} is {}", player.get(), name.as_str())
             }
@@ -236,6 +244,18 @@ impl Event {
                 player.get(),
                 host.get(),
                 player.get()
+            ),
+            // No flag: nothing is wrong but the game they chose.
+            Self::WrongGame {
+                address,
+                game,
+                session,
+            } => write!(
+                f,
+                "A player at {address} was not let in: their game is {}, and the session is \
+                 playing {}",
+                game::describe(*game),
+                game::describe(*session)
             ),
             _ => Ok(()),
         }

@@ -59,7 +59,8 @@ fn simulate_client(
     area: u8,
     observe: bool,
 ) -> io::Result<ClientResult> {
-    let mut connection = Connection::join(target.server, &target.password)?;
+    // No game: a simulated bridge joins a session whichever one it plays.
+    let mut connection = Connection::join(target.server, &target.password, 0)?;
     let start = Instant::now();
     let mut interpolator = Interpolator::default();
     let mut motion = MotionMeter::new(start, area);

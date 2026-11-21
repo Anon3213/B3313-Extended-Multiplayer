@@ -66,6 +66,9 @@ pub const SERVER_NAME: &str = "Server";
 #[derive(Debug)]
 struct Player {
     address: SocketAddr,
+    /// The version of B3313 this player's game is, as `b3313_protocol::game` numbers them, or
+    /// 0 if their bridge did not know.
+    game: u8,
     /// Order of joining; the lowest present is the session owner.
     joined: u64,
     last_heard: Instant,
@@ -229,7 +232,7 @@ impl Session {
             (Packet::Hello { .. }, Some(index)) => {
                 Self::id(index).map(|player| Packet::Welcome { player })
             }
-            (Packet::Hello { .. }, None) => Some(self.admit(from, now)),
+            (Packet::Hello { game, .. }, None) => Some(self.admit(from, game, now)),
             (Packet::State { sequence, state }, Some(index)) => {
                 self.take_state(index, sequence, state, now);
                 None
@@ -367,7 +370,26 @@ impl Session {
         self.players.get(index)?.as_ref()?.ack(stream)
     }
 
-    fn admit(&mut self, address: SocketAddr, now: Instant) -> Packet {
+    /// The version of B3313 the session plays: that of the players in it now, the first of
+    /// them whose game is known. With nobody in it whose game is known it plays none yet, so
+    /// a session everyone has left takes whichever game comes next.
+    fn game(&self) -> Option<u8> {
+        let mut games = self.players.iter().flatten().map(|player| player.game);
+        games.find(|&game| game != 0)
+    }
+
+    fn admit(&mut self, address: SocketAddr, game: u8, now: Instant) -> Packet {
+        // Before a place is looked for: of a full session playing another game, the game is
+        // what the newcomer can do something about. A game that is not known is let in, as
+        // nothing says it is another.
+        if let Some(session) = self.game().filter(|&session| game != 0 && session != game) {
+            self.events.push(Event::WrongGame {
+                address,
+                game,
+                session,
+            });
+            return Packet::Rejected(RejectReason::WrongGame(session));
+        }
         let limit = usize::from(self.config.max_players);
         let free = self.players.iter().take(limit).position(Option::is_none);
         let Some((index, player)) = free.and_then(|index| Some((index, Self::id(index)?))) else {
@@ -376,6 +398,7 @@ impl Session {
         if let Some(slot) = self.players.get_mut(index) {
             *slot = Some(Player {
                 address,
+                game,
                 joined: self.joins,
                 last_heard: now,
                 latest: None,
@@ -1222,8 +1245,14 @@ mod tests {
 
     /// What the gate passes on once a stranger's handshake checks out.
     fn hello() -> Packet {
+        hello_playing(0)
+    }
+
+    /// The same, from a bridge whose game is the version of B3313 numbered `game`.
+    fn hello_playing(game: u8) -> Packet {
         Packet::Hello {
             cookie: 0,
+            game,
             handshake: vec![],
         }
     }
@@ -1267,6 +1296,92 @@ mod tests {
         assert_eq!(
             send(&mut session, client(2), &hello(), now),
             Some(Packet::Rejected(RejectReason::Full))
+        );
+    }
+
+    #[test]
+    fn a_player_with_another_game_is_refused_and_takes_no_place() {
+        let config = Config {
+            max_players: 2,
+            ..Config::default()
+        };
+        let mut session = Session::with_config(config);
+        let now = Instant::now();
+        send(&mut session, client(0), &hello_playing(2), now);
+        session.take_events();
+
+        assert_eq!(
+            send(&mut session, client(1), &hello_playing(1), now),
+            Some(Packet::Rejected(RejectReason::WrongGame(2)))
+        );
+        assert!(!session.is_player(client(1)));
+        let refusal = Event::WrongGame {
+            address: client(1),
+            game: 1,
+            session: 2,
+        };
+        // The server's owner reads both games by name.
+        let line = refusal.to_string();
+        assert!(line.contains("B3313 Unabandoned A2 Anniversary Edition"));
+        assert!(line.ends_with("B3313 1.0.2 hotfix 3"), "{line}");
+        assert_eq!(session.take_events(), [refusal]);
+
+        // The second of the two places is still free, for one who plays the session's game.
+        assert_eq!(
+            send(&mut session, client(2), &hello_playing(2), now),
+            Some(Packet::Welcome { player: id(1) })
+        );
+        // Full now: that is said to whoever could have joined, and the game to who could not.
+        assert_eq!(
+            send(&mut session, client(3), &hello_playing(2), now),
+            Some(Packet::Rejected(RejectReason::Full))
+        );
+        assert_eq!(
+            send(&mut session, client(4), &hello_playing(3), now),
+            Some(Packet::Rejected(RejectReason::WrongGame(2)))
+        );
+    }
+
+    #[test]
+    fn a_game_that_is_not_known_joins_any_session_and_decides_nothing() {
+        let mut session = Session::new();
+        let now = Instant::now();
+        // Nobody's game is known yet, so the first that is decides.
+        send(&mut session, client(0), &hello(), now);
+        assert_eq!(
+            send(&mut session, client(1), &hello_playing(3), now),
+            Some(Packet::Welcome { player: id(1) })
+        );
+        assert_eq!(
+            send(&mut session, client(2), &hello(), now),
+            Some(Packet::Welcome { player: id(2) })
+        );
+        assert_eq!(
+            send(&mut session, client(3), &hello_playing(1), now),
+            Some(Packet::Rejected(RejectReason::WrongGame(3)))
+        );
+    }
+
+    #[test]
+    fn a_session_everyone_has_left_takes_another_game() {
+        let mut session = Session::new();
+        let now = Instant::now();
+        send(&mut session, client(0), &hello_playing(1), now);
+        send(&mut session, client(1), &hello_playing(1), now);
+        send(&mut session, client(0), &Packet::Bye, now);
+        // One player of the first game is still here.
+        assert_eq!(
+            send(&mut session, client(2), &hello_playing(2), now),
+            Some(Packet::Rejected(RejectReason::WrongGame(1)))
+        );
+        send(&mut session, client(1), &Packet::Bye, now);
+        assert_eq!(
+            send(&mut session, client(2), &hello_playing(2), now),
+            Some(Packet::Welcome { player: id(0) })
+        );
+        assert_eq!(
+            send(&mut session, client(3), &hello_playing(1), now),
+            Some(Packet::Rejected(RejectReason::WrongGame(2)))
         );
     }
 

@@ -249,7 +249,7 @@ mod tests {
     #[test]
     fn a_player_with_the_hosts_password_is_the_host() -> Result<(), String> {
         let host = Host::start("127.0.0.1:0", Config::default())?;
-        let mut bridge = Connection::join(host.address(), "").map_err(|e| e.to_string())?;
+        let mut bridge = Connection::join(host.address(), "", 0).map_err(|e| e.to_string())?;
         bridge
             .introduce(None, None, host.host_password())
             .map_err(|e| e.to_string())?;
@@ -264,7 +264,7 @@ mod tests {
     #[test]
     fn a_hosted_server_admits_players_and_obeys_the_panel() -> Result<(), String> {
         let host = Host::start("127.0.0.1:0", Config::default())?;
-        let mut bridge = Connection::join(host.address(), "").map_err(|e| e.to_string())?;
+        let mut bridge = Connection::join(host.address(), "", 0).map_err(|e| e.to_string())?;
         let player = bridge.player();
         let joined = wait_for(&host, |event| match event {
             Event::Joined(id, _) => Some(*id),
@@ -291,7 +291,7 @@ mod tests {
     #[test]
     fn a_session_the_host_ends_stops_the_server_and_its_players_are_told() -> Result<(), String> {
         let host = Host::start("127.0.0.1:0", Config::default())?;
-        let mut bridge = Connection::join(host.address(), "").map_err(|e| e.to_string())?;
+        let mut bridge = Connection::join(host.address(), "", 0).map_err(|e| e.to_string())?;
 
         host.send(Command::End);
 
@@ -312,7 +312,7 @@ mod tests {
     #[test]
     fn a_server_stopped_to_start_again_tells_its_players_to_come_back() -> Result<(), String> {
         let host = Host::start("127.0.0.1:0", Config::default())?;
-        let mut bridge = Connection::join(host.address(), "").map_err(|e| e.to_string())?;
+        let mut bridge = Connection::join(host.address(), "", 0).map_err(|e| e.to_string())?;
 
         let notices = host.stop_to_restart();
 
@@ -336,7 +336,7 @@ mod tests {
     #[test]
     fn a_ban_reports_the_removal_before_the_ban() -> Result<(), String> {
         let host = Host::start("127.0.0.1:0", Config::default())?;
-        let bridge = Connection::join(host.address(), "").map_err(|e| e.to_string())?;
+        let bridge = Connection::join(host.address(), "", 0).map_err(|e| e.to_string())?;
         host.send(Command::Ban(bridge.player()));
         let mut moderation = Vec::new();
         let deadline = Instant::now() + Duration::from_secs(2);

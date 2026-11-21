@@ -55,7 +55,7 @@ fn delay_shows_in_the_round_trip() -> io::Result<()> {
         ..Impairment::default()
     };
     through_proxy(impairment, |proxy| {
-        let mut connection = Connection::join(proxy, "")?;
+        let mut connection = Connection::join(proxy, "", 0)?;
         let report = measure(&mut connection, Duration::from_millis(1_500))?;
 
         let trips = report.round_trips;
@@ -74,7 +74,7 @@ fn loss_shows_in_the_report() -> io::Result<()> {
         ..Impairment::default()
     };
     through_proxy(impairment, |proxy| {
-        let mut connection = Connection::join(proxy, "")?;
+        let mut connection = Connection::join(proxy, "", 0)?;
         let report = measure(&mut connection, Duration::from_secs(2))?;
 
         // About 60 snapshots; the seed is fixed, but timing still varies a little.

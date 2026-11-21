@@ -7,6 +7,7 @@ use std::fmt;
 use std::time::Duration;
 
 pub mod chat;
+pub mod game;
 pub mod metrics;
 pub mod objects;
 pub mod progress;
@@ -27,7 +28,7 @@ pub use reliable::{Ack, Inbox, OUTBOX_MOST, Outbox, Stream};
 /// snapshots in time by their tick, so both ends must agree on this.
 pub const TICK_INTERVAL: Duration = Duration::from_millis(33);
 
-pub const PROTOCOL_VERSION: u8 = 25;
+pub const PROTOCOL_VERSION: u8 = 26;
 const MAGIC: [u8; 4] = *b"B3NP";
 const HEADER_SIZE: usize = MAGIC.len() + 2;
 
@@ -362,27 +363,37 @@ pub enum RejectReason {
     WrongVersion,
     /// The client's handshake was made with another password.
     WrongPassword,
+    /// The client's game is another version of B3313 than the session plays, which is the one
+    /// numbered here; see `game`.
+    WrongGame(u8),
 }
 
-impl RejectReason {
-    /// The reason's code on the wire; `Packet::decode` reads it back.
-    const fn code(self) -> u8 {
-        match self {
-            Self::Full => 1,
-            Self::WrongVersion => 2,
-            Self::WrongPassword => 3,
-        }
-    }
+/// On the wire, the code of `RejectReason::WrongGame`, which alone has a byte after it.
+const REJECT_WRONG_GAME: u8 = 4;
 
-    /// The reason a code on the wire stands for, if it is one.
-    const fn from_code(code: u8) -> Option<Self> {
-        match code {
-            1 => Some(Self::Full),
-            2 => Some(Self::WrongVersion),
-            3 => Some(Self::WrongPassword),
-            _ => None,
+impl RejectReason {
+    /// Writes the reason as it is on the wire: its code, and the session's game after the one
+    /// reason that has it. `Reader::reject_reason` reads it back.
+    fn encode(self, out: &mut Vec<u8>) {
+        match self {
+            Self::Full => out.push(1),
+            Self::WrongVersion => out.push(2),
+            Self::WrongPassword => out.push(3),
+            Self::WrongGame(game) => out.extend_from_slice(&[REJECT_WRONG_GAME, game]),
         }
     }
+}
+
+/// Writes a `Hello` after the packet's header.
+fn encode_hello(out: &mut Vec<u8>, cookie: u64, game: u8, handshake: &[u8]) {
+    out.push(KIND_HELLO);
+    out.extend_from_slice(&cookie.to_be_bytes());
+    out.push(game);
+    // A handshake message is far under 255 bytes; a longer one is cut, and fails.
+    let handshake = handshake.get(..usize::from(u8::MAX)).unwrap_or(handshake);
+    out.push(u8::try_from(handshake.len()).unwrap_or(u8::MAX));
+    out.extend_from_slice(handshake);
+    out.resize(out.len().max(HELLO_MIN_SIZE), 0);
 }
 
 /// A packet's kind, as the outer layer sees it: only these travel unencrypted.
@@ -406,6 +417,9 @@ pub enum Packet {
     /// a `Challenge`, so the server never answers a stranger with more than it got.
     Hello {
         cookie: u64,
+        /// The version of B3313 the client's game is, as `game` numbers them, or 0 if it is
+        /// not known. In the clear, as the cookie is: it is no secret.
+        game: u8,
         handshake: Vec<u8>,
     },
     /// The cookie for the client's address, to send back, and the salt for the password's key.
@@ -554,15 +568,11 @@ impl Packet {
         out.extend_from_slice(&MAGIC);
         out.push(PROTOCOL_VERSION);
         match self {
-            Self::Hello { cookie, handshake } => {
-                out.push(KIND_HELLO);
-                out.extend_from_slice(&cookie.to_be_bytes());
-                // A handshake message is far under 255 bytes; a longer one is cut, and fails.
-                let handshake = handshake.get(..usize::from(u8::MAX)).unwrap_or(handshake);
-                out.push(u8::try_from(handshake.len()).unwrap_or(u8::MAX));
-                out.extend_from_slice(handshake);
-                out.resize(out.len().max(HELLO_MIN_SIZE), 0);
-            }
+            Self::Hello {
+                cookie,
+                game,
+                handshake,
+            } => encode_hello(&mut out, *cookie, *game, handshake),
             Self::Challenge { cookie, salt } => {
                 out.push(KIND_CHALLENGE);
                 out.extend_from_slice(&cookie.to_be_bytes());
@@ -578,7 +588,10 @@ impl Packet {
                 out.extend_from_slice(sealed);
             }
             Self::Welcome { player } => out.extend_from_slice(&[KIND_WELCOME, player.0]),
-            Self::Rejected(reason) => out.extend_from_slice(&[KIND_REJECTED, reason.code()]),
+            Self::Rejected(reason) => {
+                out.push(KIND_REJECTED);
+                reason.encode(&mut out);
+            }
             Self::State { sequence, state } => {
                 out.push(KIND_STATE);
                 out.extend_from_slice(&sequence.to_be_bytes());
@@ -723,9 +736,7 @@ impl Packet {
             KIND_WELCOME => Self::Welcome {
                 player: reader.player()?,
             },
-            KIND_REJECTED => Self::Rejected(
-                RejectReason::from_code(reader.byte()?).ok_or(DecodeError::Malformed)?,
-            ),
+            KIND_REJECTED => Self::Rejected(reader.reject_reason()?),
             KIND_STATE => Self::State {
                 sequence: u32::from_be_bytes(reader.array()?),
                 state: reader.array()?,
@@ -1044,15 +1055,30 @@ impl Reader<'_> {
             .collect()
     }
 
+    fn reject_reason(&mut self) -> Result<RejectReason, DecodeError> {
+        match self.byte()? {
+            1 => Ok(RejectReason::Full),
+            2 => Ok(RejectReason::WrongVersion),
+            3 => Ok(RejectReason::WrongPassword),
+            REJECT_WRONG_GAME => Ok(RejectReason::WrongGame(self.byte()?)),
+            _ => Err(DecodeError::Malformed),
+        }
+    }
+
     fn hello(&mut self) -> Result<Packet, DecodeError> {
         let cookie = u64::from_be_bytes(self.array()?);
+        let game = self.byte()?;
         let length = usize::from(self.byte()?);
         let handshake = self.bytes(length)?.to_vec();
         // Only zeros may pad it out.
         if self.rest().iter().any(|&byte| byte != 0) {
             return Err(DecodeError::Malformed);
         }
-        Ok(Packet::Hello { cookie, handshake })
+        Ok(Packet::Hello {
+            cookie,
+            game,
+            handshake,
+        })
     }
 
     fn sealed(&mut self) -> Result<Packet, DecodeError> {
@@ -1377,10 +1403,12 @@ mod tests {
         vec![
             Packet::Hello {
                 cookie: 0,
+                game: 0,
                 handshake: vec![],
             },
             Packet::Hello {
                 cookie: u64::MAX,
+                game: u8::MAX,
                 handshake: vec![9; 48],
             },
             Packet::Challenge {
@@ -1398,6 +1426,7 @@ mod tests {
             Packet::Rejected(RejectReason::Full),
             Packet::Rejected(RejectReason::WrongVersion),
             Packet::Rejected(RejectReason::WrongPassword),
+            Packet::Rejected(RejectReason::WrongGame(3)),
             Packet::Removed(RemoveReason::Kicked),
             Packet::Removed(RemoveReason::Banned),
             Packet::Removed(RemoveReason::Ended),
@@ -1573,6 +1602,7 @@ mod tests {
     fn a_challenge_is_no_larger_than_the_hello_it_answers() {
         let empty = Packet::Hello {
             cookie: 0,
+            game: 0,
             handshake: vec![],
         };
         let hello = empty.encode().len();
@@ -1590,6 +1620,7 @@ mod tests {
     fn hello_padding_must_be_zeros_and_seals_must_hold_a_tag() {
         let mut hello = Packet::Hello {
             cookie: 1,
+            game: 1,
             handshake: vec![2; 3],
         }
         .encode();
@@ -1604,6 +1635,26 @@ mod tests {
         };
         let decoded = Packet::decode(&tagless.encode());
         assert_eq!(decoded, Err(DecodeError::Malformed));
+    }
+
+    #[test]
+    fn a_hello_names_its_game_after_the_cookie_and_cut_short_is_rejected() {
+        let hello = Packet::Hello {
+            cookie: 0x0102_0304_0506_0708,
+            game: 3,
+            handshake: vec![9; 48],
+        };
+        let encoded = hello.encode();
+        assert_eq!(
+            encoded.get(..16),
+            Some(&b"B3NP\x1A\x01\x01\x02\x03\x04\x05\x06\x07\x08\x03\x30"[..])
+        );
+        // Longer than the padding reaches, so every byte of it is needed.
+        for length in 5..encoded.len() {
+            let truncated = encoded.get(..length).unwrap_or_default();
+            assert!(Packet::decode(truncated).is_err(), "length {length}");
+        }
+        assert_eq!(Packet::decode(&encoded), Ok(hello));
     }
 
     #[test]
@@ -1624,7 +1675,7 @@ mod tests {
         .encode();
         assert_eq!(
             encoded.get(..10),
-            Some(&b"B3NP\x19\x04\x01\x02\x03\x04"[..])
+            Some(&b"B3NP\x1A\x04\x01\x02\x03\x04"[..])
         );
         assert_eq!(encoded.len(), 10 + PLAYER_STATE_SIZE);
     }
@@ -1657,6 +1708,9 @@ mod tests {
                 id: 1,
             }]),
             full_object_updates(),
+            // One reason has a byte after it, and the others none.
+            Packet::Rejected(RejectReason::Full),
+            Packet::Rejected(RejectReason::WrongGame(2)),
         ] {
             let encoded = packet.encode();
             for length in 5..encoded.len() {
@@ -1672,32 +1726,32 @@ mod tests {
     #[test]
     fn out_of_range_values_are_rejected() {
         assert_eq!(
-            Packet::decode(b"B3NP\x19\x02\x10"),
+            Packet::decode(b"B3NP\x1A\x02\x10"),
             Err(DecodeError::Malformed)
         );
         assert_eq!(
-            Packet::decode(b"B3NP\x19\x03\x04"),
+            Packet::decode(b"B3NP\x1A\x03\x05"),
             Err(DecodeError::Malformed)
         );
-        assert_eq!(Packet::decode(b"B3NP\x19\x63"), Err(DecodeError::Malformed));
+        assert_eq!(Packet::decode(b"B3NP\x1A\x63"), Err(DecodeError::Malformed));
         // Hits beyond the per-packet limit, an unknown kind, and a target outside the session.
-        let mut nine_hits = b"B3NP\x19\x0C\x09".to_vec();
+        let mut nine_hits = b"B3NP\x1A\x0C\x09".to_vec();
         nine_hits.extend(std::iter::repeat_n([1, 1, 0, 1], 9).flatten());
         assert_eq!(Packet::decode(&nine_hits), Err(DecodeError::Malformed));
         assert_eq!(
-            Packet::decode(b"B3NP\x19\x0C\x01\x01\x04\0\x01"),
+            Packet::decode(b"B3NP\x1A\x0C\x01\x01\x04\0\x01"),
             Err(DecodeError::Malformed)
         );
         assert_eq!(
-            Packet::decode(b"B3NP\x19\x0D\x01\x10\x01\0\x01"),
+            Packet::decode(b"B3NP\x1A\x0D\x01\x10\x01\0\x01"),
             Err(DecodeError::Malformed)
         );
         // A snapshot can never list sixteen others.
-        let mut too_many = b"B3NP\x19\x05\0\0\0\0\xFF\xFF\x10".to_vec();
+        let mut too_many = b"B3NP\x1A\x05\0\0\0\0\xFF\xFF\x10".to_vec();
         too_many.extend(std::iter::repeat_n(0, 16 * (1 + 4 + PLAYER_STATE_SIZE)));
         assert_eq!(Packet::decode(&too_many), Err(DecodeError::Malformed));
         // A state for player 1, who the present mask says is not there.
-        let mut absent = b"B3NP\x19\x05\0\0\0\0\0\x01\x01\x01".to_vec();
+        let mut absent = b"B3NP\x1A\x05\0\0\0\0\0\x01\x01\x01".to_vec();
         absent.extend(std::iter::repeat_n(0, 4 + PLAYER_STATE_SIZE));
         assert_eq!(Packet::decode(&absent), Err(DecodeError::Malformed));
     }
@@ -1706,7 +1760,7 @@ mod tests {
     fn object_states_must_name_objects_and_fit_the_limit() {
         let objects = |gone_children: &[u16], states: Vec<ObjectState>| {
             // Objects, level 16, area 1, send slot 5, no numbered object gone.
-            let mut encoded = b"B3NP\x19\x12\0\x10\x01\0\0\0\x05".to_vec();
+            let mut encoded = b"B3NP\x1A\x12\0\x10\x01\0\0\0\x05".to_vec();
             encoded.extend([0; 32]);
             encoded.push(u8::try_from(gone_children.len()).unwrap_or(0));
             for name in gone_children {
@@ -1776,7 +1830,7 @@ mod tests {
             object.copy_from_slice(&241_u16.to_be_bytes());
         }
         assert_eq!(Packet::decode(&wrong), Err(DecodeError::Malformed));
-        let mut too_many = b"B3NP\x19\x14\x09".to_vec();
+        let mut too_many = b"B3NP\x1A\x14\x09".to_vec();
         too_many.extend(std::iter::repeat_n([0, 9, 1, 0, 1, 0, 0, 0xC0, 1, 0, 0], 9).flatten());
         assert_eq!(Packet::decode(&too_many), Err(DecodeError::Malformed));
     }

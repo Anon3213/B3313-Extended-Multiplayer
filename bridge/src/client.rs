@@ -11,7 +11,7 @@ use b3313_protocol::{
     Ack, ChatLine, Coin, DecodeError, Hit, HitKind, Hurt, Inbox, Interaction, MAX_COIN_VALUE,
     MAX_COINS_PER_PACKET, MAX_DATAGRAM_SIZE, MAX_HITS_PER_PACKET, MAX_INTERACTIONS_PER_PACKET,
     Message, Name, ObjectState, Outbox, Outfit, PROTOCOL_VERSION, Packet, PlayerId, PlayerState,
-    PlayerUpdate, Progress, RejectReason, RemoveReason, RosterEntry, Stream, WorldInputs,
+    PlayerUpdate, Progress, RejectReason, RemoveReason, RosterEntry, Stream, WorldInputs, game,
     is_oversized_datagram,
 };
 use std::collections::VecDeque;
@@ -218,6 +218,17 @@ pub fn resolve(server: &str) -> io::Result<SocketAddr> {
         .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "the name has no address"))
 }
 
+/// What a player is told whose game is the version of B3313 numbered `own`, on being refused
+/// by a session that plays the one numbered `session`.
+fn wrong_game(session: u8, own: u8) -> String {
+    format!(
+        "this session is playing {}, and your game is {}; everyone in a session must play the \
+         same version of B3313",
+        game::describe(session),
+        game::describe(own)
+    )
+}
+
 fn is_quiet(error: &io::Error) -> bool {
     // Windows reports an earlier send to a closed port as a failed receive. The server timeout
     // covers that case, so here it means only that no packet arrived. Nor is a datagram too
@@ -230,15 +241,17 @@ fn is_quiet(error: &io::Error) -> bool {
 
 impl Connection {
     /// Joins the session at `server` with the session's `password`, empty for an open session.
+    /// `game` is the version of B3313 the player's game is, as `b3313_protocol::game` numbers
+    /// them, or 0 if it is not known: a session takes only players of the game it plays.
     ///
     /// The server first challenges the client to prove it receives at its address, and sends the
     /// salt for the password's key; the client then completes the encrypted handshake.
     ///
     /// # Errors
-    /// Fails if the password is wrong, the server is full, runs another protocol version, or does
-    /// not answer.
-    pub fn join(server: SocketAddr, password: &str) -> io::Result<Self> {
-        Self::join_within(server, password, JOIN_TIMEOUT)
+    /// Fails if the password is wrong, the server is full, plays another version of B3313, runs
+    /// another protocol version, or does not answer.
+    pub fn join(server: SocketAddr, password: &str, game: u8) -> io::Result<Self> {
+        Self::join_within(server, password, game, JOIN_TIMEOUT)
     }
 
     /// Joins as `join` does, giving up after `limit` if the server has not answered: for a
@@ -246,8 +259,13 @@ impl Connection {
     ///
     /// # Errors
     /// As `join`; a server that did not answer in time is `io::ErrorKind::TimedOut`.
-    pub fn join_within(server: SocketAddr, password: &str, limit: Duration) -> io::Result<Self> {
-        Self::join_unless(server, password, limit, &AtomicBool::new(false))
+    pub fn join_within(
+        server: SocketAddr,
+        password: &str,
+        game: u8,
+        limit: Duration,
+    ) -> io::Result<Self> {
+        Self::join_unless(server, password, game, limit, &AtomicBool::new(false))
     }
 
     /// Joins as `join_within` does, giving up as soon as `stop` is set: for a session that may
@@ -258,6 +276,7 @@ impl Connection {
     pub fn join_unless(
         server: SocketAddr,
         password: &str,
+        game: u8,
         limit: Duration,
         stop: &AtomicBool,
     ) -> io::Result<Self> {
@@ -284,6 +303,7 @@ impl Connection {
             let first = handshake.as_ref().map(|(_, _, message)| message.clone());
             let hello = Packet::Hello {
                 cookie,
+                game,
                 handshake: first.unwrap_or_default(),
             };
             let asked = Instant::now();
@@ -324,6 +344,9 @@ impl Connection {
                         Ok(Packet::Welcome { player }) => Self::joined(socket, player, channel),
                         Ok(Packet::Rejected(RejectReason::Full)) => {
                             Err(io::Error::other("the session is full"))
+                        }
+                        Ok(Packet::Rejected(RejectReason::WrongGame(session))) => {
+                            Err(io::Error::other(wrong_game(session, game)))
                         }
                         _ => Err(io::Error::other("the server's answer made no sense")),
                     };
@@ -856,7 +879,7 @@ mod tests {
             (PROTOCOL_VERSION - 1, "older"),
         ] {
             let started = std::time::Instant::now();
-            let Err(error) = Connection::join(server_of_version(version)?, "") else {
+            let Err(error) = Connection::join(server_of_version(version)?, "", 0) else {
                 unreachable!("a server of another version cannot be joined");
             };
             assert!(error.to_string().contains(word), "{error}");
@@ -984,7 +1007,7 @@ mod tests {
                 std::thread::sleep(Duration::from_millis(50));
                 stop.store(true, Ordering::Relaxed);
             });
-            Connection::join_unless(server, "", Duration::from_secs(30), &stop)
+            Connection::join_unless(server, "", 0, Duration::from_secs(30), &stop)
         });
         assert_eq!(
             joined.err().map(|error| error.kind()),

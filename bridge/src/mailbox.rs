@@ -20,6 +20,8 @@ const MAGIC: u32 = layout::MAILBOX_MAGIC; // "B3MP"
 /// The mailbox version this bridge speaks; a game marked with another is left alone.
 pub const VERSION: u32 = layout::MAILBOX_VERSION;
 const VERSION_ADDRESS: u32 = MAILBOX_ADDRESS + layout::MAILBOX_VERSION_OFFSET;
+/// `game`: which version of B3313 the game is, written by it at boot.
+const GAME_ADDRESS: u32 = MAILBOX_ADDRESS + layout::MAILBOX_GAME_OFFSET;
 /// `bridgeLease`: the frames the game still takes its bridge to be here for, which it counts
 /// down as it runs. At 0 it takes the session out of itself, as `end_session` does.
 const BRIDGE_LEASE_ADDRESS: u32 = MAILBOX_ADDRESS + layout::MAILBOX_BRIDGE_LEASE_OFFSET;
@@ -284,6 +286,19 @@ impl<'a, M: ProcessMemory> Mailbox<'a, M> {
             return Ok(None);
         }
         self.ram.read_u32(VERSION_ADDRESS).map(Some)
+    }
+
+    /// The version of B3313 the game is, as it marked itself at boot and `b3313_protocol::game`
+    /// numbers them; 0, for not known, if no game is ready or it wrote no such number.
+    ///
+    /// # Errors
+    /// Fails if the game's memory cannot be read, as when it has exited.
+    pub fn game(&self) -> io::Result<u8> {
+        // Only a ready game's mailbox has the field: an older layout has something else there.
+        if !self.is_ready()? {
+            return Ok(0);
+        }
+        Ok(u8::try_from(self.ram.read_u32(GAME_ADDRESS)?).unwrap_or(0))
     }
 
     /// Reads a record the game writes, guarded by the sequence number at `sequence_address`.
@@ -1492,6 +1507,26 @@ mod tests {
 
         N64Ram::new(&process, 0).write(0x807C_0204, &(VERSION + 1).to_be_bytes())?;
         assert!(!mailbox(&process).is_ready()?);
+        Ok(())
+    }
+
+    #[test]
+    fn the_game_is_the_number_a_ready_game_wrote_and_otherwise_not_known() -> io::Result<()> {
+        let process = game();
+        let ram = N64Ram::new(&process, 0);
+        // The game's number, at 0xC, before the game has marked the mailbox as its own.
+        ram.write(0x807C_020C, &3_u32.to_be_bytes())?;
+        assert_eq!(mailbox(&process).game()?, 0, "no game is ready");
+
+        make_ready(&process)?;
+        assert_eq!(mailbox(&process).game()?, 3);
+        // A number no game has, which no byte of a packet could carry.
+        ram.write(0x807C_020C, &0x0000_0103_u32.to_be_bytes())?;
+        assert_eq!(mailbox(&process).game()?, 0);
+
+        ram.write(0x807C_020C, &2_u32.to_be_bytes())?;
+        ram.write(0x807C_0204, &(VERSION + 1).to_be_bytes())?;
+        assert_eq!(mailbox(&process).game()?, 0, "another mailbox version");
         Ok(())
     }
 
