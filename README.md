@@ -64,11 +64,12 @@ What to know as you play:
 
 1. Start `B3313 Extended Multiplayer.exe` and open **Play**.
 2. Under **Game**, choose your Super Mario 64 ROM and the B3313 patch. The panel checks both,
-   builds the multiplayer ROM and keeps it; this is needed once.
+   builds the multiplayer ROM and keeps it, and says which version of B3313 it is; this is
+   needed once for each version you play.
 3. To join someone, copy the invite they sent you, select **Paste invite**, then **Join**. The
-   panel starts the game.
-4. To host, open **Overview**, start the server, and send players the invite it shows. Then join
-   your own server on **Play**.
+   panel starts the game. Your game must be the version theirs is; see "Versions of the game".
+4. To host, open **Overview**, start the server, and send players the invite it shows, and tell
+   them which version of B3313 you play. Then join your own server on **Play**.
 
 In the game, hold the D-pad down to see who is in the session.
 
@@ -81,8 +82,9 @@ Once everyone has left, the session takes whichever version comes next.
 
 The panel tells which version a patch is by the game it makes, not by the file's name: two
 files both called "1.0.2 hotfix 3" can be different versions. It says which one it built when
-the game is ready. Each version has a multiplayer ROM and a save of its own, so you can set
-up more than one and change between them by choosing another patch.
+the game is ready, and **Play** shows it under **Game** from then on, so players can compare
+before they join. Each version has a multiplayer ROM and a save of its own, so you can set up
+more than one and change between them by choosing another patch.
 
 Pick your Mario's colors from the swatches on **Play**, or type `/color` in the chat for the
 list and `/color green` to wear one. Everyone sees you in them, and so do you.

@@ -1401,6 +1401,24 @@ impl Panel {
     }
 
     /// The game's three files and the emulator that runs it.
+    /// Which version of B3313 the player's game is, and what that decides. Said where the
+    /// files are chosen, as two patches of one name can be different versions.
+    fn version_hint(&self) -> String {
+        let built = self.preferences.rom.as_deref();
+        match built.and_then(game_setup::built_at) {
+            Some(game) => format!(
+                "Your game is B3313 {}. Everyone in a session plays the same version of \
+                 B3313; to play another, choose its patch.",
+                game.name
+            ),
+            None => format!(
+                "The patch decides which version of B3313 you play, and everyone in a \
+                 session plays the same one. These will do: {}.",
+                game_setup::game_names()
+            ),
+        }
+    }
+
     pub(super) fn game_fields(&self, theme: &Theme, cx: &mut Context<Self>) -> Div {
         let emulators: AnyElement = match self.play.emulators.as_slice() {
             [] if self.play.launcher.is_some() => {
@@ -1452,6 +1470,7 @@ impl Panel {
             .child(self.game_file_row(theme, GameFile::Sm64Rom, cx))
             .child(self.game_file_row(theme, GameFile::B3313Patch, cx))
             .child(self.game_file_row(theme, GameFile::OwnRom, cx))
+            .child(hint(theme, &self.version_hint()))
             .child(
                 div()
                     .flex()
