@@ -15,7 +15,7 @@ pub const CODE2_ADDR: u32 = 0x807D_1600;
 pub const CODE2_END: u32 = 0x807D_2700;
 pub const ANIM_CACHE_END: u32 = 0x807E_0000;
 pub const MAILBOX_MAGIC: u32 = 0x4233_4D50;
-pub const MAILBOX_VERSION: u32 = 0x15;
+pub const MAILBOX_VERSION: u32 = 0x16;
 pub const PLAYER_SLOTS: u32 = 0x10;
 pub const PUPPETS: u32 = 0xF;
 pub const HIT_PUNCH: u32 = 1;
@@ -163,6 +163,7 @@ pub const MAILBOX_PROGRESS_IN_OFFSET: u32 = 0x5300;
 pub const MAILBOX_COINS_OUT_OFFSET: u32 = 0x5380;
 pub const MAILBOX_COINS_IN_OFFSET: u32 = 0x5480;
 pub const MAILBOX_COINS_IN_TAKEN_OFFSET: u32 = 0x5504;
+pub const MAILBOX_AREA_LOADS_OFFSET: u32 = 0x5508;
 pub const MAILBOX_PEOPLE_OFFSET: u32 = 0x5580;
 pub const MAILBOX_CHAT_OFFSET: u32 = 0x5700;
 pub const PLAYER_SLOT_SIZE: u32 = 0x80;
@@ -199,7 +200,7 @@ pub mod len {
     pub const CODE2_END: usize = 0x807D_2700;
     pub const ANIM_CACHE_END: usize = 0x807E_0000;
     pub const MAILBOX_MAGIC: usize = 0x4233_4D50;
-    pub const MAILBOX_VERSION: usize = 0x15;
+    pub const MAILBOX_VERSION: usize = 0x16;
     pub const PLAYER_SLOTS: usize = 0x10;
     pub const PUPPETS: usize = 0xF;
     pub const HIT_PUNCH: usize = 1;
@@ -347,6 +348,7 @@ pub mod len {
     pub const MAILBOX_COINS_OUT_OFFSET: usize = 0x5380;
     pub const MAILBOX_COINS_IN_OFFSET: usize = 0x5480;
     pub const MAILBOX_COINS_IN_TAKEN_OFFSET: usize = 0x5504;
+    pub const MAILBOX_AREA_LOADS_OFFSET: usize = 0x5508;
     pub const MAILBOX_PEOPLE_OFFSET: usize = 0x5580;
     pub const MAILBOX_CHAT_OFFSET: usize = 0x5700;
     pub const PLAYER_SLOT_SIZE: usize = 0x80;
@@ -371,7 +373,7 @@ pub mod len {
 
 /// Those of the numbers that are a byte's worth, as bytes.
 pub mod byte {
-    pub const MAILBOX_VERSION: u8 = 0x15;
+    pub const MAILBOX_VERSION: u8 = 0x16;
     pub const PLAYER_SLOTS: u8 = 0x10;
     pub const PUPPETS: u8 = 0xF;
     pub const HIT_PUNCH: u8 = 1;

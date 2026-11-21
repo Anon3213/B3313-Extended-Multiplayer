@@ -140,7 +140,7 @@ const HELLO_MIN_SIZE: usize = HEADER_SIZE + 8 + secure::SALT_SIZE;
 pub const MAX_HITS_PER_PACKET: usize = 8;
 /// A spawned enemy's going is sent in this many consecutive packets, so one lost packet does not
 /// lose it. Hits, touches, coins and chat are sent until acknowledged instead; see `reliable`.
-pub const HIT_SENDS: u8 = 3;
+pub const GONE_CHILD_SENDS: u8 = 3;
 
 /// The kind of attack that landed. The victim's game decides what each does.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

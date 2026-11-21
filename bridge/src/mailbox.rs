@@ -124,6 +124,7 @@ const COIN_ENTRY_SIZE: u32 = layout::COIN_SIZE;
 const COIN_RING_ENTRIES: u32 = layout::COIN_RING_ENTRIES_OFFSET;
 /// `coinsInTaken`, written by the game: how many entries of `coinsIn` it has taken.
 const COINS_IN_TAKEN_ADDRESS: u32 = MAILBOX_ADDRESS + layout::MAILBOX_COINS_IN_TAKEN_OFFSET;
+const AREA_LOADS_ADDRESS: u32 = MAILBOX_ADDRESS + layout::MAILBOX_AREA_LOADS_OFFSET;
 /// `people`, written by the bridge: the local player's role, each remote slot's role, three
 /// spare bytes, the local player's name and each remote slot's, then the sequence.
 const PEOPLE_ADDRESS: u32 = MAILBOX_ADDRESS + layout::MAILBOX_PEOPLE_OFFSET;
@@ -539,6 +540,14 @@ impl<'a, M: ProcessMemory> Mailbox<'a, M> {
     /// Fails if the game's memory cannot be read.
     pub fn coins_in_taken(&self) -> io::Result<u32> {
         self.ram.read_u32(COINS_IN_TAKEN_ADDRESS)
+    }
+
+    /// How many times the game has loaded an area, each of which puts the area's coins back.
+    ///
+    /// # Errors
+    /// Fails if the game's memory cannot be read.
+    pub fn area_loads(&self) -> io::Result<u32> {
+        self.ram.read_u32(AREA_LOADS_ADDRESS)
     }
 
     /// Adds a coin another player collected, after the `count` written so far, and returns the
@@ -1053,7 +1062,7 @@ mod tests {
         for _ in 0..4000 {
             let count = u32::from_le_bytes(noise.bytes());
             let place = noise.place();
-            match noise.below(13) {
+            match noise.below(14) {
                 0 => target.write_remote_player(noise.slot(), &noise.bytes())?,
                 1 => target.clear_remote_player(noise.slot())?,
                 2 => target.write_session_world(&noise.bytes())?,
@@ -1095,6 +1104,7 @@ mod tests {
                     let gone = ObjectSet::from_bytes(noise.bytes());
                     target.write_objects_owned(place, &owned, &gone)?;
                 }
+                12 => target.rewrite_chat_row(count, &noise.bytes())?,
                 _ => {
                     target.write_objects_in(count, place, &[noise.bytes()])?;
                 }

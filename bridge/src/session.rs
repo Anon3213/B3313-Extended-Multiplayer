@@ -123,8 +123,8 @@ pub fn describe_wrong_rom(found: Option<u32>) -> String {
         Some(version) => format!(
             "The game running is built for another version of this program (its mailbox is \
              version {version}, and this one's is {}), so the session cannot be shown in it. \
-             Set the game up again on the panel's Play page, or start the ROM that came \
-             with this version.",
+             Set the game up again on the panel's Play page, or start the ROM this version \
+             of the panel built.",
             crate::mailbox::VERSION
         ),
         None => "The game running is not the multiplayer ROM, so the session cannot be shown \
@@ -874,11 +874,13 @@ impl Session {
     /// Begins anew with a server joined again, which may know nothing of what went before:
     /// all is as at first, but for who is drawn in the game, the world the session had,
     /// whether the game is in play, whether the player was told it is the wrong game, and
-    /// what the player had before the session, which is what its progress is told apart from.
+    /// what the player had before the session, which is what its progress is told apart from,
+    /// and which coins the game was told were collected before it came.
     fn start_again(&mut self, now: Instant) {
         let mut progress = std::mem::take(&mut self.progress);
         progress.start_again();
         *self = Self {
+            objects: self.objects.for_server_joined_again(),
             shown: std::mem::take(&mut self.shown),
             world: self.world.take(),
             playing: self.playing,
@@ -928,6 +930,12 @@ impl Session {
             self.shown = ShownPlayers::default();
             self.objects.game_started_again();
             people.game_started_again();
+            // The session's world again, before the game makes its first level: the server
+            // sends it only now and then, and a level made from the game's own world numbers
+            // its objects unlike everyone else's.
+            if let Some(world) = &self.world {
+                mailbox.write_session_world(world)?;
+            }
         }
         if self.sends.is_due(now) {
             let state = if ready {
@@ -941,10 +949,17 @@ impl Session {
             // state is not sent, so the server has others run the ones it had, where they
             // would stand still for everyone until it went on.
             let running = playing && self.is_game_running(mailbox)?;
-            match state.filter(|_| running) {
-                Some(state) => connection.send_state(state)?,
+            // Asked after the state was read: an area the state is in was loaded before it.
+            let state = match state.filter(|_| running) {
+                Some(state) if self.objects.state_may_go(mailbox, now)? => Some(state),
+                _ => None,
+            };
+            if let Some(state) = state {
+                connection.send_state(state)?;
+            } else {
                 // In menus there is nothing to show, but the player must stay in the session.
-                None => connection.keep_alive()?,
+                self.objects.no_state_went();
+                connection.keep_alive()?;
             }
             if ready {
                 collect_hits(mailbox, connection, &mut self.rings, events)?;

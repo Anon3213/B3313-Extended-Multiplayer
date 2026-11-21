@@ -45,6 +45,11 @@ extern struct Object *try_to_spawn_object(s16 offsetY, f32 scale, struct Object 
 // would not see the enemies another is fighting. A state names its object's kind by its place
 // here, from 1, never by an address; an enemy of any other kind is still only in the games whose
 // own spawners spawned it.
+//
+// Only kinds whose objects are in a synced list (is_synced_list) belong here: spawned enemies
+// are named from those lists alone, and one made here that is never named is made again for
+// every state that comes for it. A bob-omb is in the game's list of destructive objects, so it
+// is not one.
 struct MpSpawnKind {
     const BehaviorScript *behavior;
     s32 model;
@@ -52,7 +57,6 @@ struct MpSpawnKind {
 
 static const struct MpSpawnKind sSpawnKinds[] = {
     { bhvGoomba, MODEL_GOOMBA },
-    { bhvBobomb, MODEL_BLACK_BOBOMB },
 };
 #define SPAWN_KINDS ((s32) (sizeof(sSpawnKinds) / sizeof(sSpawnKinds[0])))
 typedef char MpSpawnKindsCheck[SPAWN_KINDS <= MP_OBJECT_KIND_MASK ? 1 : -1];
@@ -114,7 +118,9 @@ struct MpObjectIds {
     u16 count; // Objects numbered when the area loaded.
     u16 pad2;
     u32 objectsInTaken; // Entries of the mailbox's `objectsIn` ring taken so far.
-    u32 unused;
+    // Whether the area was loaded since the server's word on what is gone from it was last
+    // acted on; see remove_gone_objects.
+    u32 goneUnchecked;
     struct MpObjectId slots[OBJECT_POOL_CAPACITY];
     u8 slotOfId[MP_OBJECT_IDS + 1]; // Each number's pool slot, or NO_SLOT.
     // For the coin in each slot that a defeated enemy dropped, the number of the object behind
@@ -258,6 +264,10 @@ void mp_number_area_objects(void) {
     sIds->levelNum = gCurrLevelNum;
     sIds->areaIndex = gCurrAreaIndex;
     sIds->count = next;
+    sIds->goneUnchecked = TRUE;
+    // The area's coins are all back, the ones others collected among them: the bridge has the
+    // game told again which those are.
+    gMpMailbox->areaLoads++;
 }
 
 u16 mp_object_id(struct Object *obj) {
@@ -597,23 +607,39 @@ static void name_children(void) {
     }
 }
 
-// The bridge's last consistent word on ownership, if it is about the current area.
-static s32 read_owned(struct MpObjectsOwned *copy) {
+// Takes the bridge's last consistent word on ownership into `kept`, and says whether what is
+// kept is about the current area. A read the bridge was writing through leaves the word from
+// before: for that one frame every copy would otherwise run on its own toward this game's
+// Mario, nothing would be published, and every spawned enemy would count as this game's.
+static s32 read_owned(struct MpObjectsOwned *kept) {
     volatile struct MpObjectsOwned *owned = &gMpMailbox->objectsOwned;
+    struct MpObjectsOwned read;
     u32 sequence = owned->sequence;
     s32 i;
 
-    if (sequence & 1) {
+    if (gMpMailbox->bridgeLease == 0) {
+        // No bridge: nothing kept from one is believed, even from one that was killed half
+        // way through writing this, which left the record never to read as whole again.
+        kept->levelNum = MP_NO_LEVEL;
         return FALSE;
     }
-    copy->levelNum = owned->levelNum;
-    copy->areaIndex = owned->areaIndex;
-    for (i = 0; i < MP_OBJECT_MASK_BYTES; i++) {
-        copy->owned[i] = owned->owned[i];
-        copy->gone[i] = owned->gone[i];
+    if (!(sequence & 1)) {
+        read.levelNum = owned->levelNum;
+        read.areaIndex = owned->areaIndex;
+        for (i = 0; i < MP_OBJECT_MASK_BYTES; i++) {
+            read.owned[i] = owned->owned[i];
+            read.gone[i] = owned->gone[i];
+        }
+        if (owned->sequence == sequence) {
+            kept->levelNum = read.levelNum;
+            kept->areaIndex = read.areaIndex;
+            for (i = 0; i < MP_OBJECT_MASK_BYTES; i++) {
+                kept->owned[i] = read.owned[i];
+                kept->gone[i] = read.gone[i];
+            }
+        }
     }
-    return owned->sequence == sequence && copy->levelNum == gCurrLevelNum
-        && copy->areaIndex == gCurrAreaIndex;
+    return kept->levelNum == gCurrLevelNum && kept->areaIndex == gCurrAreaIndex;
 }
 
 #define F32_EXPONENT_MASK 0x7F800000
@@ -698,6 +724,14 @@ static struct MpCopy *copy_of(struct Object *obj) {
 // as a goomba does how fast it walks, which made every goomba look held.
 static s32 is_held_here(struct Object *obj) {
     return gMarioState->heldObj == obj;
+}
+
+// Whether this game's Mario waits on `obj` to let him go: it has grabbed him, as a Chuckya does,
+// or he has stopped to talk to it. Only the object's own behavior ends either, and neither can
+// be hit out of, so an object that did not run here would hold him for good.
+static s32 is_engaged_here(struct Object *obj) {
+    return gMarioState->usedObj == obj
+        && (gMarioState->action == ACT_GRABBED || gMarioState->action == ACT_WAITING_FOR_DIALOG);
 }
 
 // Whether this object is a copy that should mirror its owner this frame: this game's Mario does
@@ -812,7 +846,10 @@ static struct Object *player_seen_by(struct Object *obj) {
     s32 slot = slot_of(obj);
     s32 i;
 
+    // What holds this game's Mario, or is held by him, deals with him: what it does to the
+    // Mario it sees, as throwing him, would be lost on a puppet.
     if (!sCopies->knowsOwners || seen == NULL || slot < 0 || slot >= OBJECT_POOL_CAPACITY
+        || is_held_here(obj) || is_engaged_here(obj)
         || (sCopies->childName[slot] == 0
             && (mp_object_id(obj) == 0 || sIds->slots[slot].synced == SYNC_NONE))) {
         return seen;
@@ -933,7 +970,8 @@ static void take_spawner_state(volatile struct MpObjectState *state) {
 // Takes the states the bridge added since the last frame, for copies to mirror.
 static void take_object_states(void) {
     volatile struct MpObjectsIn *in = &gMpMailbox->objectsIn;
-    volatile struct MpObjectState *state;
+    struct MpObjectState taken;
+    struct MpObjectState *state = &taken;
     struct MpCopy *copy;
     u32 count = in->count;
     u32 behind = count - sIds->objectsInTaken;
@@ -944,7 +982,9 @@ static void take_object_states(void) {
         sIds->objectsInTaken = behind < 0x80000000 ? count - MP_OBJECTS_IN_ENTRIES : count;
     }
     while (sIds->objectsInTaken != count) {
-        state = &in->entries[sIds->objectsInTaken % MP_OBJECTS_IN_ENTRIES];
+        // Taken out of the mailbox once, and only the copy looked at: the bridge may write
+        // the entry again meanwhile, and what was checked must be what is used.
+        copy_state(state, &in->entries[sIds->objectsInTaken % MP_OBJECTS_IN_ENTRIES]);
         sIds->objectsInTaken++;
         if (state->levelNum != gCurrLevelNum || state->areaIndex != gCurrAreaIndex
             || !is_others(state->id) || !is_valid_state(state)) {
@@ -1040,18 +1080,23 @@ static void drop_loot(struct Object *obj, u32 name) {
     }
 }
 
-// Removes the objects that their owners report gone, such as defeated enemies.
+// Removes the objects that their owners report gone, such as defeated enemies. An area loaded
+// again, as when Mario dies in it, has them all back, and this game is given those nearest it
+// to run: the server takes an object's going as final while anyone is in the area, so on the
+// first word after a load they go again whoever runs them, as they have for everyone else.
 static void remove_gone_objects(void) {
     struct Object *obj;
+    s32 all = sIds->goneUnchecked;
     u32 id;
 
     for (id = 1; id <= sIds->count; id++) {
-        if (mask_has(sCopies->owned.gone, id) && is_others(id)
+        if (mask_has(sCopies->owned.gone, id) && (all || is_others(id))
             && (obj = named_object(id)) != NULL) {
             drop_loot(obj, id);
             obj_mark_for_deletion(obj);
         }
     }
+    sIds->goneUnchecked = FALSE;
 }
 
 void mp_take_object_states(void) {
@@ -1069,6 +1114,13 @@ void mp_take_object_states(void) {
         // A claim is on an object, not on its slot: once the object has gone, whatever takes
         // the slot next, the first to be free, is another game's to run again.
         if (sCopies->slots[i].claim != 0 && name_of(i) != sCopies->slots[i].id) {
+            sCopies->slots[i].claim = 0;
+        }
+        // Nor does it outlast its purpose: once the server has made this game the owner, the
+        // claim is over. Kept to its end, it would have this game run the object on after
+        // the server, which holds a claim a shorter time, gave it to a nearer player's.
+        if (sCopies->slots[i].claim != 0 && sCopies->knowsOwners
+            && !is_others(sCopies->slots[i].id)) {
             sCopies->slots[i].claim = 0;
         }
         if (sCopies->slots[i].claim != 0) {
@@ -1223,7 +1275,8 @@ void mp_claim_touched_objects(void) {
         if (sCopies->slots[slot].claim != 0 || (copy = copy_of(obj)) == NULL) {
             continue;
         }
-        if ((obj->oInteractStatus & INT_STATUS_WAS_ATTACKED) || is_held_here(obj)) {
+        if ((obj->oInteractStatus & INT_STATUS_WAS_ATTACKED) || is_held_here(obj)
+            || is_engaged_here(obj)) {
             // The status stays: the object's own behavior, which runs later this frame now
             // that it is claimed, reads it as it would in a game alone.
             post_interaction(copy->id, obj->oInteractStatus & FORWARDED_STATUS);

@@ -349,9 +349,11 @@ void mp_render_hud(void) {
     s32 typing;
 
     render_hud();
-    // Nothing until a bridge has said who is here; an odd sequence means it is writing now, and
-    // the text is as good a frame late.
-    if (gMpMailbox->people.sequence == 0 || (gMpMailbox->people.sequence & 1)) {
+    // Nothing until a bridge has said who is here, nor once its lease has run out, when no
+    // session is left to show; an odd sequence means it is writing now, and the text is as
+    // good a frame late.
+    if (gMpMailbox->bridgeLease == 0 || gMpMailbox->people.sequence == 0
+        || (gMpMailbox->people.sequence & 1)) {
         return;
     }
     // Never while typing, when the game is shown no button as held.

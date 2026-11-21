@@ -9,7 +9,8 @@ use crate::object_motion::ObjectMotion;
 use crate::ram::ProcessMemory;
 use b3313_protocol::objects::object_id;
 use b3313_protocol::{
-    HIT_SENDS, MAX_GONE_CHILDREN, MAX_OBJECTS_PER_PACKET, ObjectSet, ObjectState, ObjectUpdate,
+    GONE_CHILD_SENDS, MAX_GONE_CHILDREN, MAX_OBJECTS_PER_PACKET, ObjectSet, ObjectState,
+    ObjectUpdate,
 };
 use std::collections::{HashMap, VecDeque};
 use std::io;
@@ -148,6 +149,75 @@ pub struct ObjectSync {
     coins_waiting: VecDeque<RingCoin>,
     /// What the game was last told of who runs what, and when.
     told: Option<(Told, Instant)>,
+    earlier_coins: EarlierCoins,
+}
+
+/// Whether the game is to have the server's word on which coins of its area were collected
+/// before it came, which arrives as coins worth nothing for the game to take away.
+///
+/// The server gives that word with the first state a bridge sends after a break in them, as
+/// it cannot tell a game that was at a menu, whose area is loaded again with every coin back,
+/// from one that was paused, which still has what it took away. A coin's name is not always
+/// one coin's alone, so a game told twice takes away two: coins nobody collected went from a
+/// game each time it was paused. The game counts its area loads (`areaLoads`), and the word is
+/// passed on only if the area was loaded since it last was.
+///
+/// Which word a coin belongs to cannot be read off it, so this goes by when each was asked
+/// for. A break within a second of the last asking, before its word can have come, or two
+/// loads as close, are taken wrongly: rare, and what it costs is a coin too many or too few.
+#[derive(Debug, Default)]
+struct EarlierCoins {
+    /// The game's count of area loads when the server's word was last asked for, by a state
+    /// after a break, and when that was.
+    asked: Option<(u32, Instant)>,
+    /// The word asked for last is one the game has already had.
+    is_repeat: bool,
+    /// States are going to the server, with no break since the last.
+    sending: bool,
+    /// Send slots still to go without a state, for the break the server is to see.
+    withheld: u8,
+}
+
+/// How many send slots go without a state for the server to see a break in them: each is a
+/// packet that may be lost, and the server gives its word again only if one arrives.
+const BREAK_SLOTS: u8 = 3;
+/// How long the server's word takes to come at most, a round trip and the packets it fills.
+/// A break sooner than this after asking for it does not make the next word a repeat.
+const WORD_ARRIVES_WITHIN: Duration = Duration::from_secs(1);
+
+impl EarlierCoins {
+    /// Whether a state may go in this send slot, at `now`, the game having loaded
+    /// `area_loads` areas. Not for a few slots if it loaded one since the server's word was
+    /// asked for with states going all the while, as when Mario dies: the server would not
+    /// give its word again without a break.
+    fn state_may_go(&mut self, area_loads: u32, now: Instant) -> bool {
+        let loaded_since = self.asked.is_none_or(|(loads, _)| loads != area_loads);
+        if self.sending && loaded_since {
+            self.sending = false;
+            self.withheld = BREAK_SLOTS;
+        }
+        if self.withheld > 0 {
+            self.withheld -= 1;
+            return false;
+        }
+        if !self.sending {
+            self.is_repeat = self.asked.is_some_and(|(loads, at)| {
+                loads == area_loads && now.saturating_duration_since(at) >= WORD_ARRIVES_WITHIN
+            });
+            self.asked = Some((area_loads, now));
+            self.sending = true;
+        }
+        true
+    }
+
+    /// What is kept of this for a server joined again, with the game where it was: the word
+    /// a server that still has the session gives is one the game has had.
+    fn for_server_joined_again(&self) -> Self {
+        Self {
+            asked: self.asked,
+            ..Self::default()
+        }
+    }
 }
 
 /// What the server says of an area's objects besides their states, as the game is told it.
@@ -167,6 +237,34 @@ impl ObjectSync {
     /// is read from the game anew, and nothing queued for the game that was is kept.
     pub fn game_started_again(&mut self) {
         *self = Self::default();
+    }
+
+    /// Whether the game's state may go to the server in this send slot, which is asked in each
+    /// slot it would: see `EarlierCoins`.
+    ///
+    /// # Errors
+    /// Fails if the game's memory cannot be read.
+    pub fn state_may_go<M: ProcessMemory>(
+        &mut self,
+        mailbox: &Mailbox<M>,
+        now: Instant,
+    ) -> io::Result<bool> {
+        Ok(self.earlier_coins.state_may_go(mailbox.area_loads()?, now))
+    }
+
+    /// Object sync for a server joined again, with the same game: nothing kept of the server
+    /// that was, but which of its words on earlier coins the game has had.
+    #[must_use]
+    pub fn for_server_joined_again(&self) -> Self {
+        Self {
+            earlier_coins: self.earlier_coins.for_server_joined_again(),
+            ..Self::default()
+        }
+    }
+
+    /// Notes that no state went in this send slot: the game is paused, or at a menu.
+    pub const fn no_state_went(&mut self) {
+        self.earlier_coins.sending = false;
     }
 
     /// Reports the game's objects and its Mario's interactions with others'. Call it once per send
@@ -233,7 +331,11 @@ impl ObjectSync {
     /// this game's Mario collected too: a name is not always one coin's alone, so that cannot
     /// be told, and a coin two players reach together counts for each of them twice.
     fn queue_coins(&mut self, coins: &[RingCoin]) {
-        for coin in coins {
+        // Worth nothing: one collected before this game came to its area. See `EarlierCoins`.
+        let wanted = coins
+            .iter()
+            .filter(|coin| coin.value != 0 || !self.earlier_coins.is_repeat);
+        for coin in wanted {
             if self.coins_waiting.len() >= COINS_WAITING_MOST {
                 self.coins_waiting.pop_front();
             }
@@ -266,7 +368,7 @@ impl ObjectSync {
     }
 
     /// Queues the spawned enemies the game reported gone since the last call, each to be sent
-    /// `HIT_SENDS` times, as UDP may lose one.
+    /// `GONE_CHILD_SENDS` times, as UDP may lose one.
     fn collect_children_gone<M: ProcessMemory>(&mut self, mailbox: &Mailbox<M>) -> io::Result<()> {
         let seen = match self.children_gone_seen {
             Some(seen) => seen,
@@ -275,7 +377,7 @@ impl ObjectSync {
         let (names, count) = mailbox.read_children_gone_out(seen)?;
         self.children_gone_seen = Some(count);
         self.children_gone
-            .extend(names.into_iter().map(|name| (name, HIT_SENDS)));
+            .extend(names.into_iter().map(|name| (name, GONE_CHILD_SENDS)));
         Ok(())
     }
 
@@ -374,7 +476,9 @@ fn collect_interactions<M: ProcessMemory>(
 
 #[cfg(test)]
 mod tests {
-    use super::{ObjectNews, ObjectSender, ObjectSync, REFRESH_INTERVAL};
+    use super::{
+        BREAK_SLOTS, ObjectNews, ObjectSender, ObjectSync, REFRESH_INTERVAL, WORD_ARRIVES_WITHIN,
+    };
     use crate::layout;
     use crate::mailbox::testing::game;
     use crate::mailbox::{COIN_ENTRIES, Mailbox, ObjectsOut, RingCoin};
@@ -479,6 +583,55 @@ mod tests {
         N64Ram::new(&process, 0).write(taken, &COIN_ENTRIES.to_be_bytes())?;
         sync.deliver_coins(&mailbox)?;
         assert_eq!(mailbox.coins_in_count()?, 20);
+        Ok(())
+    }
+
+    /// The server names an area's earlier coins again after any break in a game's states. A
+    /// game that was only paused has taken them away already, and would take away as many
+    /// more of the same names.
+    #[test]
+    fn earlier_coins_are_passed_on_again_only_once_the_area_was_loaded_again() -> io::Result<()> {
+        let process = game();
+        let mailbox = Mailbox::new(N64Ram::new(&process, 0));
+        let loads = layout::MAILBOX_ADDR + layout::MAILBOX_AREA_LOADS_OFFSET;
+        let load_area = |count: u32| N64Ram::new(&process, 0).write(loads, &count.to_be_bytes());
+        let mut sync = ObjectSync::default();
+        let waiting_after = |sync: &mut ObjectSync, coins: &[RingCoin]| {
+            sync.queue_coins(coins);
+            let waiting = sync.coins_waiting.len();
+            sync.coins_waiting.clear();
+            waiting
+        };
+        let earlier = [coin(1, 7, 0), coin(1, 7, 0)];
+
+        let start = Instant::now();
+        let later = start + WORD_ARRIVES_WITHIN;
+
+        // Come to the area: the first state goes, and the server's word is taken.
+        load_area(1)?;
+        assert!(sync.state_may_go(&mailbox, start)?);
+        assert_eq!(waiting_after(&mut sync, &earlier), 2);
+
+        // Paused and on again: the same word comes, and is left out. A coin collected now is not.
+        sync.no_state_went();
+        assert!(sync.state_may_go(&mailbox, later)?);
+        assert_eq!(waiting_after(&mut sync, &earlier), 0);
+        assert_eq!(waiting_after(&mut sync, &[coin(1, 7, 1)]), 1);
+
+        // The server is joined again with the game where it was: its word is still a repeat.
+        let mut sync = sync.for_server_joined_again();
+        assert!(sync.state_may_go(&mailbox, later + WORD_ARRIVES_WITHIN)?);
+        assert_eq!(waiting_after(&mut sync, &earlier), 0);
+
+        // The area is loaded again with states going, as after Mario dies: a few slots go
+        // without a state, so that the server gives its word again, and then it is taken.
+        load_area(2)?;
+        let much_later = later + 2 * WORD_ARRIVES_WITHIN;
+        for _ in 0..BREAK_SLOTS {
+            assert!(!sync.state_may_go(&mailbox, much_later)?);
+        }
+        assert!(sync.state_may_go(&mailbox, much_later)?);
+        assert_eq!(waiting_after(&mut sync, &earlier), 2);
         Ok(())
     }
 

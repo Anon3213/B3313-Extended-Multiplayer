@@ -1,4 +1,4 @@
-; Lets each player's Mario have colors of their own; included by Multiplayer/segment.asm.
+; Lets each player's Mario have colors of their own; included by Multiplayer/overlay.asm.
 ;
 ; B3313's Mario models (three, in the file loaded as segment 4 from ROM 0x11A35B8: one with a
 ; red cap and shirt, two with green) color each part by loading a light just before drawing it:
@@ -10,8 +10,7 @@
 ; model's at 0x30. The other parts (skin, hair, gloves, shoes) keep the model's own.
 ;
 ; The pairs were found by scanning the ROM for those commands and reading each light's color.
-; Each is patched at its two addresses: the light's at +4, the ambient's at +12. armips allows
-; no macro here, inside the build's MULTIPLAYER condition.
+; Each is patched at its two addresses: the light's at +4, the ambient's at +12.
 
 ; Overalls: 0000FF in the ROM.
 .orga 0x11B6FF0 + 4 :: .word 0x0D000008

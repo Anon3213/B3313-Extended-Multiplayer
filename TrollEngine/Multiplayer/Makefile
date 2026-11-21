@@ -33,8 +33,16 @@ $(OUT): $(OBJ) $(ASM) Multiplayer/font.bin $(BASE)
 
 # Every object is built again when any header here changes: a stale one once shipped a segment
 # loaded at its old address.
+#
+# The sources' checks of sizes and places are arrays of a negative size when they fail, which
+# this compiler only warns of, as warning 654, and compiles all the same: that warning stops
+# the build here, and takes the object with it.
 Multiplayer/%.o: Multiplayer/%.c $(wildcard Multiplayer/*.h)
-	$(CC) $(CFLAGS) -o $@ $<
+	@echo $(CC) -o $@ $<
+	@$(CC) $(CFLAGS) -o $@ $< > $@.log 2>&1; status=$$?; cat $@.log; \
+	if [ $$status -ne 0 ] || grep -q "Warning 654" $@.log; then \
+		rm -f $@ $@.log; echo "$<: not built"; exit 1; \
+	fi; rm -f $@.log
 
 clean:
 	rm -f $(OBJ)

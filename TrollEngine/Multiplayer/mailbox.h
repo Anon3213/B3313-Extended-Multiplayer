@@ -39,7 +39,7 @@
 #define MP_ANIM_CACHE_END 0x807E0000
 
 #define MP_MAILBOX_MAGIC 0x42334D50 // "B3MP"
-#define MP_MAILBOX_VERSION 21
+#define MP_MAILBOX_VERSION 22
 #define MP_PLAYER_SLOTS 16
 // Every other player in a full session. Slot 15 stays unused.
 #define MP_PUPPETS 15
@@ -380,7 +380,12 @@ struct MpMailbox {
     // the bridge adds no more than the ring holds beyond it, so a level's worth of coins sent
     // at once, to a game that has just come there, is not lost.
     /*0x5504*/ u32 coinsInTaken;
-    /*0x5508*/ u8 reserved14[0x5580 - 0x5508];
+    // How many times the game has loaded an area, which puts every coin of it back. The
+    // server tells a game which coins of an area were collected before it came; the bridge
+    // passes that on only when the area was loaded since it last did, as the server tells it
+    // again after a pause too, and a coin's name is not always one coin's alone.
+    /*0x5508*/ u32 areaLoads;
+    /*0x550C*/ u8 reserved14[0x5580 - 0x550C];
     /*0x5580*/ struct MpPeople people; // Written by the bridge.
     /*0x56EC*/ u8 reserved15[0x5700 - 0x56EC];
     /*0x5700*/ struct MpChat chat; // Written by the bridge.
