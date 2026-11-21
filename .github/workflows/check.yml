@@ -8,30 +8,27 @@ on:
 permissions:
   contents: read
 
+# Actions are named by commit, with the version that commit was. The Rust toolchain is the one
+# rust-toolchain.toml names, which rustup, on every runner, installs.
 jobs:
   # Everything scripts/check.py runs: formatting, lints, tests and dependency policy, for both
   # Rust workspaces and the Python scripts. The ROM build is not here: it needs Nintendo's ROM.
   windows:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: 1.99.1
-          components: clippy, rustfmt
-      - uses: taiki-e/install-action@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - run: rustup toolchain install --no-self-update
+      - uses: taiki-e/install-action@25f51f6b1bf4e18876107cece836f4f77ac17c8c # v2
         with:
           tool: cargo-nextest,cargo-deny
-      - uses: astral-sh/setup-uv@v6
-      - run: uv sync
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+      - run: uv sync --locked
       - run: uv run --no-sync python scripts/check.py
 
   # The server alone must also build and pass its tests on Linux, where a host may run it.
   linux-server:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: 1.99.1
-      - run: cargo test -p b3313-protocol -p b3313-server
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - run: rustup toolchain install --no-self-update
+      - run: cargo test --locked -p b3313-protocol -p b3313-server

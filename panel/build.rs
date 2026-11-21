@@ -28,13 +28,17 @@ fn main() {
             println!("cargo::rerun-if-changed={path}");
         }
     }
-    let commit = Command::new("git")
-        .args(["rev-parse", "--short=10", "HEAD"])
-        .output()
-        .ok()
-        .filter(|output| output.status.success())
-        .and_then(|output| String::from_utf8(output.stdout).ok())
-        .map(|commit| commit.trim().to_owned())
-        .unwrap_or_default();
+    // A release is built from a copy of the sources that git knows nothing of, so
+    // `scripts/release.py` names the commit itself.
+    println!("cargo::rerun-if-env-changed=B3313_COMMIT");
+    let commit = std::env::var("B3313_COMMIT").ok().or_else(|| {
+        Command::new("git")
+            .args(["rev-parse", "--short=10", "HEAD"])
+            .output()
+            .ok()
+            .filter(|output| output.status.success())
+            .and_then(|output| String::from_utf8(output.stdout).ok())
+    });
+    let commit = commit.map(|commit| commit.trim().to_owned()).unwrap_or_default();
     println!("cargo::rustc-env=B3313_PANEL_COMMIT={commit}");
 }

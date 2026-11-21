@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from game_versions import GameVersion, by_key
+from setup_base_rom import require_sha256
 
 VERSIONS_DIR = Path(__file__).resolve().parent.parent / "TrollEngine" / "Multiplayer" / "versions"
 
@@ -476,7 +477,11 @@ def main() -> None:
     if len(sys.argv) < 4:
         raise SystemExit(__doc__)
     version = by_key(sys.argv[1])
-    rom = Rom(Path(sys.argv[2]).read_bytes())
+    data = Path(sys.argv[2]).read_bytes()
+    # Another version's ROM would give this one's file that version's addresses, and two
+    # versions are alike enough for the build's own checks to let some of them through.
+    require_sha256(data, version.base_sha256, f"The ROM of {version.name}")
+    rom = Rom(data)
     objects = _engine_objects([Path(tree) for tree in sys.argv[3:]])
     votes = Votes()
     for engine_object in objects:

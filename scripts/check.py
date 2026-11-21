@@ -6,6 +6,9 @@ Usage: uv run --no-sync python scripts/check.py
 
 import subprocess
 import sys
+from pathlib import Path
+
+_ROOT = Path(__file__).resolve().parent.parent
 
 _PANEL = ("--manifest-path", "panel/Cargo.toml")
 
@@ -29,7 +32,7 @@ _COMMANDS = (
 def main() -> None:
     for command in _COMMANDS:
         print(f"== {' '.join(command)}", flush=True)
-        if subprocess.run(command, check=False).returncode:
+        if subprocess.run(command, check=False, cwd=_ROOT).returncode:
             sys.exit(f"Failed: {' '.join(command)}")
     print("All checks passed.")
 

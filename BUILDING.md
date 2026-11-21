@@ -54,7 +54,8 @@ the game's ROM, and the game's own code is left as it is.
    ```
 
 3. Build every version's multiplayer ROM, or only those you name. On Windows this runs the
-   build in WSL:
+   build in WSL, in your default distribution unless `B3313_WSL_DISTRO` names the one that
+   has the tools:
 
    ```bash
    uv run --no-sync python scripts/build_game.py
@@ -110,8 +111,9 @@ Never commit a ROM, a B3313 patch, or an engine file.
 
 ## Releasing
 
-Set the version in `panel/Cargo.toml`, and say what changed under a heading `## <version>` in
-`CHANGELOG.md`, then:
+Set the version in `panel/Cargo.toml`, build the panel once so that `panel/Cargo.lock` has it
+too, and say what changed under a heading `## <version>` in `CHANGELOG.md`. Commit those, as
+a release is built from what git has and as its lock files say, then:
 
 ```bash
 uv run --no-sync python scripts/release.py

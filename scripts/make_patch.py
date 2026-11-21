@@ -60,6 +60,12 @@ def make_bps(source: bytes, target: bytes) -> bytes:
 
 
 def write_patch(version: GameVersion) -> None:
+    for path, maker in (
+        (version.base_path, "setup_base_rom.py"),
+        (version.multiplayer_path, "build_game.py"),
+    ):
+        if not path.exists():
+            raise SystemExit(f"{path} is missing; make it with {maker}")
     base = version.base_path.read_bytes()
     require_sha256(base, version.base_sha256, f"The ROM of {version.name}")
     target = version.multiplayer_path.read_bytes()

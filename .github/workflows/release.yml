@@ -9,23 +9,30 @@ on:
 permissions:
   contents: write
 
+# Actions are named by commit, with the version that commit was: a release's programs are
+# built with nothing that can change without a change here. The Rust toolchain is the one
+# rust-toolchain.toml names, which rustup, on every runner, installs.
 jobs:
   windows:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: 1.99.1
-      - uses: astral-sh/setup-uv@v6
-      - run: uv sync
-      - run: uv run --no-sync python scripts/release.py
-      # The draft is titled with the version, and its text is this version's part of
-      # CHANGELOG.md, from its heading to the next.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      # Before anything is built: a tag is for the version the panel says it is, and that
+      # version has its part of CHANGELOG.md, from its heading to the next, which is the
+      # draft's text.
       - run: |
           version="${GITHUB_REF_NAME#v}"
+          grep -qx "version = \"$version\"" panel/Cargo.toml \
+            || { echo "panel/Cargo.toml is not version $version"; exit 1; }
           awk -v heading="## $version" '/^## /{wanted = ($0 == heading)} wanted' CHANGELOG.md > notes.md
-          gh release create "$GITHUB_REF_NAME" --draft --title "B3313 Extended Multiplayer $version" \
+          test -s notes.md || { echo "CHANGELOG.md has no heading ## $version"; exit 1; }
+        shell: bash
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+      - run: uv sync --locked
+      - run: uv run --no-sync python scripts/release.py
+      - run: |
+          gh release create "$GITHUB_REF_NAME" --draft \
+            --title "B3313 Extended Multiplayer ${GITHUB_REF_NAME#v}" \
             --notes-file notes.md dist/*.zip dist/*.sha256
         shell: bash
         env:
@@ -35,15 +42,14 @@ jobs:
     needs: windows
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: 1.99.1
-      - run: cargo build --release -p b3313-server
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - run: rustup toolchain install --no-self-update
+      - run: cargo build --release --locked -p b3313-server
       - run: |
           name="b3313-server-${{ github.ref_name }}-linux-x64"
           mkdir "$name"
           cp target/release/b3313-server server/server.example.conf LICENSE.txt NOTICE.md "$name/"
+          python3 scripts/release.py server-licenses "$name/THIRD-PARTY-LICENSES.txt"
           tar -czf "$name.tar.gz" "$name"
           sha256sum "$name.tar.gz" > "$name.tar.gz.sha256"
           gh release upload "${{ github.ref_name }}" "$name.tar.gz" "$name.tar.gz.sha256"

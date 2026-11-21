@@ -32,14 +32,25 @@ def git(*arguments: str, cwd: Path) -> bytes:
     return result.stdout
 
 
+def has_commit(clone: Path) -> bool:
+    """Whether `clone` is a repository holding the pinned commit: not one an earlier run left
+    half fetched, or fetched before the pin moved."""
+    check = ("git", "cat-file", "-e", f"{PINNED_COMMIT}^{{commit}}")
+    return (clone / ".git").is_dir() and not subprocess.run(
+        check, cwd=clone, check=False, capture_output=True
+    ).returncode
+
+
 def fetch_upstream(clone: Path) -> None:
     """Make `clone` a checkout of the pinned commit, byte for byte as upstream stores it."""
-    if not (clone / ".git").is_dir():
+    if not has_commit(clone):
         clone.mkdir(parents=True, exist_ok=True)
-        git("clone", "--quiet", "--no-checkout", UPSTREAM, ".", cwd=clone)
-        # Upstream's bundled tools ask for converted line endings, which IDO and armips reject
-        # on Windows. This file outranks theirs.
-        (clone / ".git" / "info" / "attributes").write_bytes(b"* -text\n")
+        if not (clone / ".git").is_dir():
+            git("init", "--quiet", cwd=clone)
+        git("fetch", "--quiet", UPSTREAM, PINNED_COMMIT, cwd=clone)
+    # Upstream's bundled tools ask for converted line endings, which IDO and armips reject
+    # on Windows. This file outranks theirs.
+    (clone / ".git" / "info" / "attributes").write_bytes(b"* -text\n")
     git("checkout", "--quiet", "--force", "--detach", PINNED_COMMIT, cwd=clone)
 
 
@@ -51,7 +62,11 @@ def setup(root: Path) -> None:
         )
     clone = root / ".engine"
     fetch_upstream(clone)
-    shutil.copytree(clone / ENGINE, root / ENGINE, dirs_exist_ok=True)
+    # The marker last, so that a copy cut short is not taken for a whole one.
+    marker = clone / SETUP_MARKER
+    not_marker = shutil.ignore_patterns(marker.name)
+    shutil.copytree(clone / ENGINE, root / ENGINE, dirs_exist_ok=True, ignore=not_marker)
+    shutil.copy(marker, root / SETUP_MARKER)
     print(f"Troll Engine {PINNED_COMMIT[:7]} is in {root / ENGINE}.")
 
 

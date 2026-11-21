@@ -50,4 +50,5 @@ None of the hooked files is among them.
 The programs link crates under the MIT, Apache-2.0, BSD, ISC, Zlib, CC0 and Unicode licenses;
 `deny.toml` and `panel/deny.toml` hold the lists the build enforces, and a release carries each
 crate's license text in `THIRD-PARTY-LICENSES.txt` (see `scripts/release.py`). The panel's
-icons are Lucide's, under the ISC license in `panel/assets/icons/LICENSE`.
+icons are Lucide's, under the ISC license in `panel/assets/icons/LICENSE`, which a release
+carries as `LUCIDE-LICENSE.txt`.

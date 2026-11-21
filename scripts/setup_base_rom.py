@@ -40,7 +40,8 @@ def to_big_endian(rom: bytes) -> bytes:
 
 def apply_bps(patch: bytes, source: bytes) -> bytes:
     """Return the patched ROM, or exit if any CRC stored in the patch does not match."""
-    if patch[:4] != b"BPS1":
+    # The least a patch can be: its name, three sizes and three checksums.
+    if patch[:4] != b"BPS1" or len(patch) < 4 + 3 + 12:
         raise SystemExit("Not a BPS1 patch")
     source_crc, target_crc, patch_crc = struct.unpack("<III", patch[-12:])
     if zlib.crc32(patch[:-4]) != patch_crc:
@@ -130,6 +131,9 @@ def released_version(patched: bytes) -> GameVersion:
 def main() -> None:
     if len(sys.argv) != 3:
         raise SystemExit(__doc__)
+    for name in sys.argv[1:]:
+        if not Path(name).is_file():
+            raise SystemExit(f"There is no file {name}")
     patch = Path(sys.argv[1]).read_bytes()
     vanilla = to_big_endian(Path(sys.argv[2]).read_bytes())
 
