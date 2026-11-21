@@ -24,6 +24,11 @@ In the game:
 - An enemy you attacked is handed on to a nearer player's game when the server says so, not
   some seconds later, during which two games ran it.
 - A game reset in a session has the session's world again before its first level.
+- **With three or more players, two could become one Mario** after a level loaded: one was
+  not drawn, and a hit on the other landed on both.
+- The other players no longer turn see-through or metal when you put on such a cap.
+- A player who takes the number of one who just left is no longer shown frozen where that
+  one stood.
 
 In the server:
 
@@ -37,6 +42,10 @@ In the server:
 - A session everyone has left no longer gives its stars to players of another version of
   B3313.
 - A ban of an IPv4 address also holds on a server that hears both IPv4 and IPv6.
+- A `/kick` or `/ban` in the chat removes only the player it named, not whoever took their
+  number if they left first.
+- A settings or ban file saved as "UTF-8 with BOM" is read, where it was refused whole, and
+  an unban takes the address out of the ban file however it was written there.
 - **`b3313-server` stopped with Ctrl+C, or by a signal on Linux, ends the session in order**:
   players are told at once, where they waited and tried to join again for two minutes.
 
@@ -52,6 +61,10 @@ In the panel and the bridge:
   to start, says at once when the emulator was closed, and makes about 2,700 fewer system
   calls a second in a busy area.
 - The game the panel builds is written whole or not at all.
+- The panel says when it found no save of the game to copy aside before a session.
+- Restart no longer risks closing the router's port just after opening it again.
+- A line in the Server chat too long for the game's chat is refused, where players lost
+  its end; `/list` there shows its answer.
 
 In a release: Lucide's license, and for the Linux server the licenses of what it is built
 from; the commit a panel was built from is in its crash reports again.

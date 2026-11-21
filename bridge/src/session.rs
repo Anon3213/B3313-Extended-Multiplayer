@@ -1001,7 +1001,13 @@ impl Session {
                 .receive(snapshot.arrived, snapshot.present, &snapshot.players);
         }
         if ready && let Some(world) = received.world.take() {
-            mailbox.write_session_world(&world)?;
+            // The server sends the same world every few seconds for the whole session. It
+            // is written when it is news: the game reads it once for each step of making a
+            // level, with no second try, and a read that fell in the middle of a write made
+            // that step from the player's own world, unlike everyone else's.
+            if !self.has_session_world || self.world.as_ref() != Some(&world) {
+                mailbox.write_session_world(&world)?;
+            }
             self.has_session_world = true;
             self.world = Some(world);
         }

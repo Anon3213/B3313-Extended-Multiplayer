@@ -240,10 +240,24 @@ struct Track {
     states: VecDeque<(i64, PlayerState)>,
 }
 
+/// How far behind a player's newest state another must be to be taken for a new sender's:
+/// ten seconds of states, far more than any packet arrives late by.
+const FROM_ANOTHER_SENDER: u32 = 300;
+
 impl Track {
     /// Adds a state if it is newer than any so far. Every snapshot repeats a player's newest
     /// state until another arrives, so most repeats are ignored here.
     fn add(&mut self, sequence: u32, arrived: Instant, state: PlayerState) {
+        // A state from far before the newest is no late one: the player with this number
+        // left and another has it, whose bridge counts from the start, and the snapshots
+        // that showed the number free in between were all missed. Kept, the old count would
+        // refuse everything of the new player until theirs passed it.
+        let behind = self
+            .newest
+            .map_or(0, |newest| newest.wrapping_sub(sequence));
+        if (FROM_ANOTHER_SENDER..u32::MAX / 2).contains(&behind) {
+            *self = Self::default();
+        }
         let is_newer = self
             .newest
             .is_none_or(|newest| (1..u32::MAX / 2).contains(&sequence.wrapping_sub(newest)));
@@ -498,6 +512,24 @@ mod tests {
         // Long after the last state, the newest is held.
         let later = x_of(&interpolator.sample(now + Duration::from_secs(1)));
         assert_eq!(later, [(3, 165.0)]);
+    }
+
+    /// A player leaves and another takes their number, and every snapshot between, which
+    /// would have shown the number free, is lost. The newcomer's bridge counts from the start.
+    #[test]
+    fn a_newcomer_with_a_number_just_left_is_not_held_at_the_old_players_place() {
+        let start = Instant::now();
+        let mut interpolator = Interpolator::default();
+        interpolator.receive(start, id(3).bit(), &[update(3, 9000, 500.0)]);
+
+        let later = start + Duration::from_secs(1);
+        for sequence in 1..4_u32 {
+            let arrived = later + TICK_INTERVAL * sequence;
+            interpolator.receive(arrived, id(3).bit(), &[update(3, sequence, 7.0)]);
+        }
+
+        let drawn = x_of(&interpolator.sample(later + Duration::from_secs(1)));
+        assert_eq!(drawn, [(3, 7.0)]);
     }
 
     #[test]

@@ -451,9 +451,13 @@ static void publish_local_player(void) {
 // Forgets a puppet whose object is gone, and returns the puppet's object if it still has one.
 static struct Object *live_puppet(struct PuppetRuntime *runtime) {
     // Pool slots are reused, and area changes unload objects, so an old pointer proves nothing.
+    // Nor does its being a puppet: after a level loads, another player's new puppet may be in
+    // the slot this one's was in, and the two players would be one Mario here. A puppet says
+    // whose it is in its parameters.
     if (runtime->object != NULL
         && (runtime->object->activeFlags == ACTIVE_FLAG_DEACTIVATED
-            || runtime->object->behavior != bhvMpPuppet)) {
+            || runtime->object->behavior != bhvMpPuppet
+            || runtime->object->oBehParams2ndByte != runtime - sPrivate->puppets)) {
         runtime->object = NULL;
     }
     return runtime->object;
@@ -480,9 +484,11 @@ f32 mp_camera_fov(void) {
 
 typedef Gfx *(*GeoFunction)(s32 callContext, struct GraphNode *node, Mat4 *mtx);
 
-// Mario's model takes its opacity from one state that every Mario drawn shares. While a puppet
-// that is fading is drawn, that state says he is see-through, and by how much, as the vanish cap
-// does; it is put back at once, so the local Mario and the other puppets are drawn as they are.
+// Mario's model takes its opacity, and whether he is metal, from one state that every Mario
+// drawn shares: the local Mario's. While a puppet is drawn, that state is the puppet's own: if
+// it is fading, see-through, and by how much, as the vanish cap does; and if not, as he is with
+// no cap, or every other player would turn see-through or metal when the local one put on such
+// a cap. It is put back at once, so the local Mario is drawn as he is.
 static Gfx *with_puppet_opacity(GeoFunction function, s32 callContext, struct GraphNode *node,
                                 Mat4 *mtx) {
     struct MarioBodyState *body = gMarioState->marioBodyState;
@@ -493,12 +499,11 @@ static Gfx *with_puppet_opacity(GeoFunction function, s32 callContext, struct Gr
     // The model also calls these as it is built, at boot, before Mario has a state; and only
     // objects in the pool have a behavior to ask: the mirror's Mario, for one, is not one.
     if (callContext != GEO_CONTEXT_RENDER || body == NULL || drawn < gObjectPool
-        || drawn >= gObjectPool + OBJECT_POOL_CAPACITY || drawn->behavior != bhvMpPuppet
-        || drawn->oOpacity >= OPAQUE) {
+        || drawn >= gObjectPool + OBJECT_POOL_CAPACITY || drawn->behavior != bhvMpPuppet) {
         return function(callContext, node, mtx);
     }
     own = body->modelState;
-    body->modelState = MODEL_STATE_ALPHA | drawn->oOpacity;
+    body->modelState = drawn->oOpacity >= OPAQUE ? 0 : MODEL_STATE_ALPHA | drawn->oOpacity;
     gfx = function(callContext, node, mtx);
     body->modelState = own;
     return gfx;
