@@ -91,7 +91,7 @@ def _copy_sources() -> None:
     subprocess.run(export, cwd=ROOT, check=True)
 
 
-def _names_home(file: Path) -> bool:
+def names_home(file: Path) -> bool:
     """Whether `file` holds the path of the builder's home folder, in either way of writing
     a path and in either of the encodings a program keeps text in."""
     home = str(Path.home()).lower()
@@ -249,7 +249,7 @@ def build_zip() -> None:
         shutil.copy(source, folder / target)
     licenses = third_party_licenses(((SOURCES, _TOOLS), (panel, _PANEL)), _PLATFORM, environment)
     _write_text(folder / "THIRD-PARTY-LICENSES.txt", licenses)
-    named = [file.name for file in sorted(folder.iterdir()) if _names_home(file)]
+    named = [file.name for file in sorted(folder.iterdir()) if names_home(file)]
     if named:
         raise SystemExit(f"Not released: the builder's home folder is named in {named}")
 

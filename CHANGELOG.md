@@ -4,6 +4,58 @@ What each version changed, newest first. Versions of the same protocol play toge
 those from 0.1.0 to 0.1.4 join each other's servers, as do those from 0.2.0 on, and a version
 that does not play with the ones before it says so.
 
+## Not yet released
+
+From a review of the whole project. It plays with 0.2.1's servers and players; the panel
+builds the game again by itself at the next join, as the game changed.
+
+In the game:
+
+- **Pausing no longer takes coins away.** When a game was paused and went on, coins nobody
+  had collected could vanish from it: as many as others had collected of the same ring.
+- **Coins others collected stay gone after Mario dies** in the area, where they came back
+  for the player who died.
+- **Mario is no longer left stuck** when he talks to a character, or is grabbed by an
+  enemy, that another player's game was running because that player stood nearer.
+- **Enemies others defeated stay gone after Mario dies** in the area too, where the player
+  who died had them back and fought what nobody else could see.
+- Enemies no longer all turn on your Mario for one frame now and then, which happened when
+  the game read who runs what while it was being written.
+- An enemy you attacked is handed on to a nearer player's game when the server says so, not
+  some seconds later, during which two games ran it.
+- A game reset in a session has the session's world again before its first level.
+
+In the server:
+
+- **A ban removes everyone who plays from the banned address**, each told why. The others
+  used to be left in the session unheard until they timed out. In the chat, a ban that would
+  shut out your own address, or a moderator only the host may remove, is refused.
+- One machine can no longer keep newcomers out by sending from a thousand ports.
+- A player already in the session can no longer have another removed by claiming their name.
+- In a busy area, every enemy now moves for everyone: with more news than a packet holds,
+  the same few were sent each time.
+- A session everyone has left no longer gives its stars to players of another version of
+  B3313.
+- A ban of an IPv4 address also holds on a server that hears both IPv4 and IPv6.
+- **`b3313-server` stopped with Ctrl+C, or by a signal on Linux, ends the session in order**:
+  players are told at once, where they waited and tried to join again for two minutes.
+
+In the panel and the bridge:
+
+- **Ban on a player's row bans nobody if that player has left** while the question stood.
+- A game the panel starts has preemptive frames off, and the key that closes the emulator,
+  Escape with Parallel Launcher's settings, must be pressed twice, as it also closes a line
+  of chat.
+- Reset all no longer turns streamer mode off, and streamer mode hides a few things it
+  missed.
+- The bridge no longer risks crashing the emulator while it looks for a game that is slow
+  to start, says at once when the emulator was closed, and makes about 2,700 fewer system
+  calls a second in a busy area.
+- The game the panel builds is written whole or not at all.
+
+In a release: Lucide's license, and for the Linux server the licenses of what it is built
+from; the commit a panel was built from is in its crash reports again.
+
 ## 0.2.1
 
 **About the version numbers:** 0.2.0 was made the same day and never published, and this

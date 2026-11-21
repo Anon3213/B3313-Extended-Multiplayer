@@ -427,6 +427,29 @@ mod tests {
         assert_eq!(made.as_deref(), Some(b"01xy789xy789xy7".as_slice()));
     }
 
+    /// Every real patch has numbers of more than one byte, as a ROM's size is.
+    #[test]
+    fn a_patch_with_numbers_of_several_bytes_is_read_as_its_maker_wrote_it() {
+        let source: Vec<u8> = (0..=255).cycle().take(40_000).collect();
+        let made = apply_bps(
+            &patch(
+                source.len(),
+                20_300,
+                &[
+                    command(0, 20_000), // The first half, from the same place.
+                    [command(2, 300), number(35_000 << 1)].concat(), // From far on in the source.
+                ],
+            ),
+            &source,
+        );
+        let expected = [
+            source.get(..20_000).unwrap_or_default(),
+            source.get(35_000..35_300).unwrap_or_default(),
+        ]
+        .concat();
+        assert_eq!(made, Some(expected));
+    }
+
     #[test]
     fn a_patch_that_does_not_fit_is_refused_not_trusted() {
         let source = b"0123456789";

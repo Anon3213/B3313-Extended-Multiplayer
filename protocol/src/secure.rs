@@ -304,4 +304,35 @@ mod tests {
         assert!(open(&mut server, 98));
         Ok(())
     }
+
+    /// What was opened stays opened as newer packets arrive: the record of it moves along
+    /// with the newest, and is not begun again.
+    #[test]
+    fn a_packet_cannot_be_replayed_after_newer_ones_arrived() -> Result<(), SecureError> {
+        let key = derive_key("", &SALT)?;
+        let (mut client, mut server, _) = connect(&key, &key)?;
+        let sealed: Vec<(u64, Vec<u8>)> = (0..300)
+            .map(|_| client.seal(b"x"))
+            .collect::<Result<_, _>>()?;
+        let open = |server: &mut Channel, index: usize| {
+            sealed
+                .get(index)
+                .and_then(|(nonce, packet)| server.open(*nonce, packet))
+                .is_some()
+        };
+
+        for index in 0..3 {
+            assert!(open(&mut server, index), "in order: {index}");
+        }
+        assert!(!open(&mut server, 0) && !open(&mut server, 1), "replayed");
+        // One that was skipped is still new, once.
+        assert!(open(&mut server, 10));
+        assert!(open(&mut server, 5) && !open(&mut server, 5));
+        assert!(!open(&mut server, 2), "replayed after the window moved");
+        // The newest leaps further than the window is wide: everything before it is too old.
+        assert!(open(&mut server, 299));
+        assert!(!open(&mut server, 10) && !open(&mut server, 11));
+        assert!(open(&mut server, 298) && !open(&mut server, 298));
+        Ok(())
+    }
 }

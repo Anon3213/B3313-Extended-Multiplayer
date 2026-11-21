@@ -102,15 +102,16 @@ The host and the server owner are usually the same person, and are still two thi
 server owner is whoever started the server, and need not be playing. The host is a player.
 If you host from the panel and join your own server on **Play**, the panel makes your player
 the host, so you are both: you speak as `[Server]` in the Server chat, and as yourself, with
-the crown, on **Play** and in the game. A server run by itself has a host only if a player
-is given its host password, or its owner names one with `host <player>`.
+the crown, on **Play** and in the game. A server run by itself has a host only if its owner
+names one with `host <player>`, or a player joins with its host password, which takes
+`b3313-bridge` run by hand: **Play** has no field for one.
 
 A session has one host. The first player to join with the host password keeps the role: anyone
 who joins with it later is an ordinary player, and the server owner is told. The host hands
 the role to another player with `/host <player>` and is an ordinary player from then on. If
 the host leaves without doing so, the session has no host until the server owner names one or
-a player joins with the host password. A host whose connection drops has the role again when
-they are back.
+a player joins with the host password. A host who joined with the host password has the role
+again when they are back from a dropped connection; one who was named must be named again.
 
 ### Chat
 

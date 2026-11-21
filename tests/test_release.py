@@ -2,7 +2,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from release import license_texts, linked_crates
+from release import license_texts, linked_crates, names_home
 
 
 def _package(name: str) -> dict[str, Any]:
@@ -40,6 +40,25 @@ def test_a_program_answers_for_what_it_is_built_from_and_not_for_its_tests() -> 
 def test_a_program_the_workspace_lacks_stops_the_release() -> None:
     with pytest.raises(SystemExit, match="renamed"):
         linked_crates(METADATA, ("server", "renamed"))
+
+
+def test_a_file_that_names_the_builders_home_folder_is_found(tmp_path: Path) -> None:
+    # What is released records paths of the PC it was built on; one in the builder's home
+    # folder begins with their name, in whichever way a program wrote it down.
+    home = str(Path.home())
+    written = {
+        "as it is": home.encode(),
+        "with the other slashes": home.replace("\\", "/").encode(),
+        "in capitals": home.upper().encode(),
+        "as Windows keeps text": home.encode("utf-16-le"),
+    }
+    for how, contents in written.items():
+        file = tmp_path / "program.exe"
+        file.write_bytes(b"\x00before " + contents + b" after\x00")
+        assert names_home(file), how
+    clean = tmp_path / "clean.exe"
+    clean.write_bytes(b"C:\\b3313-release\\src\\panel")
+    assert not names_home(clean)
 
 
 def test_a_link_to_a_license_is_not_its_text(tmp_path: Path) -> None:

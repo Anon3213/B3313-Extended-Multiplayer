@@ -64,7 +64,11 @@ def setup(root: Path) -> None:
     fetch_upstream(clone)
     # The marker last, so that a copy cut short is not taken for a whole one.
     marker = clone / SETUP_MARKER
-    not_marker = shutil.ignore_patterns(marker.name)
+
+    def not_marker(folder: str, names: list[str]) -> list[str]:
+        # The one file, not every file of its name: the tools have Makefiles of their own.
+        return [name for name in names if Path(folder) / name == marker]
+
     shutil.copytree(clone / ENGINE, root / ENGINE, dirs_exist_ok=True, ignore=not_marker)
     shutil.copy(marker, root / SETUP_MARKER)
     print(f"Troll Engine {PINNED_COMMIT[:7]} is in {root / ENGINE}.")

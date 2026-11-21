@@ -1,3 +1,5 @@
+import re
+
 import pytest
 from make_layout import HEADER, PYTHON, RUST, read_layout, render_python, render_rust
 
@@ -54,6 +56,24 @@ def test_each_number_is_written_for_the_bridge_in_the_types_it_uses() -> None:
     assert rust.count("NO_LEVEL") == 1
     assert "pub const NO_LEVEL: i16 = -1;\n" in rust
     assert "NO_LEVEL = -1\n" in render_python(layout)
+
+
+def test_the_segments_are_assembled_for_the_addresses_they_are_loaded_at() -> None:
+    # The header's addresses are where the game's loader puts the two segments, and the
+    # assembler's labels where their code is made to run: with one changed and not the other
+    # the ROM builds, and the game never starts.
+    layout = read_layout(HEADER.read_text(encoding="utf-8"))
+    segment = HEADER.with_name("segment.asm").read_text(encoding="utf-8")
+    labels = dict(
+        re.findall(r"^\.definelabel (mpseg2?_(?:start|end)), (0x[0-9A-F]+)$", segment, re.M)
+    )
+
+    assert {name: int(address, 16) for name, address in labels.items()} == {
+        "mpseg_start": layout["CODE_ADDR"],
+        "mpseg_end": layout["CODE_END"],
+        "mpseg2_start": layout["CODE2_ADDR"],
+        "mpseg2_end": layout["CODE2_END"],
+    }
 
 
 def test_the_layout_files_are_the_ones_the_header_gives() -> None:
