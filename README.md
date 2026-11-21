@@ -28,8 +28,14 @@ What is known not to have been tried:
 - **Joining over the internet through the panel's own port opening.** Only a router that
   refuses to open the port has been seen. Forwarding the port by hand is the fallback; see
   "Hosting over the internet".
-- **Most of the game.** Two linked games have been taken through levels 4 to 6 only. One
-  place there, level 6 area 6, is known to stop the game of whoever hosts.
+- **Most of the game.** In the Unabandoned A2 Anniversary Edition, two linked games have been
+  taken through levels 4 to 6 only. One place there, level 6 area 6, is known to stop the
+  game of whoever hosts.
+- **The two 1.0.2 versions, more than a little.** They were added later, and their engine's
+  source is not public, so the multiplayer code was fitted to the games as built. Each passes
+  the same automatic tests as the Anniversary Edition, and two linked games have been through
+  levels 4 and 5 and part of level 9. In level 4 area 4, a player standing where the area is
+  entered is pushed into a warp by the next player to arrive there.
 - **Keyboards that are not US ones**, and AltGr, for typing the chat in the game.
 - **More than two players at once**, other than with simulated ones.
 
