@@ -287,6 +287,11 @@ impl Panel {
             return;
         }
         match notice {
+            Notice::SaveNotCopied => self.play.note(
+                "No save of this game was found to copy aside. A game not yet played has \
+                 none; one you started yourself may keep its save elsewhere"
+                    .to_owned(),
+            ),
             Notice::Event(Event::WaitingForGame) => self.play.state = PlayState::WaitingForGame,
             Notice::Event(Event::Joining) => self.play.state = PlayState::Joining,
             Notice::Event(Event::Reconnecting(limit)) => {

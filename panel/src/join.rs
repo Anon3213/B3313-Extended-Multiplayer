@@ -19,6 +19,9 @@ use std::thread::{self, JoinHandle};
 #[derive(Debug)]
 pub enum Notice {
     Event(Event),
+    /// No save of the game was found to copy aside before the session, which adds to it:
+    /// the emulator keeps this game's save somewhere the panel did not look, or it has none.
+    SaveNotCopied,
     /// The session ended, saying why in a sentence for the player, with what the system said
     /// of it when there is more to know.
     Ended {
@@ -144,7 +147,7 @@ fn play(
     let report = |event| {
         let _ = notify.send(Notice::Event(event));
     };
-    let options = request.options(stop);
+    let options = request.options(stop, notify);
     preparing.store(false, Ordering::Relaxed);
     let (reason, detail) = match options {
         Ok(options) => match session::run(&options, stop, typed, report) {
@@ -262,18 +265,17 @@ impl Request {
 
     /// Copies the game's save aside before a session adds to it, where the emulator is the
     /// one whose saves the panel can find.
-    fn back_up_save(&self) -> Result<(), String> {
+    fn back_up_save(&self) -> Result<usize, String> {
         let (Some(install), Some(backups)) = (Install::find(), game_setup::backups_path()) else {
-            return Ok(());
+            return Ok(0);
         };
         install
             .back_up_saves(&self.rom, &backups)
-            .map(|_| ())
             .map_err(|error| format!("Could not copy your save aside before joining: {error}."))
     }
 
     /// What the session needs, read and looked up; or why that failed, in a sentence.
-    fn options(self, stop: &AtomicBool) -> Result<Options, String> {
+    fn options(self, stop: &AtomicBool, notify: &Sender<Notice>) -> Result<Options, String> {
         // Before the emulator is started, which a mistyped name should not do.
         let server = resolve(&self.server)
             .map_err(|error| format!("Could not find the server {}: {error}.", self.server))?;
@@ -283,7 +285,10 @@ impl Request {
         if stop.load(Ordering::Relaxed) {
             return Err("You left the session.".to_owned());
         }
-        self.back_up_save()?;
+        if self.back_up_save()? == 0 {
+            // Said, not passed over: the session changes a save that then has no copy.
+            let _ = notify.send(Notice::SaveNotCopied);
+        }
         let pid = self.emulator()?;
         let host_password = self
             .hosting
