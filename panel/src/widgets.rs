@@ -389,7 +389,7 @@ pub fn column_handle(
         .top_0()
         .bottom_0()
         .right_0()
-        .w(px(COLUMN_HANDLE_WIDTH))
+        .w(scaled(COLUMN_HANDLE_WIDTH))
         // The line stands a little inside the column, clear of the next one's text.
         .pr(px(5.))
         .flex()

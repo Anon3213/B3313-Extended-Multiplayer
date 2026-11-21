@@ -329,19 +329,35 @@ pub fn backups_path() -> Option<PathBuf> {
 /// # Errors
 /// Says, in a sentence for the player, which file could not be read or is not the one needed.
 pub fn set_up(vanilla: &Path, b3313_patch: &Path) -> Result<Built, String> {
-    let read = |path: &Path| {
-        std::fs::read(path).map_err(|error| format!("Could not read {}: {error}.", path.display()))
-    };
-    let (game, rom) =
-        build_rom(&read(vanilla)?, &read(b3313_patch)?).map_err(|error| format!("{error}."))?;
+    let (game, rom) = build_rom(&read_chosen(vanilla)?, &read_chosen(b3313_patch)?)
+        .map_err(|error| format!("{error}."))?;
     let path = game
         .rom_path()
         .ok_or("There is no folder to keep the game in.")?;
+    // Put in place whole: a panel closed half way through would leave half a ROM, which is
+    // then taken for a game an older panel built.
     path.parent()
         .map_or(Ok(()), std::fs::create_dir_all)
-        .and_then(|()| std::fs::write(&path, rom))
+        .and_then(|()| crate::preferences::replace_file_bytes(&path, &rom))
         .map_err(|error| format!("Could not write {}: {error}.", path.display()))?;
     Ok(Built { rom: path, game })
+}
+
+/// The bytes of a file the player chose as a ROM or a patch. One larger than any of either
+/// is refused unread: all of a file picked by mistake would otherwise be taken into memory
+/// before it is found to be neither.
+fn read_chosen(path: &Path) -> Result<Vec<u8>, String> {
+    let failed = |error| format!("Could not read {}: {error}.", path.display());
+    let size = std::fs::metadata(path).map_err(failed)?.len();
+    if usize::try_from(size).is_ok_and(|size| size <= LARGEST_ROM) {
+        std::fs::read(path).map_err(failed)
+    } else {
+        let megabytes = LARGEST_ROM >> 20;
+        Err(format!(
+            "{} is neither a ROM nor a patch: it is larger than {megabytes} MB.",
+            path.display()
+        ))
+    }
 }
 
 #[cfg(test)]

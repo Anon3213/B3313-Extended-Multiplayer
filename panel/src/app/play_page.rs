@@ -294,6 +294,9 @@ impl Panel {
                     until: Instant::now() + limit,
                 };
                 self.play.link = None;
+                // Who was there is not who will be: the server may be a new one, and this
+                // player's number another, which an old list would name someone else by.
+                self.play.roster.clear();
                 self.play
                     .note("Lost the server; joining it again".to_owned());
                 // Worth looking up for, from the game or another page.
@@ -362,7 +365,12 @@ impl Panel {
     /// Why Join cannot go ahead yet, if it cannot.
     fn join_blocker(&self, cx: &Context<Self>) -> Option<&'static str> {
         if self.play.bridge.is_some() {
-            Some("Already joined")
+            let leaving = matches!(self.play.state, PlayState::Ended { left: true, .. });
+            Some(if leaving {
+                "Still leaving the last session"
+            } else {
+                "Already joined"
+            })
         } else if self.play.building {
             Some("The game is still being built")
         } else if self.preferences.rom.is_none() {
@@ -557,6 +565,7 @@ impl Panel {
             return;
         }
         self.play.building = true;
+        let built_from = (Some(sm64.clone()), Some(patch.clone()));
         let built = cx
             .background_executor()
             .spawn(async move { game_setup::set_up(&sm64, &patch) });
@@ -564,6 +573,16 @@ impl Panel {
             let built = built.await;
             let _ = this.update(cx, |this, cx| {
                 this.play.building = false;
+                // Another file was chosen while this was built: the game shown as ready
+                // must be the one of the files shown, so it is built from those now.
+                let chosen = (
+                    this.preferences.sm64_rom.clone(),
+                    this.preferences.b3313_patch.clone(),
+                );
+                if chosen != built_from {
+                    this.build_game(cx);
+                    return;
+                }
                 match built {
                     Ok(built) => {
                         this.preferences.rom = Some(built.rom);
@@ -1323,6 +1342,13 @@ impl Panel {
         let launcher = self.play.launcher.as_ref()?;
         let typing = self.preferences.chat_key.is_some();
         Some(launcher.changes(typing).map_err(|error| error.to_string()))
+    }
+
+    /// Reads again what starting the game changes in the emulator, if the list is open.
+    pub(super) fn refresh_emulator_changes(&mut self) {
+        if self.play.changes.is_some() {
+            self.play.changes = self.emulator_changes();
+        }
     }
 
     /// Shows what starting the game changes in the emulator, or hides it again.

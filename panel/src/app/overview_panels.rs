@@ -320,14 +320,11 @@ impl Panel {
                     .child(div().flex_1().min_w_0().one_line().child(value))
             }))
             .into_any_element();
+        let (can_save, save_tip) = self.save_state();
         let save = Button::new("overview-save", "Save")
             .small()
-            .enabled(self.form.is_dirty() && self.field_errors.is_empty())
-            .tooltip(if self.form.is_dirty() {
-                "Saves the server settings (Ctrl+S)"
-            } else {
-                "Nothing to save"
-            })
+            .enabled(can_save)
+            .tooltip(save_tip)
             .on_click(|_, window, cx| window.dispatch_action(Box::new(SaveConfig), cx))
             .into_any_element();
         PanelContent::Card {

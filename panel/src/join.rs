@@ -214,7 +214,13 @@ fn current_rom(
                         .to_owned(),
                 ));
             };
-            let built = rebuild(sm64, patch)?;
+            // The player chose no file just now, so what went wrong with one needs saying.
+            let built = rebuild(sm64, patch).map_err(|error| {
+                format!(
+                    "This panel is newer than its game and could not build it again: {error} \
+                     Set the game up again on the Play page."
+                )
+            })?;
             // The patch chosen may be another version's than the ROM joined with, and
             // building that one leaves this ROM as old as it was.
             if built.rom != rom {

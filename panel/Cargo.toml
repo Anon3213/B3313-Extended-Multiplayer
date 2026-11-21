@@ -17,7 +17,7 @@ b3313-protocol = { path = "../protocol", version = "0.1.0" }
 b3313-server = { path = "../server", version = "0.1.0" }
 # Zed's own crate. Without default features it leaves out Linux's Wayland and X11 support.
 gpui = { version = "=0.2.2", default-features = false, features = ["windows-manifest"] }
-# Asks the host's router to open the server's port and for its public address (src/port_map.rs).
+# Asks the server owner's router to open the server's port and for its public address (src/port_map.rs).
 # Its default HTTP client is MPL-2.0, outside this workspace's license policy; this one runs on
 # tokio and hyper, which GPUI already brings.
 igd-next = { version = "0.18", default-features = false, features = ["aio_tokio"] }

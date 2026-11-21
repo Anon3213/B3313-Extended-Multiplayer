@@ -618,6 +618,9 @@ impl Preferences {
             pages: self.pages.clone(),
             // Reports already told of are not news again.
             seen_crash: self.seen_crash.clone(),
+            // Never turned off as a side effect: what it hides would show at once, to
+            // whoever is watching, the listen address on this very page among it.
+            streamer_mode: self.streamer_mode,
             ..Self::default()
         }
     }
@@ -677,11 +680,19 @@ impl Preferences {
 /// # Errors
 /// Fails if the file cannot be written or put in place.
 pub fn replace_file(path: &Path, text: &str) -> std::io::Result<()> {
+    replace_file_bytes(path, text.as_bytes())
+}
+
+/// As `replace_file`, for a file that is not text.
+///
+/// # Errors
+/// Fails if the file cannot be written or put in place.
+pub fn replace_file_bytes(path: &Path, contents: &[u8]) -> std::io::Result<()> {
     let mut beside = path.as_os_str().to_owned();
     beside.push(".b3313-saving");
     let beside = PathBuf::from(beside);
     let written = std::fs::File::create(&beside).and_then(|mut file| {
-        file.write_all(text.as_bytes())?;
+        file.write_all(contents)?;
         file.sync_all()
     });
     written
@@ -904,11 +915,14 @@ mod tests {
             compact: true,
             message_seconds: 15,
             listen_address: Some("0.0.0.0:41313".to_owned()),
+            streamer_mode: true,
             ..Preferences::default()
         };
         preferences.remember_file(Path::new("a.conf"));
         preferences.overview.add(PanelKind::Log);
         let reset = preferences.reset();
+        // What streamer mode hides is not shown for a reset of the theme.
+        assert!(reset.streamer_mode);
         assert_eq!(reset.theme, ThemeName::Blue);
         assert!(!reset.compact);
         assert_eq!(reset.message_seconds, 6);

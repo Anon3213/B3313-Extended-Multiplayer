@@ -362,8 +362,15 @@ impl Panel {
                     let moved = panel.clone();
                     window.on_mouse_event(move |event: &MouseMoveEvent, phase, _, cx| {
                         if phase == DispatchPhase::Capture {
+                            // A button let go outside the window sends no release: without
+                            // this the list would follow the mouse until the next click.
+                            let held = event.pressed_button == Some(MouseButton::Left);
                             let _ = moved.update(cx, |this, cx| {
-                                this.chat_log(chat).drag_to(event.position.y);
+                                if held {
+                                    this.chat_log(chat).drag_to(event.position.y);
+                                } else {
+                                    this.chat_log_mut(chat).drag = None;
+                                }
                                 cx.notify();
                             });
                         }

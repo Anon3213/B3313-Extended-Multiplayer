@@ -39,6 +39,8 @@ fn main() {
             .filter(|output| output.status.success())
             .and_then(|output| String::from_utf8(output.stdout).ok())
     });
-    let commit = commit.map(|commit| commit.trim().to_owned()).unwrap_or_default();
+    let commit = commit
+        .map(|commit| commit.trim().to_owned())
+        .unwrap_or_default();
     println!("cargo::rustc-env=B3313_PANEL_COMMIT={commit}");
 }

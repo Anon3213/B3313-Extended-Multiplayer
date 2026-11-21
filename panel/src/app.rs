@@ -672,8 +672,7 @@ impl Panel {
                     ToastTone::Error,
                     format!("Fix the settings first: {message}"),
                 );
-                self.page = Page::Settings;
-                cx.notify();
+                self.go_to(Page::Settings, cx);
                 None
             }
         }
@@ -977,13 +976,16 @@ impl Panel {
         cx.notify();
     }
 
-    fn ban_player(&mut self, player: PlayerId, window: &mut Window, cx: &mut Context<Self>) {
-        let address = self
-            .dashboard
-            .players()
+    /// The IP address the player numbered `player` plays from, if one is in the session.
+    fn ip_of(&self, player: PlayerId) -> Option<IpAddr> {
+        let mut players = self.dashboard.players();
+        players
             .find(|row| row.id == player)
-            .map(|row| row.address.ip());
-        let Some(ip) = address else {
+            .map(|row| row.address.ip())
+    }
+
+    fn ban_player(&mut self, player: PlayerId, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(ip) = self.ip_of(player) else {
             return;
         };
         let question = format!("Ban player {}?", player.get());
@@ -992,8 +994,14 @@ impl Panel {
              The Bans page can let it in again.",
             self.shown_ip(ip)
         );
-        Self::confirm(window, cx, &question, &detail, "Ban", move |this, _, _| {
-            if let Some(running) = &this.running {
+        Self::confirm(window, cx, &question, &detail, "Ban", move |this, _, cx| {
+            // The server bans whoever has the number when the command arrives. While the
+            // question stood, the player asked about may have left and another taken it.
+            if this.ip_of(player) != Some(ip) {
+                let gone = format!("Player {} has left; nobody was banned", player.get());
+                this.show_toast(ToastTone::Error, gone);
+                cx.notify();
+            } else if let Some(running) = &this.running {
                 running.host.send(Command::Ban(player));
             }
         });
@@ -1006,6 +1014,9 @@ impl Panel {
                 .update(cx, |input, cx| input.set_invalid(true, cx));
             let message = if text.is_empty() {
                 "Type the IP address to ban".to_owned()
+            } else if self.preferences.streamer_mode {
+                // What was typed is hidden in its field, and is not to show here.
+                "That is not an IP address".to_owned()
             } else {
                 format!("{text} is not an IP address")
             };
@@ -1187,8 +1198,7 @@ impl Panel {
                 ToastTone::Error,
                 format!("Fix the settings first: {message}"),
             );
-            self.page = Page::Settings;
-            cx.notify();
+            self.go_to(Page::Settings, cx);
             return;
         }
         let directory = self
@@ -1224,7 +1234,7 @@ impl Panel {
             }
             Err(message) => {
                 self.show_toast(ToastTone::Error, message);
-                self.page = Page::Settings;
+                self.go_to(Page::Settings, cx);
             }
         }
         cx.notify();
@@ -1687,6 +1697,11 @@ impl Panel {
             crate::crash::note("panel", &format!("Showed {}", page.title()));
         }
         self.page = page;
+        // What the Play page lists as changed in the emulator is what a join would change,
+        // which a preference set on another page meanwhile, as the chat's key, alters.
+        if page == Page::Play {
+            self.refresh_emulator_changes();
+        }
         self.share_state();
         cx.notify();
     }

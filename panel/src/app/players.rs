@@ -873,7 +873,7 @@ impl Panel {
                 .flex()
                 .items_center()
                 .overflow_hidden()
-                .pr(px(COLUMN_HANDLE_WIDTH))
+                .pr(scaled(COLUMN_HANDLE_WIDTH))
                 .child(cell)
                 .children(line)
                 .into_any_element()

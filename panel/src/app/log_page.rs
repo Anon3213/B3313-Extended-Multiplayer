@@ -11,7 +11,7 @@ use crate::theme::{MONO, Theme, scaled};
 use crate::widgets::{Button, COLUMN_HANDLE_WIDTH, OneLine as _, Tip, Tone, card, sort_heading};
 use gpui::{
     AnyElement, App, Context, FontWeight, ScrollStrategy, SharedString, Window, div, prelude::*,
-    px, uniform_list,
+    uniform_list,
 };
 use std::fmt::Write as _;
 use std::ops::Range;
@@ -157,7 +157,7 @@ impl Panel {
                 .flex()
                 .items_center()
                 .overflow_hidden()
-                .pr(px(COLUMN_HANDLE_WIDTH))
+                .pr(scaled(COLUMN_HANDLE_WIDTH))
                 .child(cell)
                 .children(line)
                 .into_any_element()

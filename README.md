@@ -166,8 +166,9 @@ and games you start from Parallel Launcher are as they always were. The **Game**
 | Change | Why |
 |---|---|
 | Sound is on, and the game keeps time by it | RetroArch paces a game by its sound; with sound off the game runs at over twice its speed. You can still mute it |
-| Run-ahead and rewind are off, and no saved state loads at the start | Each would put your game at a moment the other players' games are not at |
-| The hotkeys for loading a state, rewinding, stepping a frame, fast forward and slow motion do nothing | The same: a game that jumps in time or changes speed falls out of step |
+| Run-ahead, preemptive frames and rewind are off, and no saved state loads at the start | Each would put your game at a moment the other players' games are not at |
+| The hotkeys for loading a state, rewinding, stepping a frame, fast forward, slow motion, run-ahead and preemptive frames do nothing | The same: a game that jumps in time or changes speed falls out of step |
+| The key that closes the emulator must be pressed twice | With Parallel Launcher's settings it is Escape, which also closes a line of chat you are typing |
 | Your hotkeys on keys you type with do nothing | You type the chat in the game's window. Only while typing in the game is on, under **Preferences** |
 | RetroArch takes no commands over the network | It would take them from any PC on your network |
 

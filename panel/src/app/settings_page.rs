@@ -11,6 +11,21 @@ use crate::widgets::{Button, FocusRing as _, Tip, Tone, card, card_header};
 use gpui::{AnyElement, Context, FontWeight, SharedString, Window, div, prelude::*};
 
 impl Panel {
+    /// Whether Save has anything to do, and what its button says of itself, wherever one is:
+    /// settings never kept in a file can be saved as they are, which asks where.
+    pub(super) fn save_state(&self) -> (bool, &'static str) {
+        let never_saved = self.form.path().is_none();
+        let can_save = self.field_errors.is_empty() && (self.form.is_dirty() || never_saved);
+        let tip = if !self.field_errors.is_empty() {
+            "Fix the settings marked in red first"
+        } else if can_save {
+            "Save the settings (Ctrl+S)"
+        } else {
+            "No changes to save"
+        };
+        (can_save, tip)
+    }
+
     pub(super) fn render_settings(&mut self, _: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let theme = *cx.global::<Theme>();
         let file = self
@@ -24,14 +39,7 @@ impl Panel {
             (count, _) => format!(" · {count} settings need fixing"),
         };
         let dirty = self.form.is_dirty();
-        let can_save = self.field_errors.is_empty() && (dirty || self.form.path().is_none());
-        let save_tip = if !self.field_errors.is_empty() {
-            "Fix the settings marked in red first"
-        } else if can_save {
-            "Save the settings (Ctrl+S)"
-        } else {
-            "No changes to save"
-        };
+        let (can_save, save_tip) = self.save_state();
         let actions = vec![
             self.arrange_button(ArrangedPage::Settings, cx),
             Button::new("new-config", "New")

@@ -38,7 +38,7 @@ type FixedChange = (
 /// these would break a session, or mislead the player about one. They are laid over the
 /// player's `RetroArch` settings for the one run, and `config_save_on_exit` keeps them out of
 /// the player's own settings file.
-const FIXED_CHANGES: [FixedChange; 5] = [
+const FIXED_CHANGES: [FixedChange; 6] = [
     (
         "Sound is on, and the game keeps time by it.",
         "The emulator paces a game by its sound: with sound off the game runs at over twice \
@@ -46,17 +46,20 @@ const FIXED_CHANGES: [FixedChange; 5] = [
         &[("audio_enable", "true"), ("audio_sync", "true")],
     ),
     (
-        "Run-ahead and rewind are off, and no saved state is loaded as the game starts.",
+        "Run-ahead, preemptive frames and rewind are off, and no saved state is loaded as the \
+         game starts.",
         "Each would put your game at a moment the other players' games are not at.",
         &[
             ("run_ahead_enabled", "false"),
+            ("preemptive_frames_enable", "false"),
             ("rewind_enable", "false"),
             ("savestate_auto_load", "false"),
         ],
     ),
     (
-        "The hotkeys for loading a state, rewinding, stepping a frame, fast forward and slow \
-         motion do nothing, on the keyboard, a controller or the mouse.",
+        "The hotkeys for loading a state, rewinding, stepping a frame, fast forward, slow \
+         motion, run-ahead and preemptive frames do nothing, on the keyboard, a controller or \
+         the mouse.",
         "For the same reason: a game that jumps in time or runs at another speed falls out \
          of step with the others.",
         // Each hotkey has a key, and a controller's button and stick and a mouse's button,
@@ -90,7 +93,21 @@ const FIXED_CHANGES: [FixedChange; 5] = [
             ("input_hold_slowmotion_btn", NO_KEY),
             ("input_hold_slowmotion_axis", NO_KEY),
             ("input_hold_slowmotion_mbtn", NO_KEY),
+            ("input_runahead_toggle", NO_KEY),
+            ("input_runahead_toggle_btn", NO_KEY),
+            ("input_runahead_toggle_axis", NO_KEY),
+            ("input_runahead_toggle_mbtn", NO_KEY),
+            ("input_preempt_toggle", NO_KEY),
+            ("input_preempt_toggle_btn", NO_KEY),
+            ("input_preempt_toggle_axis", NO_KEY),
+            ("input_preempt_toggle_mbtn", NO_KEY),
         ],
+    ),
+    (
+        "The key that closes the emulator must be pressed twice.",
+        "With Parallel Launcher's settings that key is Escape, which also closes a line of \
+         chat you are typing in the game: one press would close the game with it.",
+        &[("quit_press_twice", "true")],
     ),
     (
         "The emulator takes no commands over the network.",
@@ -280,10 +297,13 @@ impl Install {
     /// # Errors
     /// Fails if the player's settings cannot be read.
     pub fn changes(&self, typing: bool) -> io::Result<Vec<Change>> {
-        Ok(changes_to(
-            &std::fs::read_to_string(&self.settings)?,
-            typing,
-        ))
+        Ok(changes_to(&self.read_settings()?, typing))
+    }
+
+    /// The player's settings as text. A byte that is no text, as in a path typed in another
+    /// encoding, is no reason to refuse to join: only the lines read here matter.
+    fn read_settings(&self) -> io::Result<String> {
+        Ok(String::from_utf8_lossy(&std::fs::read(&self.settings)?).into_owned())
     }
 
     /// Starts `rom` and returns the emulator's process ID. The game is left running when the
@@ -316,7 +336,7 @@ impl Install {
     /// # Errors
     /// Fails if a save is there but cannot be copied.
     pub fn back_up_saves(&self, rom: &Path, backups: &Path) -> io::Result<usize> {
-        let settings = std::fs::read_to_string(&self.settings)?;
+        let settings = self.read_settings()?;
         let (Some(saves), Some(game)) = (save_directory(&settings), rom.file_stem()) else {
             return Ok(0);
         };

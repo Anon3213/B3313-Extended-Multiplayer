@@ -74,11 +74,55 @@ pub fn hide_servers<'a>(text: &str, servers: impl IntoIterator<Item = &'a str>) 
             && host.trim_matches(['[', ']']).parse::<IpAddr>().is_err();
         if named && hidden.contains(host) {
             // The whole address first, so its port stays with it.
-            hidden = hidden
-                .replace(server, &hide_server(server))
-                .replace(host, HIDDEN_HOST);
+            let whole = hidden.replace(server, &hide_server(server));
+            hidden = replace_where(&whole, host, HIDDEN_HOST, |text, start, end| {
+                // Not inside a longer word: a server called "pc" is not in "accept".
+                let before = text.get(..start).and_then(|head| head.chars().next_back());
+                let after = text.get(end..).and_then(|tail| tail.chars().next());
+                !before.is_some_and(is_word_character) && !after.is_some_and(is_word_character)
+            });
         }
     }
+    hidden
+}
+
+/// `text` with `replacement` in place of each `needle` in it for which `fits`, given the
+/// text and where the needle starts and ends in it, says so.
+fn replace_where(
+    text: &str,
+    needle: &str,
+    replacement: &str,
+    fits: impl Fn(&str, usize, usize) -> bool,
+) -> String {
+    let mut replaced = String::with_capacity(text.len());
+    let mut copied = 0;
+    for (start, found) in text.match_indices(needle) {
+        let end = start + found.len();
+        if fits(text, start, end) {
+            replaced.push_str(text.get(copied..start).unwrap_or_default());
+            replaced.push_str(replacement);
+            copied = end;
+        }
+    }
+    replaced.push_str(text.get(copied..).unwrap_or_default());
+    replaced
+}
+
+/// `text` with the user's folder, `home`, shown as `%USERPROFILE%`, however its letters'
+/// case and its slashes are written: Windows takes `c:/users/name` for the same folder, and a
+/// path typed by hand may be written so.
+fn hide_home(text: &str, home: &str) -> String {
+    // Each of these keeps a character's length, so places in one are places in the other.
+    let plain = |text: &str| text.to_ascii_lowercase().replace('/', "\\");
+    let (plain_text, plain_home) = (plain(text), plain(home));
+    let mut hidden = String::with_capacity(text.len());
+    let mut copied = 0;
+    for (start, found) in plain_text.match_indices(&plain_home) {
+        hidden.push_str(text.get(copied..start).unwrap_or_default());
+        hidden.push_str("%USERPROFILE%");
+        copied = start + found.len();
+    }
+    hidden.push_str(text.get(copied..).unwrap_or_default());
     hidden
 }
 
@@ -98,7 +142,7 @@ fn split_port(address: &str) -> (&str, Option<u16>) {
 #[must_use]
 pub fn hide_in_text(text: &str, home: Option<&str>) -> String {
     let text = match home.filter(|home| !home.is_empty()) {
-        Some(home) => text.replace(home, "%USERPROFILE%"),
+        Some(home) => hide_home(text, home),
         None => text.to_owned(),
     };
     let mut hidden = String::with_capacity(text.len());
@@ -230,6 +274,11 @@ mod tests {
             "Reaching ••••••••:41313… could not find ••••••••"
         );
         assert_eq!(hide_servers("joined gamingpc", servers), "joined ••••••••");
+        // A short name is hidden where it stands alone, not inside other words.
+        assert_eq!(
+            hide_servers("pc:41313 did not accept the pc, pcs", ["pc:41313"]),
+            "••••••••:41313 did not accept the ••••••••, pcs"
+        );
         // IPs are left to `hide_in_text`, which keeps this PC's own showing.
         assert_eq!(
             hide_servers("203.0.113.9:41313 and localhost:41313", servers),
@@ -252,5 +301,10 @@ mod tests {
             r"could not save %USERPROFILE%\bans.txt"
         );
         assert_eq!(hide_in_text(text, None), text);
+        // As a path typed by hand may be written, which Windows takes for the same folder.
+        assert_eq!(
+            hide_in_text("c:/users/name/bäns.txt", Some(r"C:\Users\Name")),
+            "%USERPROFILE%/bäns.txt"
+        );
     }
 }

@@ -582,7 +582,7 @@ impl Panel {
             .top_0()
             .bottom_0()
             .right_0()
-            .w(px(6.))
+            .w(scaled(6.))
             .flex()
             .justify_end()
             .cursor(CursorStyle::ResizeLeftRight)
