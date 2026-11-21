@@ -161,8 +161,9 @@ pub struct Session {
     people: People,
     /// Removals the host or a moderator asked for in the chat, for `serve` to carry out: it
     /// holds the socket and the bans. A removal is with the place in the order of joining
-    /// of the player it is of: a number is another player's once its own has left.
-    orders: Vec<(Command, Option<u64>)>,
+    /// of the player it is of, as a number is another player's once its own has left, and
+    /// with who asked for it, to be told if it comes to nothing.
+    orders: Vec<(Command, Option<(u64, PlayerId)>)>,
 }
 
 impl Session {
@@ -636,7 +637,8 @@ impl Session {
                     ChatCommand::Ban(_) => Command::Ban(target),
                     _ => Command::Kick(target),
                 };
-                self.orders.push((order, self.joined_of(target)));
+                let meant = self.joined_of(target).map(|joined| (joined, actor));
+                self.orders.push((order, meant));
             }
             ChatCommand::Mod(target) | ChatCommand::Unmod(target) => {
                 let target = self.people.find(target)?;
@@ -697,16 +699,26 @@ impl Session {
     }
 
     /// The removals asked for in the chat since the last call, for `serve` to carry out.
-    /// Not one of a player who has left since: whoever has their number now was not meant.
+    /// Not one of a player who has left since: whoever has their number now was not meant,
+    /// and who asked is told that nobody was removed.
     pub fn take_orders(&mut self) -> Vec<Command> {
-        let orders = std::mem::take(&mut self.orders);
-        let still_meant = |(order, joined): (Command, Option<u64>)| match order {
-            Command::Kick(player) | Command::Ban(player) => {
-                (self.joined_of(player) == joined).then_some(order)
+        let mut carried_out = Vec::new();
+        for (order, meant) in std::mem::take(&mut self.orders) {
+            let (Command::Kick(player) | Command::Ban(player)) = order else {
+                carried_out.push(order);
+                continue;
+            };
+            match meant {
+                Some((joined, _)) if self.joined_of(player) == Some(joined) => {
+                    carried_out.push(order);
+                }
+                Some((_, actor)) => self
+                    .people
+                    .tell(actor, "They left before that; nobody was removed."),
+                None => {}
             }
-            _ => Some(order),
-        };
-        orders.into_iter().filter_map(still_meant).collect()
+        }
+        carried_out
     }
 
     /// Everyone listed, with their roles and names.
@@ -2522,6 +2534,9 @@ mod tests {
         send(&mut session, client(7), &hello(), now);
         assert!(session.is_player(client(7)));
         assert_eq!(session.take_orders(), []);
+        // And whoever asked is told so, not left to think it was done.
+        let told = chat_for(&mut session, 0, now).join(" ");
+        assert!(told.contains("nobody was removed"), "{told}");
     }
 
     #[test]

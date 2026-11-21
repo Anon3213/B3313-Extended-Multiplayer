@@ -1,7 +1,8 @@
 //! Rate limits, so a flood costs the server little and cannot crowd out players.
 //!
-//! Every address gets a token bucket, and join attempts from new addresses share one more. The
-//! table of addresses is bounded: when it is full, packets from addresses not in it are dropped
+//! Every address gets a token bucket, and join attempts from new addresses share one more. A
+//! player's bucket is spent only by packets that prove they are the player's; everything else
+//! spends a smaller one, whatever address it claims. Each table of addresses is bounded: when it is full, packets from addresses not in it are dropped
 //! until idle entries expire. One IP address may have only a small part of the table, so that
 //! one machine sending from a thousand ports cannot fill it and keep every newcomer out.
 
@@ -81,36 +82,84 @@ impl LogLimit {
     }
 }
 
+/// What an address that has proved nothing may send in a second: a join's few packets, sent
+/// again a few times over. Kept apart from a player's allowance, which only packets sealed
+/// under the player's own channel spend: an address is easy to forge, and a flood sent under
+/// a player's would otherwise use up what the player may send, and so cut them off.
+const UNPROVEN_PER_SECOND: u32 = 20;
+
+/// The allowances of one kind of sender, each address with a bucket of its own.
 #[derive(Debug)]
-pub struct Limits {
+struct Allowances {
     rate: f64,
     burst: f64,
     addresses: HashMap<SocketAddr, Bucket>,
     /// How many of `addresses` each IP address has.
     per_ip: HashMap<IpAddr, usize>,
+}
+
+#[derive(Debug)]
+pub struct Limits {
+    /// For packets that proved they are a player's.
+    players: Allowances,
+    /// For everything else, whatever address it claims to come from.
+    unproven: Allowances,
     join_rate: f64,
     joins: Bucket,
 }
 
 impl Limits {
-    /// Allows `per_address` packets a second from each address, in bursts of up to half a second's
+    /// Allows `per_address` packets a second from each player, in bursts of up to half a second's
     /// worth, and `joins` join attempts a second from new addresses together.
     #[must_use]
     pub fn new(per_address: u32, joins: u32, now: Instant) -> Self {
-        let rate = f64::from(per_address);
         let join_rate = f64::from(joins);
         Self {
-            rate,
-            burst: rate / 2.0,
-            addresses: HashMap::new(),
-            per_ip: HashMap::new(),
+            players: Allowances::new(per_address),
+            unproven: Allowances::new(UNPROVEN_PER_SECOND),
             join_rate,
             joins: Bucket::full(join_rate, now),
         }
     }
 
-    /// Reports whether a packet from `from` may be handled.
+    /// Reports whether a packet that proved it is the player's at `from` may be handled.
     pub fn allow_packet(&mut self, from: SocketAddr, now: Instant) -> bool {
+        self.players.allow(from, now)
+    }
+
+    /// Reports whether a packet that proved nothing, from what it says is `from`, may be
+    /// handled.
+    pub fn allow_unproven(&mut self, from: SocketAddr, now: Instant) -> bool {
+        self.unproven.allow(from, now)
+    }
+
+    /// Reports whether a join attempt from a new address may be handled.
+    pub fn allow_join(&mut self, now: Instant) -> bool {
+        self.joins.take(1.0, self.join_rate, self.join_rate, now)
+    }
+
+    /// Forgets addresses unheard for a while.
+    pub fn forget_idle(&mut self, now: Instant) {
+        self.players.forget_idle(now);
+        self.unproven.forget_idle(now);
+    }
+}
+
+impl Allowances {
+    /// `per_second` packets a second from each address, in bursts of up to half a second's
+    /// worth.
+    fn new(per_second: u32) -> Self {
+        let rate = f64::from(per_second);
+        Self {
+            rate,
+            burst: rate / 2.0,
+            addresses: HashMap::new(),
+            per_ip: HashMap::new(),
+        }
+    }
+
+    /// Reports whether a packet from `from` may be handled.
+    fn allow(&mut self, from: SocketAddr, now: Instant) -> bool {
         if !self.addresses.contains_key(&from) {
             // Not swept here, where a flood from made-up addresses would have every one of
             // its packets look through the whole table: the server forgets the idle ones at
@@ -128,13 +177,8 @@ impl Limits {
             .is_some_and(|bucket| bucket.take(1.0, rate, burst, now))
     }
 
-    /// Reports whether a join attempt from a new address may be handled.
-    pub fn allow_join(&mut self, now: Instant) -> bool {
-        self.joins.take(1.0, self.join_rate, self.join_rate, now)
-    }
-
     /// Forgets addresses unheard for a while.
-    pub fn forget_idle(&mut self, now: Instant) {
+    fn forget_idle(&mut self, now: Instant) {
         let per_ip = &mut self.per_ip;
         self.addresses.retain(|address, bucket| {
             let kept = now.saturating_duration_since(bucket.last()) < IDLE_EXPIRY;

@@ -91,12 +91,27 @@ impl Gate {
         data: &[u8],
         now: Instant,
     ) -> Option<Vec<u8>> {
-        // Before any other work, so a flood costs as little as possible.
-        if !self.limits.allow_packet(from, now) {
+        let packet = Packet::decode(data);
+        // A packet sealed under a player's channel proves it is theirs, and spends their
+        // allowance. Anything else spends that of an address that has proved nothing, even
+        // one that claims a player's address: a forged flood must not cut the player off.
+        let opened = match &packet {
+            Ok(Packet::Sealed { nonce, sealed }) => {
+                let peer = self.peers.get_mut(&from);
+                peer.and_then(|peer| peer.channel.open(*nonce, sealed))
+            }
+            _ => None,
+        };
+        let allowed = if opened.is_some() {
+            self.limits.allow_packet(from, now)
+        } else {
+            self.limits.allow_unproven(from, now)
+        };
+        if !allowed {
             self.rate_limited += 1;
             return None;
         }
-        let packet = match Packet::decode(data) {
+        let packet = match packet {
             Ok(packet) => packet,
             Err(DecodeError::WrongVersion(_)) => {
                 return Some(Packet::Rejected(RejectReason::WrongVersion).encode());
@@ -105,8 +120,8 @@ impl Gate {
             Err(_) => return None,
         };
         match packet {
-            Packet::Sealed { nonce, sealed } => {
-                let inner = self.peers.get_mut(&from)?.channel.open(nonce, &sealed)?;
+            Packet::Sealed { .. } => {
+                let inner = opened?;
                 session.record_received(from, data.len());
                 // Handshake packets travel only unsealed, and admission only through the gate.
                 let inner = Packet::decode(&inner).ok()?;
@@ -555,10 +570,36 @@ mod tests {
         let answered = (0..200)
             .filter(|_| gate.receive(&mut session, client(0), &hello, now).is_some())
             .count();
-        // A burst of half a second's worth.
-        assert_eq!(answered, 50);
-        assert_eq!(gate.take_rate_limited(), 150);
+        // A burst of half a second's worth of what an address that proved nothing may send.
+        assert_eq!(answered, 10);
+        assert_eq!(gate.take_rate_limited(), 190);
         assert!(gate.receive(&mut session, client(1), &hello, now).is_some());
+        Ok(())
+    }
+
+    /// A sender's address is easy to forge. Packets sent under a player's that are not
+    /// sealed under the player's channel must not use up what the player may send.
+    #[test]
+    fn a_flood_forged_under_a_players_address_does_not_cut_the_player_off() -> TestResult {
+        let now = Instant::now();
+        let mut gate = Gate::new(&Config::default(), now)?;
+        let mut session = Session::new();
+        let (_, mut channel) = join(&mut gate, &mut session, client(1), "", now)
+            .map_err(|reply| format!("refused: {reply:?}"))?;
+
+        let forged = Packet::Sealed {
+            nonce: 9,
+            sealed: vec![7; 40],
+        }
+        .encode();
+        for _ in 0..500 {
+            assert_eq!(gate.receive(&mut session, client(1), &forged, now), None);
+        }
+
+        let (nonce, sealed) = channel.seal(&Packet::Ping { id: 3 }.encode())?;
+        let ping = Packet::Sealed { nonce, sealed }.encode();
+        let answer = gate.receive(&mut session, client(1), &ping, now);
+        assert!(answer.is_some(), "the player's own packet is still heard");
         Ok(())
     }
 }
