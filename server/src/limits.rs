@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 const MAX_TRACKED: usize = 1024;
 /// And at once from one IP address: a full session behind one router, each player's bridge
 /// having joined again from a new port, with the old ports not yet forgotten.
-const MAX_TRACKED_PER_IP: u32 = 48;
+const MAX_TRACKED_PER_IP: usize = 48;
 /// An address unheard for this long is forgotten.
 const IDLE_EXPIRY: Duration = Duration::from_secs(10);
 
@@ -87,7 +87,7 @@ pub struct Limits {
     burst: f64,
     addresses: HashMap<SocketAddr, Bucket>,
     /// How many of `addresses` each IP address has.
-    per_ip: HashMap<IpAddr, u32>,
+    per_ip: HashMap<IpAddr, usize>,
     join_rate: f64,
     joins: Bucket,
 }
@@ -209,7 +209,7 @@ mod tests {
         let now = Instant::now();
         let mut limits = Limits::new(100, 5, now);
         let allowed = (1000..3000).filter(|&port| limits.allow_packet(address(port), now));
-        assert_eq!(allowed.count(), MAX_TRACKED_PER_IP as usize);
+        assert_eq!(allowed.count(), MAX_TRACKED_PER_IP);
         // A newcomer elsewhere is heard all the same.
         assert!(limits.allow_packet(machine(1), now));
 

@@ -261,6 +261,7 @@ impl People {
     }
 
     /// Whether a player's bridge has said who they are, which it may once.
+    #[must_use]
     pub fn is_introduced(&self, player: PlayerId) -> bool {
         self.member(player).is_some_and(|member| member.introduced)
     }
