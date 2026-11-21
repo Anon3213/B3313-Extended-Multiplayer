@@ -356,7 +356,7 @@ impl Panel {
                         (Some(owner), _) => {
                             let named = self.dashboard.player(owner).map(player_name);
                             let owner = named.unwrap_or_else(|| format!("Player {}", owner.get()));
-                            format!("World from {owner}")
+                            self.shown_text(&format!("World from {owner}"))
                         }
                         (None, 0) => "Nobody has joined".to_owned(),
                         (None, _) => "No world shared yet".to_owned(),

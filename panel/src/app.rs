@@ -759,7 +759,11 @@ impl Panel {
                 if let RouterPort::Open(map) = running.port {
                     map.close();
                 }
-                self.restart_password = Some(running.host.host_password().to_owned());
+                // Only one the panel made up: the settings' own is theirs to change, and
+                // one taken out of them to revoke it must not live on in the next server.
+                if running.config.host_password.is_empty() {
+                    self.restart_password = Some(running.host.host_password().to_owned());
+                }
                 running.host.stop_to_restart()
             } else {
                 running.host.stop()
@@ -980,7 +984,11 @@ impl Panel {
             match Command::parse(&format!("say {typed}")) {
                 Ok(command) => command,
                 Err(why) => {
-                    let why = why.replacen("say takes", "A line takes", 1);
+                    let why = why.replacen("say takes", "A line takes", 1).replacen(
+                        "say needs",
+                        "A line needs",
+                        1,
+                    );
                     self.show_toast(ToastTone::Error, why);
                     cx.notify();
                     return;
@@ -1297,13 +1305,15 @@ impl Panel {
         }
     }
 
-    /// The servers the player has joined, as typed: the recent ones and the one now joined.
+    /// The servers the player has joined, as typed: the recent ones, the one now joined,
+    /// and every one joined since the panel opened, which lines still on screen may name.
     fn known_servers(&self) -> impl Iterator<Item = &str> {
         self.preferences
             .servers
             .iter()
             .map(|server| server.address.as_str())
             .chain(std::iter::once(self.play.server()))
+            .chain(self.play.servers_joined())
     }
 
     /// A log entry as one line on screen, hidden as streamer mode needs.
@@ -1718,7 +1728,8 @@ impl Panel {
         self.page = page;
         // What the Play page lists as changed in the emulator is what a join would change,
         // which a preference set on another page meanwhile, as the chat's key, alters.
-        if page == Page::Play {
+        // The Overview's Game panel shows the same list.
+        if matches!(page, Page::Play | Page::Overview) {
             self.refresh_emulator_changes();
         }
         self.share_state();

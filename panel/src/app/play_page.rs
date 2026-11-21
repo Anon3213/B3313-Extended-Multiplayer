@@ -105,6 +105,10 @@ pub(super) struct Play {
     pub(super) chat: ChatLog,
     /// Everyone in the session, as the server last listed them.
     roster: Vec<RosterEntry>,
+    /// Every server joined since the panel opened, as typed. What was said of one stays on
+    /// screen after it is forgotten from the recent ones, and streamer mode must still know
+    /// its name to hide it there.
+    joined: Vec<String>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -167,6 +171,7 @@ impl Play {
             say,
             chat: ChatLog::default(),
             roster: Vec::new(),
+            joined: Vec::new(),
             _subscriptions: subscriptions,
         }
     }
@@ -214,6 +219,11 @@ impl Play {
     /// The server joined, or last joined, as typed.
     pub(super) fn server(&self) -> &str {
         &self.server
+    }
+
+    /// Every server joined since the panel opened, as typed.
+    pub(super) fn servers_joined(&self) -> impl Iterator<Item = &str> {
+        self.joined.iter().map(String::as_str)
     }
 
     /// The field that holds an address, for streamer mode to hide.
@@ -421,6 +431,9 @@ impl Panel {
         let password = self.play.password.read(cx).text().to_owned();
         let kept = self.play.remember_password.then_some(password.as_str());
         self.preferences.remember_server(&server, kept);
+        if !self.play.joined.contains(&server) {
+            self.play.joined.push(server.clone());
+        }
         let name = self.play.name.read(cx).text().trim().to_owned();
         self.preferences.player_name.clone_from(&name);
         self.save_preferences();
