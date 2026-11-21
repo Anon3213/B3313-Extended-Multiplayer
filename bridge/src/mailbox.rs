@@ -281,7 +281,7 @@ impl<'a, M: ProcessMemory> Mailbox<'a, M> {
     ///
     /// # Errors
     /// Fails if the game's memory cannot be read, as when it has exited.
-    pub fn game_version(&self) -> io::Result<Option<u32>> {
+    pub fn mailbox_version(&self) -> io::Result<Option<u32>> {
         if self.ram.read_u32(MAILBOX_ADDRESS)? != MAGIC {
             return Ok(None);
         }

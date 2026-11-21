@@ -47,7 +47,7 @@ const REJOIN_ATTEMPT: Duration = Duration::from_secs(1);
 const STALLED_AFTER: u32 = 15;
 /// A game that has not marked its mailbox for this long is not about to: it starts within a
 /// few seconds, and one being started again is back sooner.
-const WRONG_GAME_AFTER: Duration = Duration::from_secs(10);
+const WRONG_ROM_AFTER: Duration = Duration::from_secs(10);
 /// A failure this soon after the last is one of a run, and a run longer than `MOST_FAULTS`
 /// ends the session: joining again does not mend whatever fails that often.
 const FAULT_WINDOW: Duration = Duration::from_secs(10);
@@ -97,9 +97,9 @@ pub enum Event {
     /// at most.
     Reconnecting(Duration),
     /// In the session, but the game running is not one this bridge can show it in: it marked
-    /// itself with this mailbox version, or with none. Said once; `describe_wrong_game`
+    /// itself with this mailbox version, or with none. Said once; `describe_wrong_rom`
     /// puts it in words.
-    WrongGame(Option<u32>),
+    WrongRom(Option<u32>),
     /// The local player hit another.
     Hit(PlayerId, HitKind),
     /// Another player hit the local one.
@@ -116,9 +116,9 @@ pub enum Event {
     },
 }
 
-/// What `Event::WrongGame` means for the player, and what to do about it.
+/// What `Event::WrongRom` means for the player, and what to do about it.
 #[must_use]
-pub fn describe_wrong_game(found: Option<u32>) -> String {
+pub fn describe_wrong_rom(found: Option<u32>) -> String {
     match found {
         Some(version) => format!(
             "The game running is built for another version of this program (its mailbox is \
@@ -831,7 +831,7 @@ struct Session {
     /// Since when the game has not been one to write into, and whether the player has been
     /// told that it is the wrong game.
     unready_since: Option<Instant>,
-    said_wrong_game: bool,
+    said_wrong_rom: bool,
 }
 
 impl Session {
@@ -842,7 +842,7 @@ impl Session {
             published: None,
             slots_unpublished: 0,
             unready_since: None,
-            said_wrong_game: false,
+            said_wrong_rom: false,
             shown: ShownPlayers::default(),
             interpolator: Interpolator::default(),
             has_session_world: false,
@@ -866,7 +866,7 @@ impl Session {
             shown: std::mem::take(&mut self.shown),
             world: self.world.take(),
             playing: self.playing,
-            said_wrong_game: self.said_wrong_game,
+            said_wrong_rom: self.said_wrong_rom,
             progress,
             ..Self::new(now)
         };
@@ -899,10 +899,10 @@ impl Session {
         let ready = mailbox.is_ready()?;
         if !ready {
             let since = *self.unready_since.get_or_insert(now);
-            if !self.said_wrong_game && now.saturating_duration_since(since) >= WRONG_GAME_AFTER {
+            if !self.said_wrong_rom && now.saturating_duration_since(since) >= WRONG_ROM_AFTER {
                 // Without this the player is in the session, sees nobody, and is told nothing.
-                self.said_wrong_game = true;
-                events(Event::WrongGame(mailbox.game_version()?));
+                self.said_wrong_rom = true;
+                events(Event::WrongRom(mailbox.mailbox_version()?));
             }
         } else if self.unready_since.take().is_some() {
             // Marked now and not at the last step: the game was reset and has started again.
@@ -1793,10 +1793,10 @@ mod tests {
             // The player, who sees nobody, is told why: once, and that the game has no
             // mailbox at all.
             let mut told = Vec::new();
-            for later in [super::WRONG_GAME_AFTER, super::WRONG_GAME_AFTER * 2] {
+            for later in [super::WRONG_ROM_AFTER, super::WRONG_ROM_AFTER * 2] {
                 let now = Instant::now() + later;
                 let mut note = |event| {
-                    if let Event::WrongGame(found) = event {
+                    if let Event::WrongRom(found) = event {
                         told.push(found);
                     }
                 };

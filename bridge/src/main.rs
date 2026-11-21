@@ -60,7 +60,7 @@ fn print_event(server: SocketAddr, event: &Event) {
             limit.as_secs()
         ),
         Event::Joined(player) => println!("Joined {server} as player {}.", player.get()),
-        Event::WrongGame(found) => eprintln!("{}", session::describe_wrong_game(*found)),
+        Event::WrongRom(found) => eprintln!("{}", session::describe_wrong_rom(*found)),
         Event::Hit(target, kind) => println!("Hit player {} ({kind:?}).", target.get()),
         Event::HitBy(attacker, kind) => println!("Hit by player {} ({kind:?}).", attacker.get()),
         Event::Link(report) => println!("Network: {report}"),

@@ -307,8 +307,8 @@ impl Panel {
                 let text = format!("Joined {} as player {}", self.play.server, player.get());
                 self.play.note(text);
             }
-            Notice::Event(Event::WrongGame(found)) => {
-                let text = b3313_bridge::session::describe_wrong_game(found);
+            Notice::Event(Event::WrongRom(found)) => {
+                let text = b3313_bridge::session::describe_wrong_rom(found);
                 self.play.note(text.clone());
                 self.report_problem(text);
             }
