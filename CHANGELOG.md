@@ -4,17 +4,30 @@ What each version changed, newest first. Versions of the same protocol play toge
 those from 0.1.0 to 0.1.4 join each other's servers, and a version that does not play with
 the ones before it says so.
 
-## Not yet released
-
-- **The mod plays three versions of B3313:** Unabandoned A2 Anniversary Edition, 1.0.2
-  hotfix 3, and 1.0.2 hotfix 3 with Unabandoned tweaks.
-- **Everyone in a session plays the same version.** The first player in decides which, and
-  a session everyone has left takes whichever comes next.
-- A player whose game is another version is not let in, and is told which version the
-  session is playing and which theirs is. The server's log says so too.
+## 0.2.0
 
 This version does not play with earlier ones: the panel, the bridge and the server must all
-be this version.
+be this version. The panel builds the game again by itself when you join, if your Super
+Mario 64 ROM and your patch are still where they were.
+
+- **The mod plays three versions of B3313:** Unabandoned A2 Anniversary Edition, 1.0.2
+  hotfix 3, and 1.0.2 hotfix 3 with Unabandoned tweaks. The last is what some downloads
+  called "1.0.2 hotfix 3" are: the same release with the Unabandoned team's changes to the
+  engine.
+- **Choose any of their patches on the Play page.** The panel tells which version a patch is
+  by the game it makes, not by the file's name, says which one it built, and shows it under
+  Game from then on.
+- **Everyone in a session plays the same version**, as the versions' levels differ. The
+  first player in decides which, and a session everyone has left takes whichever comes next.
+  A host should tell players which version to bring.
+- A player whose game is another version is not let in, and is told which version the
+  session is playing and which theirs is. The server's log says so too.
+- **Each version has a multiplayer ROM and a save of its own**, so you can set up more than
+  one and change between them by choosing another patch. The Anniversary Edition keeps the
+  save it had.
+- The two 1.0.2 versions have been through less than the Anniversary Edition: the automatic
+  tests, and two linked games in levels 4, 5 and part of 9. In level 4 area 4, a player
+  standing where the area is entered is pushed into a warp by the next one to arrive.
 
 ## 0.1.4
 
