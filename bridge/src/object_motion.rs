@@ -11,6 +11,7 @@
 //! never blended from one much older than itself: the object stood still until just before it.
 
 use crate::interpolation::SenderClock;
+use crate::layout::len;
 use b3313_protocol::objects::{is_child_name, object_id};
 use b3313_protocol::{ObjectState, ObjectUpdate, PlayerId, TICK_INTERVAL};
 use std::collections::{HashMap, VecDeque};
@@ -28,10 +29,19 @@ const WEIGHT_ONE: u16 = 4096;
 const FORGET_AFTER: Duration = Duration::from_secs(5);
 
 /// Where the blended fields sit in a state's network part (`struct MpObjectState` from `id`).
-const POSITION: [usize; 3] = [4, 8, 12];
-const ANGLES: [usize; 4] = [24, 26, 28, 30];
-const ANIMATION: usize = 42;
-const ANIMATION_FRAME: usize = 44;
+const FROM: usize = len::OBJECT_STATE_ID_OFFSET;
+const POSITION: [usize; 3] = {
+    let x = len::OBJECT_STATE_POS_OFFSET - FROM;
+    [x, x + 4, x + 8]
+};
+const ANGLES: [usize; 4] = [
+    len::OBJECT_STATE_FACE_YAW_OFFSET - FROM,
+    len::OBJECT_STATE_MOVE_YAW_OFFSET - FROM,
+    len::OBJECT_STATE_FACE_PITCH_OFFSET - FROM,
+    len::OBJECT_STATE_FACE_ROLL_OFFSET - FROM,
+];
+const ANIMATION: usize = len::OBJECT_STATE_ANIM_INDEX_OFFSET - FROM;
+const ANIMATION_FRAME: usize = len::OBJECT_STATE_ANIM_FRAME_OFFSET - FROM;
 
 fn micros(duration: Duration) -> i64 {
     i64::try_from(duration.as_micros()).unwrap_or(i64::MAX)

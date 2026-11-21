@@ -85,6 +85,17 @@ impl SenderClock {
     }
 }
 
+// `Fields` reads a state in this order: the place's four bytes, then each of these.
+const _: () = {
+    use crate::layout::len;
+    assert!(len::PLAYER_SLOT_POS_OFFSET == 4);
+    assert!(len::PLAYER_SLOT_ANGLE_OFFSET == 16);
+    assert!(len::PLAYER_SLOT_ANIM_ID_OFFSET == 22);
+    assert!(len::PLAYER_SLOT_ANIM_FRAME_OFFSET == 24);
+    assert!(len::PLAYER_SLOT_PLATFORM_OFFSET == 26);
+    assert!(len::PLAYER_SLOT_PLATFORM_OFFSET_OFFSET == 28);
+};
+
 /// A `PlayerState`'s fields, in the layout of the game's `struct MpPlayerSlot`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Fields {

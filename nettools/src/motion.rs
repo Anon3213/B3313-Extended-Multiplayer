@@ -4,6 +4,7 @@
 //! them moving the same distance every frame; stalls and catch-up jumps show as variation in the
 //! drawn speed.
 
+use b3313_bridge::layout::len;
 use b3313_protocol::{PLAYER_STATE_SIZE, PlayerId, PlayerState};
 use std::collections::HashMap;
 use std::fmt;
@@ -15,8 +16,8 @@ pub const SPEED: f32 = 500.0;
 const SETTLE: Duration = Duration::from_secs(1);
 
 /// `struct MpPlayerSlot` offsets.
-const AREA: usize = 1;
-const POSITION_X: usize = 4;
+const AREA: usize = len::PLAYER_SLOT_AREA_INDEX_OFFSET;
+const POSITION_X: usize = len::PLAYER_SLOT_POS_OFFSET;
 
 /// A player in area `area` of level 16, `seconds` into a run at `SPEED` along x.
 #[must_use]

@@ -3,7 +3,7 @@
 //! Each simulated client runs the bridge's own `Connection` at the bridge's rate, so the numbers
 //! are the ones real bridges would cause, minus the game.
 
-use b3313_bridge::client::Connection;
+use b3313_bridge::client::{Connection, resolve};
 use b3313_bridge::interpolation::Interpolator;
 use b3313_bridge::pacing::{FRAME_INTERVAL, SEND_INTERVAL, Schedule};
 use b3313_nettools::motion::{MotionMeter, MotionReport, moving_state};
@@ -13,7 +13,7 @@ use b3313_protocol::{MAX_PLAYERS, PROGRESS_SIZE, Progress, WORLD_INPUTS_SIZE};
 use b3313_server::{Config, Event, StopOnDrop, serve};
 use std::error::Error;
 use std::io;
-use std::net::{Ipv4Addr, SocketAddr, ToSocketAddrs, UdpSocket};
+use std::net::{Ipv4Addr, SocketAddr, UdpSocket};
 use std::process::ExitCode;
 use std::sync::atomic::AtomicBool;
 use std::thread;
@@ -252,10 +252,9 @@ fn run() -> Result<(), Box<dyn Error>> {
 
     if options.has("server") {
         let server: String = options.get("server", String::new())?;
-        let server = server
-            .to_socket_addrs()?
-            .next()
-            .ok_or("the server address did not resolve")?;
+        // As a bridge does: for "localhost" Windows gives the IPv6 address first, where a
+        // server listening on IPv4 is not.
+        let server = resolve(&server)?;
         println!("{clients} clients in {areas} areas for {seconds} s against {server}");
         let target = Target {
             server,

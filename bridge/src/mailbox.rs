@@ -271,8 +271,12 @@ impl<'a, M: ProcessMemory> Mailbox<'a, M> {
     /// # Errors
     /// Fails if the game's memory cannot be read, as when it has exited.
     pub fn is_ready(&self) -> io::Result<bool> {
-        Ok(self.ram.read_u32(MAILBOX_ADDRESS)? == MAGIC
-            && self.ram.read_u32(VERSION_ADDRESS)? == VERSION)
+        // The mark and the version after it, in one read: this is asked on every turn.
+        const { assert!(VERSION_ADDRESS == MAILBOX_ADDRESS + 4) };
+        let mut marked = [0; 8];
+        self.ram.read(MAILBOX_ADDRESS, &mut marked)?;
+        let (mark, version) = marked.split_at(4);
+        Ok(mark == MAGIC.to_be_bytes() && version == VERSION.to_be_bytes())
     }
 
     /// The mailbox version the game marked itself with, or `None` for a game that has marked
@@ -882,22 +886,29 @@ impl<'a, M: ProcessMemory> Mailbox<'a, M> {
         self.ram.read_u32(OBJECTS_IN_ADDRESS)
     }
 
-    /// Adds another owner's state for an object in `place`, after the `count` written so far, and
-    /// returns the new count. The entry goes in before the count rises, as for hits.
+    /// Adds other owners' states for objects in `place`, after the `count` written so far, and
+    /// returns the new count. The entries go in before the count rises, as for hits, and the
+    /// count rises once for them all: writing it after each cost a system call a state, sixty
+    /// times a second.
     ///
     /// # Errors
     /// Fails if the game's memory cannot be written.
-    pub fn write_object_in(
+    pub fn write_objects_in(
         &self,
-        count: u32,
+        mut count: u32,
         place: Place,
-        state: &ObjectState,
+        states: &[ObjectState],
     ) -> io::Result<u32> {
-        let entry = OBJECTS_IN_ADDRESS
-            + layout::OBJECTS_IN_ENTRIES_OFFSET
-            + (count % OBJECTS_IN_ENTRIES) * MAILBOX_OBJECT_STRIDE;
-        self.ram.write(entry, &mailbox_object(place, state))?;
-        let count = count.wrapping_add(1);
+        if states.is_empty() {
+            return Ok(count);
+        }
+        for state in states {
+            let entry = OBJECTS_IN_ADDRESS
+                + layout::OBJECTS_IN_ENTRIES_OFFSET
+                + (count % OBJECTS_IN_ENTRIES) * MAILBOX_OBJECT_STRIDE;
+            self.ram.write(entry, &mailbox_object(place, state))?;
+            count = count.wrapping_add(1);
+        }
         self.ram.write(OBJECTS_IN_ADDRESS, &count.to_be_bytes())?;
         Ok(count)
     }
@@ -1085,7 +1096,7 @@ mod tests {
                     target.write_objects_owned(place, &owned, &gone)?;
                 }
                 _ => {
-                    target.write_object_in(count, place, &noise.bytes())?;
+                    target.write_objects_in(count, place, &[noise.bytes()])?;
                 }
             }
         }
@@ -1344,7 +1355,7 @@ mod tests {
         let mut count = 0;
         for id in 1..=65 {
             written(&process);
-            count = target.write_object_in(count, (16, 1), &object(id, 3))?;
+            count = target.write_objects_in(count, (16, 1), &[object(id, 3)])?;
             // The count last: the game takes every entry the count covers.
             assert_eq!(written(&process).last(), Some(&0xD00), "object {id}");
         }

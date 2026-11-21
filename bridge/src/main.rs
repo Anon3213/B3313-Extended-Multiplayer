@@ -162,7 +162,9 @@ fn run() -> Result<(), Box<dyn Error>> {
             println!("{}", end.describe());
             Ok(())
         }
-        End::ServerSilent | End::Removed(_) | End::Refused(_) => Err(end.describe().into()),
+        End::ServerSilent | End::Removed(_) | End::Refused(_) | End::NetworkFailing(_) => {
+            Err(end.describe().into())
+        }
     }
 }
 

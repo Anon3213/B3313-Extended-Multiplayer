@@ -11,18 +11,28 @@ use windows_sys::Win32::System::Diagnostics::ToolHelp::{
     CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS,
 };
 use windows_sys::Win32::System::Memory::{
-    MEM_COMMIT, MEMORY_BASIC_INFORMATION, PAGE_EXECUTE_READ, PAGE_EXECUTE_READWRITE, PAGE_READONLY,
-    PAGE_READWRITE, PAGE_WRITECOPY, VirtualQueryEx,
+    MEM_COMMIT, MEMORY_BASIC_INFORMATION, PAGE_EXECUTE_READ, PAGE_EXECUTE_READWRITE, PAGE_GUARD,
+    PAGE_NOACCESS, PAGE_READONLY, PAGE_READWRITE, PAGE_WRITECOPY, VirtualQueryEx,
 };
 use windows_sys::Win32::System::ProcessStatus::{
     K32QueryWorkingSetEx, PSAPI_WORKING_SET_EX_BLOCK, PSAPI_WORKING_SET_EX_INFORMATION,
 };
 use windows_sys::Win32::System::Threading::{
-    OpenProcess, PROCESS_QUERY_INFORMATION, PROCESS_VM_OPERATION, PROCESS_VM_READ, PROCESS_VM_WRITE,
+    GetExitCodeProcess, OpenProcess, PROCESS_QUERY_INFORMATION, PROCESS_VM_OPERATION,
+    PROCESS_VM_READ, PROCESS_VM_WRITE,
 };
 
 const READABLE_PROTECTIONS: u32 =
     PAGE_READONLY | PAGE_READWRITE | PAGE_WRITECOPY | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE;
+/// What marks a page as not to be read whatever else it allows. A guard page is the end of a
+/// thread's stack: the first touch of it, a read from another process among them, takes the
+/// guard away, and the thread then crashes where its stack would have grown.
+const UNREADABLE_PROTECTIONS: u32 = PAGE_GUARD | PAGE_NOACCESS;
+
+/// Whether memory under `protection` may be read without changing anything for its owner.
+const fn is_readable(protection: u32) -> bool {
+    protection & READABLE_PROTECTIONS != 0 && protection & UNREADABLE_PROTECTIONS == 0
+}
 /// RDRAM is 8 MB, so regions this large only waste time and memory to scan.
 const MAX_SCANNED_REGION: usize = 1 << 31;
 /// The size of a page of memory, on every processor Windows runs on that this is built for.
@@ -53,7 +63,21 @@ impl WindowsProcess {
         }
         Ok(Self { handle })
     }
+
+    /// Whether the process has ended. Its memory then reads as holding nothing at all, which
+    /// alone looks like a game that has not started yet.
+    #[must_use]
+    pub fn has_exited(&self) -> bool {
+        let mut code = 0_u32;
+        // SAFETY: `code` is valid for the one write of a `u32` this makes, and the handle was
+        // opened with the right to ask.
+        let ok = unsafe { GetExitCodeProcess(self.handle, &raw mut code) };
+        ok != 0 && code != STILL_ACTIVE
+    }
 }
+
+/// What Windows gives as the exit code of a process that is still running.
+const STILL_ACTIVE: u32 = 259;
 
 /// The emulator's program, as Parallel Launcher starts it.
 pub const EMULATOR: &str = "retroarch.exe";
@@ -186,10 +210,7 @@ impl ProcessMemory for WindowsProcess {
             // SAFETY: a non-zero return means the kernel filled in `info`.
             let info = unsafe { info.assume_init() };
             let (base, size) = (info.BaseAddress.addr(), info.RegionSize);
-            if info.State == MEM_COMMIT
-                && info.Protect & READABLE_PROTECTIONS != 0
-                && size < MAX_SCANNED_REGION
-            {
+            if info.State == MEM_COMMIT && is_readable(info.Protect) && size < MAX_SCANNED_REGION {
                 regions.push(Region {
                     address: base,
                     size,
@@ -265,8 +286,32 @@ impl WindowsProcess {
 
 #[cfg(test)]
 mod tests {
-    use super::{PAGE_SIZE, WindowsProcess, find_processes};
+    use super::{PAGE_SIZE, WindowsProcess, find_processes, is_readable};
     use crate::ram::ProcessMemory;
+    use windows_sys::Win32::System::Memory::{PAGE_GUARD, PAGE_NOACCESS, PAGE_READWRITE};
+
+    /// A full search reads every region found readable. Reading the guard page at the end of
+    /// a thread's stack takes its guard away for good, in the emulator's own threads.
+    #[test]
+    fn a_stacks_guard_page_is_not_read_though_it_allows_reading() {
+        assert!(is_readable(PAGE_READWRITE));
+        assert!(!is_readable(PAGE_READWRITE | PAGE_GUARD));
+        assert!(!is_readable(PAGE_NOACCESS));
+    }
+
+    #[test]
+    fn a_running_process_has_not_exited_and_one_that_ended_has() -> std::io::Result<()> {
+        assert!(!WindowsProcess::open(std::process::id())?.has_exited());
+
+        let mut child = std::process::Command::new("cmd")
+            .args(["/c", "exit"])
+            .spawn()?;
+        // Opened while it may still run: the handle keeps the process known after it ends.
+        let opened = WindowsProcess::open(child.id())?;
+        child.wait()?;
+        assert!(opened.has_exited());
+        Ok(())
+    }
 
     #[test]
     fn memory_set_aside_and_never_touched_is_not_in_use_and_a_touched_page_is()

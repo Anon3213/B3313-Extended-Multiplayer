@@ -144,6 +144,9 @@ pub enum End {
     Removed(RemoveReason),
     /// The server was there again but would not have this player back.
     Refused(io::Error),
+    /// The network failed again each time the bridge had joined again, with the game still
+    /// running.
+    NetworkFailing(io::Error),
 }
 
 impl End {
@@ -163,6 +166,7 @@ impl End {
             // Only a bridge that could not join again ends on this; one that can, does.
             Self::Removed(RemoveReason::Restarting) => "The server is starting again.".to_owned(),
             Self::Refused(error) => format!("Could not join the session again: {error}."),
+            Self::NetworkFailing(error) => format!("The connection kept failing: {error}."),
         }
     }
 
@@ -172,7 +176,11 @@ impl End {
     pub fn detail(&self) -> Option<String> {
         match self {
             Self::GameClosed(error) => Some(error.to_string()),
-            Self::Left | Self::ServerSilent | Self::Removed(_) | Self::Refused(_) => None,
+            Self::Left
+            | Self::ServerSilent
+            | Self::Removed(_)
+            | Self::Refused(_)
+            | Self::NetworkFailing(_) => None,
         }
     }
 }
@@ -243,8 +251,8 @@ pub fn run(
             // was the network, as when Wi-Fi drops: the way back is to join again.
             Err(error) if mailbox.is_ready().is_err() => break End::GameClosed(error),
             // Unless it fails again as soon as it has joined again, over and over: that is
-            // no network coming back, and it ends as any failure did before.
-            Err(error) if faults.is_one_too_many(now) => break End::GameClosed(error),
+            // no network coming back. The game is still there, and is told the session is over.
+            Err(error) if faults.is_one_too_many(now) => break End::NetworkFailing(error),
             Err(_) | Ok(Some(RemoveReason::Restarting)) => true,
             Ok(Some(reason)) => break End::Removed(reason),
             Ok(None) => !connection.is_server_alive(now),
@@ -423,7 +431,7 @@ fn leave_game<M: ProcessMemory>(
     clear_all(mailbox, shown)?;
     let parting = match end {
         End::Left | End::GameClosed(_) => Vec::new(),
-        End::ServerSilent | End::Removed(_) | End::Refused(_) => {
+        End::ServerSilent | End::Removed(_) | End::Refused(_) | End::NetworkFailing(_) => {
             text::rows(&format!("- {}", end.describe()))
         }
     };
@@ -444,6 +452,14 @@ fn attach_when_running<'a>(
     loop {
         if stop.load(Ordering::Relaxed) {
             return Ok(None);
+        }
+        // Said at once: an emulator that has closed reads as one whose game has not started,
+        // and would be waited on until the time for that ran out.
+        if process.has_exited() {
+            return Err(io::Error::new(
+                io::ErrorKind::BrokenPipe,
+                "the emulator closed before its game had started",
+            ));
         }
         let search = if Instant::now() >= full_search_due {
             full_search_due = Instant::now() + FULL_SEARCH_EVERY;
@@ -944,7 +960,7 @@ impl Session {
         // own, or, joining again, the one the session had.
         let offer_due = self
             .last_offer
-            .is_none_or(|sent| now - sent >= WORLD_OFFER_INTERVAL);
+            .is_none_or(|sent| now.saturating_duration_since(sent) >= WORLD_OFFER_INTERVAL);
         if ready && !self.has_session_world && offer_due {
             let world = match &self.world {
                 Some(world) => Some(world.clone()),

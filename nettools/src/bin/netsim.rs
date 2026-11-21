@@ -3,7 +3,7 @@
 use b3313_nettools::netsim::{Impairment, Proxy};
 use b3313_nettools::options::Options;
 use std::error::Error;
-use std::net::{SocketAddr, ToSocketAddrs, UdpSocket};
+use std::net::{SocketAddr, UdpSocket};
 use std::process::ExitCode;
 use std::sync::atomic::AtomicBool;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -22,10 +22,9 @@ fn run() -> Result<(), Box<dyn Error>> {
     let [listen, server] = options.positional.as_slice() else {
         return Err(USAGE.into());
     };
-    let server: SocketAddr = server
-        .to_socket_addrs()?
-        .next()
-        .ok_or("the server address did not resolve")?;
+    // As a bridge does: for "localhost" Windows gives the IPv6 address first, where a server
+    // listening on IPv4 is not.
+    let server: SocketAddr = b3313_bridge::client::resolve(server)?;
     let loss_percent: f64 = options.get("loss", 0.0)?;
     if !(0.0..=100.0).contains(&loss_percent) {
         return Err("--loss must be from 0 to 100".into());

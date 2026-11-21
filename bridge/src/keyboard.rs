@@ -89,13 +89,6 @@ impl<K: Keys> Keyboard<K> {
         }
     }
 
-    /// The keys pressed for the chat since the last poll, in the order of their codes; `open`
-    /// says whether a line is being typed.
-    ///
-    /// While none is, only the keys that open the chat are looked at. A key held down types
-    /// again and again, as it does anywhere. A key that was already down when the chat opened
-    /// or closed, or when the window came to the front, was pressed for something else, and
-    /// types nothing until it is pressed again.
     /// Has the next `poll` take nothing for a press: after a while in which the keys were
     /// not looked at, as while joining a server again, a key pressed then was for something
     /// else, and Windows still reports it as pressed since the last look.
@@ -104,6 +97,13 @@ impl<K: Keys> Keyboard<K> {
         self.repeat = None;
     }
 
+    /// The keys pressed for the chat since the last poll, in the order of their codes; `open`
+    /// says whether a line is being typed.
+    ///
+    /// While none is, only the keys that open the chat are looked at. A key held down types
+    /// again and again, as it does anywhere. A key that was already down when the chat opened
+    /// or closed, or when the window came to the front, was pressed for something else, and
+    /// types nothing until it is pressed again.
     pub fn poll(&mut self, open: bool, now: Instant) -> Vec<Key> {
         if !self.keys.has_focus() {
             // What is typed into another window is not the chat's to see, or to wait on.

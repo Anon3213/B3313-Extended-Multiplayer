@@ -3,6 +3,7 @@
 
 use crate::client::{Connection, Received};
 use crate::interpolation::Interpolator;
+use crate::layout::len;
 use crate::mailbox::{COIN_ENTRIES, Mailbox, ObjectsOut, Place, RingCoin};
 use crate::object_motion::ObjectMotion;
 use crate::ram::ProcessMemory;
@@ -19,8 +20,15 @@ use std::time::{Duration, Instant};
 pub const REFRESH_INTERVAL: Duration = Duration::from_secs(1);
 
 /// Where `timer` and `animFrame` sit in a state's network part (`struct MpObjectState` from `id`).
-const TIMER: std::ops::Range<usize> = 32..34;
-const ANIM_FRAME: std::ops::Range<usize> = 44..46;
+const TIMER: std::ops::Range<usize> = network_part(len::OBJECT_STATE_TIMER_OFFSET, 2);
+const ANIM_FRAME: std::ops::Range<usize> = network_part(len::OBJECT_STATE_ANIM_FRAME_OFFSET, 2);
+
+/// Where the `size` bytes at `offset` of the game's `struct MpObjectState` are in a state as
+/// the network carries it, which begins at the struct's `id`.
+const fn network_part(offset: usize, size: usize) -> std::ops::Range<usize> {
+    let start = offset - len::OBJECT_STATE_ID_OFFSET;
+    start..start + size
+}
 
 /// Whether two states of one object differ in more than their timers and animation frames. Both
 /// count frames, so counting them as a change would send every object every time; each game's copy
@@ -108,14 +116,11 @@ fn deliver<M: ProcessMemory>(
     if states.is_empty() {
         return Ok(());
     }
-    let mut count = match *in_count {
+    let count = match *in_count {
         Some(count) => count,
         None => mailbox.objects_in_count()?,
     };
-    for state in states {
-        count = mailbox.write_object_in(count, place, state)?;
-    }
-    *in_count = Some(count);
+    *in_count = Some(mailbox.write_objects_in(count, place, states)?);
     Ok(())
 }
 
@@ -141,6 +146,17 @@ pub struct ObjectSync {
     /// Others' coins the game has yet to be given: its ring holds only so many at a time, and a
     /// game that has just come to an area is told of every coin collected there before.
     coins_waiting: VecDeque<RingCoin>,
+    /// What the game was last told of who runs what, and when.
+    told: Option<(Told, Instant)>,
+}
+
+/// What the server says of an area's objects besides their states, as the game is told it.
+#[derive(Debug, PartialEq, Eq)]
+struct Told {
+    place: Place,
+    owned: ObjectSet,
+    gone: ObjectSet,
+    children: Option<Vec<u16>>,
 }
 
 /// The most of others' coins kept for a game that is not taking them, as while it is paused.
@@ -292,7 +308,23 @@ impl ObjectSync {
         now: Instant,
     ) -> io::Result<()> {
         if let Some(news) = &received.objects {
-            mailbox.write_objects_owned(news.place, &news.owned, &news.gone)?;
+            // The server says who runs what with every state it sends, thirty times a second
+            // while anything moves, and mostly says the same. Written again only when it
+            // differs, and now and then in case the game let the session go meanwhile and
+            // took it up again with nothing kept: each write is eight system calls, and makes
+            // the game's read of the record fail if it falls in the middle.
+            let told = Told {
+                place: news.place,
+                owned: news.owned,
+                gone: news.gone,
+                children: news.children.clone(),
+            };
+            let is_news = self.told.as_ref().is_none_or(|(last, at)| {
+                *last != told || now.saturating_duration_since(*at) >= REFRESH_INTERVAL
+            });
+            if is_news {
+                mailbox.write_objects_owned(news.place, &news.owned, &news.gone)?;
+            }
             if self.motion_place != Some(news.place) {
                 self.motion_place = Some(news.place);
                 self.motion.clear();
@@ -307,7 +339,10 @@ impl ObjectSync {
             }
             // Before `draw` next gives the game a state: an enemy no longer alive must not be
             // made again from one.
-            mailbox.write_live_children(news.place, news.children.as_deref())?;
+            if is_news {
+                mailbox.write_live_children(news.place, news.children.as_deref())?;
+                self.told = Some((told, now));
+            }
             if let Some(alive) = &news.children {
                 self.motion.forget_children_but(alive);
             }
