@@ -4,12 +4,12 @@
 //! The panel reads back what the session reports; neither side waits on the other.
 
 use crate::emulator::Install;
-use crate::game_setup;
+use crate::game_setup::{self, Built, Game};
 use b3313_bridge::client::resolve;
 use b3313_bridge::session::{self, Event, Input, Options};
 use b3313_protocol::Outfit;
 use std::net::{SocketAddr, UdpSocket};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -191,41 +191,53 @@ fn is_own_server(server: SocketAddr, hosting: SocketAddr) -> bool {
     server.port() == hosting.port() && is_this_pc
 }
 
-impl Request {
-    /// The ROM's bytes. A ROM the panel built is checked against the one this panel's bridge
-    /// was made for, and built again if an older panel made it; one the player chose
-    /// themself is taken as it is.
-    fn current_rom(&self) -> Result<Vec<u8>, String> {
-        let read = || {
-            std::fs::read(&self.rom)
-                .map_err(|error| format!("Could not read the ROM {}: {error}.", self.rom.display()))
-        };
-        let built_here = game_setup::built_at(&self.rom);
-        match read() {
-            Ok(rom) if built_here.is_none_or(|game| game.is_current(&rom)) => Ok(rom),
-            outdated => {
-                let rebuilt = built_here.zip(self.sources.as_ref());
-                let Some((game, (sm64, patch))) = rebuilt else {
-                    return outdated.and(Err(
-                        "This panel is newer than its game. Set the game up again on the Play \
-                         page."
-                            .to_owned(),
-                    ));
-                };
-                let built = game_setup::set_up(sm64, patch)?;
-                // The patch chosen may be another version's than the ROM joined with, and
-                // building that one leaves this ROM as old as it was.
-                if built.rom != self.rom {
-                    return Err(format!(
-                        "This panel is newer than its game, B3313 {}, and the patch chosen on \
-                         the Play page is for B3313 {}. Choose the patch of the version you \
-                         play there.",
-                        game.name, built.game.name
-                    ));
-                }
-                read()
+/// The bytes of the ROM at `rom`, to join with. One the panel built, as the game `built_here`,
+/// is checked against the one this panel's bridge was made for, and built again with
+/// `rebuild`, from the player's two files in `sources`, if an older panel made it; one the
+/// player chose themself is taken as it is. `rebuild` is `game_setup::set_up`, but for tests.
+fn current_rom(
+    rom: &Path,
+    built_here: Option<&'static Game>,
+    sources: Option<&(PathBuf, PathBuf)>,
+    rebuild: impl FnOnce(&Path, &Path) -> Result<Built, String>,
+) -> Result<Vec<u8>, String> {
+    let read = || {
+        std::fs::read(rom)
+            .map_err(|error| format!("Could not read the ROM {}: {error}.", rom.display()))
+    };
+    match read() {
+        Ok(bytes) if built_here.is_none_or(|game| game.is_current(&bytes)) => Ok(bytes),
+        outdated => {
+            let Some((game, (sm64, patch))) = built_here.zip(sources) else {
+                return outdated.and(Err(
+                    "This panel is newer than its game. Set the game up again on the Play page."
+                        .to_owned(),
+                ));
+            };
+            let built = rebuild(sm64, patch)?;
+            // The patch chosen may be another version's than the ROM joined with, and
+            // building that one leaves this ROM as old as it was.
+            if built.rom != rom {
+                return Err(format!(
+                    "This panel is newer than its game, B3313 {}, and the patch chosen on the \
+                     Play page is for B3313 {}. Choose the patch of the version you play there.",
+                    game.name, built.game.name
+                ));
             }
+            read()
         }
+    }
+}
+
+impl Request {
+    /// The ROM's bytes, brought up to date if the panel built it; see `current_rom`.
+    fn current_rom(&self) -> Result<Vec<u8>, String> {
+        current_rom(
+            &self.rom,
+            game_setup::built_at(&self.rom),
+            self.sources.as_ref(),
+            game_setup::set_up,
+        )
     }
 
     /// The emulator to join with: the one named, or one started now with the ROM.
@@ -288,8 +300,100 @@ impl Request {
 
 #[cfg(test)]
 mod tests {
-    use super::is_own_server;
+    use super::{current_rom, is_own_server};
+    use crate::game_setup::{Built, GAMES, Game};
     use std::net::SocketAddr;
+    use std::path::{Path, PathBuf};
+
+    /// A folder of this test's own, empty, with the player's two files named in it. Nothing
+    /// reads those two here: what rebuilds the game is the test's.
+    fn scratch(name: &str) -> (PathBuf, (PathBuf, PathBuf)) {
+        let folder = std::env::temp_dir().join(format!("b3313-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&folder);
+        let _ = std::fs::create_dir_all(&folder);
+        let sources = (folder.join("sm64.z64"), folder.join("b3313.bps"));
+        (folder, sources)
+    }
+
+    /// Two of the games the panel builds: the one a test's ROM is, and another.
+    fn two_games() -> (&'static Game, &'static Game) {
+        match GAMES.as_slice() {
+            [first, second, ..] => (first, second),
+            _ => unreachable!("the panel builds more than one game"),
+        }
+    }
+
+    fn never_rebuilt(_: &Path, _: &Path) -> Result<Built, String> {
+        unreachable!("this ROM is not one to build again")
+    }
+
+    #[test]
+    fn a_rom_the_player_chose_themself_is_taken_as_it_is() -> std::io::Result<()> {
+        let (folder, sources) = scratch("own-rom");
+        let rom = folder.join("mine.z64");
+        std::fs::write(&rom, b"whatever the player built")?;
+        let taken = current_rom(&rom, None, Some(&sources), never_rebuilt);
+        assert_eq!(
+            taken.as_deref(),
+            Ok(b"whatever the player built".as_slice())
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn an_older_panels_game_is_built_again_and_the_new_one_played() -> std::io::Result<()> {
+        let (folder, sources) = scratch("rebuilt");
+        let (game, _) = two_games();
+        let rom = folder.join("game.z64");
+        std::fs::write(&rom, b"built by an older panel")?;
+        let rebuild = |sm64: &Path, patch: &Path| {
+            // From the player's two files, and over the old game.
+            assert_eq!((sm64, patch), (sources.0.as_path(), sources.1.as_path()));
+            std::fs::write(&rom, b"built anew").map_err(|error| error.to_string())?;
+            Ok(Built {
+                rom: rom.clone(),
+                game,
+            })
+        };
+        let taken = current_rom(&rom, Some(game), Some(&sources), rebuild);
+        assert_eq!(taken.as_deref(), Ok(b"built anew".as_slice()));
+        Ok(())
+    }
+
+    #[test]
+    fn a_game_that_another_versions_patch_cannot_renew_is_not_played() -> std::io::Result<()> {
+        let (folder, sources) = scratch("other-patch");
+        let (game, other) = two_games();
+        let rom = folder.join("game.z64");
+        std::fs::write(&rom, b"built by an older panel")?;
+        // The patch chosen is the other version's, so that is the game built, elsewhere.
+        let rebuild = |_: &Path, _: &Path| {
+            let built = folder.join("other game.z64");
+            std::fs::write(&built, b"the other version").map_err(|error| error.to_string())?;
+            Ok(Built {
+                rom: built,
+                game: other,
+            })
+        };
+        let Err(refusal) = current_rom(&rom, Some(game), Some(&sources), rebuild) else {
+            unreachable!("the old game must not be played as though it were new");
+        };
+        // Both versions are named, so the player knows which patch to choose.
+        assert!(refusal.contains(game.name), "{refusal}");
+        assert!(refusal.contains(other.name), "{refusal}");
+        Ok(())
+    }
+
+    #[test]
+    fn an_older_panels_game_with_nothing_to_build_it_from_is_refused() -> std::io::Result<()> {
+        let (folder, _) = scratch("no-sources");
+        let (game, _) = two_games();
+        let rom = folder.join("game.z64");
+        std::fs::write(&rom, b"built by an older panel")?;
+        let refused = current_rom(&rom, Some(game), None, never_rebuilt);
+        assert!(refused.is_err_and(|message| message.contains("Set the game up again")));
+        Ok(())
+    }
 
     fn address(text: &str) -> SocketAddr {
         text.parse()
