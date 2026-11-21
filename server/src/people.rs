@@ -260,6 +260,11 @@ impl People {
         self.roster_version += 1;
     }
 
+    /// Whether a player's bridge has said who they are, which it may once.
+    pub fn is_introduced(&self, player: PlayerId) -> bool {
+        self.member(player).is_some_and(|member| member.introduced)
+    }
+
     /// Takes a bridge's word on who its player is: the name, or one made up if it gave none, and
     /// the host's role if `is_host`, from whoever had it. A bridge may say once; anything after
     /// is ignored.

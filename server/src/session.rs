@@ -147,6 +147,8 @@ pub struct Session {
     joins: u64,
     /// Fixed for the session once set, even if its owner leaves.
     world: Option<Box<WorldInputs>>,
+    /// The version of B3313 the world and the progress are of: the last a player came with.
+    kept_for_game: Option<u8>,
     tick: u32,
     events: Vec<Event>,
     ticks: TickReport,
@@ -395,6 +397,17 @@ impl Session {
         let Some((index, player)) = free.and_then(|index| Some((index, Self::id(index)?))) else {
             return Packet::Rejected(RejectReason::Full);
         };
+        if game != 0 {
+            // A session everyone has left keeps its world and what its players got, for
+            // those who come back. Not for another version of the game: its stars are other
+            // stars, which this would write into the newcomers' saves.
+            if self.kept_for_game.is_some_and(|kept| kept != game) {
+                self.world = None;
+                self.progress = SessionProgress::default();
+                self.collected = CollectedCoins::default();
+            }
+            self.kept_for_game = Some(game);
+        }
         if let Some(slot) = self.players.get_mut(index) {
             *slot = Some(Player {
                 address,
@@ -484,6 +497,11 @@ impl Session {
         host_password: &str,
         now: Instant,
     ) {
+        // A bridge says who its player is once. Checked before anything is done for it: a
+        // player could otherwise have anyone silent for a moment removed, by naming them.
+        if self.people.is_introduced(player) {
+            return;
+        }
         // Whoever has the name and has gone silent is most likely this player's own game from
         // before it was closed or lost the server, not yet timed out: it goes now, so that the
         // player has their name back and not a number after it.
@@ -544,6 +562,38 @@ impl Session {
         }
     }
 
+    /// Whether `actor` may ban `target` in the chat. A ban is of an address, and removes
+    /// everyone who plays from it: not the actor themself, then, nor anyone the actor could
+    /// not remove alone.
+    fn may_ban_address_of(&self, actor: PlayerId, target: PlayerId) -> Result<(), String> {
+        let ip_of = |player: PlayerId| {
+            let slot = self.players.get(usize::from(player.get()));
+            slot.and_then(Option::as_ref)
+                .map(|player| player.address.ip().to_canonical())
+        };
+        let banned = ip_of(target);
+        let name = self.people.name_of(target);
+        if ip_of(actor) == banned {
+            return Err(format!(
+                "{name} plays from your own address, which a ban would shut out. /kick removes them."
+            ));
+        }
+        let is_host = self.people.role_of(actor) == Role::Host;
+        let spared = self.players().into_iter().find(|&(other, _)| {
+            other != target
+                && ip_of(other) == banned
+                && !is_host
+                && self.people.role_of(other).moderates()
+        });
+        match spared {
+            Some((other, _)) => Err(format!(
+                "{name} plays from the address {} does, whom only the host can remove. /kick removes {name} alone.",
+                self.people.name_of(other)
+            )),
+            None => Ok(()),
+        }
+    }
+
     /// Carries out a command `actor` gave in the chat, if their role is one `allowed` it.
     fn run_chat_command(
         &mut self,
@@ -574,6 +624,9 @@ impl Session {
                 }
                 if role != Role::Host && self.people.role_of(target).moderates() {
                     return Err("Only the host can remove a moderator.".to_owned());
+                }
+                if matches!(command, ChatCommand::Ban(_)) {
+                    self.may_ban_address_of(actor, target)?;
                 }
                 self.orders.push(match command {
                     ChatCommand::Ban(_) => Command::Ban(target),
@@ -1210,8 +1263,41 @@ mod tests {
         assert_eq!(worlds_sent(&mut session, now), vec![(client(2), 4)]);
     }
 
+    /// One version's stars are not another's: what a session kept would be written into the
+    /// saves of players of another game.
+    #[test]
+    fn a_world_and_progress_are_not_kept_for_players_of_another_game() {
+        let mut session = Session::new();
+        let now = Instant::now();
+        let mut star = [0; PROGRESS_SIZE];
+        star[4] = 1;
+        let report = Packet::Progress(Box::new(Progress::from_bytes(star)));
+        let kept_for = |session: &mut Session, port: u16, game: u8| {
+            send(session, client(port), &hello_playing(game), now);
+            let sent: Vec<Packet> = (0..WORLD_RESEND_TICKS)
+                .flat_map(|_| session.tick(now))
+                .map(|(_, packet)| packet)
+                .collect();
+            let is_kept =
+                |packet: &Packet| matches!(packet, Packet::World(_) | Packet::SessionProgress(_));
+            sent.into_iter().filter(is_kept).count()
+        };
+        send(&mut session, client(0), &hello_playing(1), now);
+        send(&mut session, client(0), &offer(4), now);
+        send(&mut session, client(0), &report, now);
+        send(&mut session, client(0), &Packet::Bye, now);
+
+        // Someone of the same game has both, as before.
+        assert!(kept_for(&mut session, 1, 1) >= 2);
+        send(&mut session, client(1), &Packet::Bye, now);
+        // Someone of another has neither.
+        assert_eq!(kept_for(&mut session, 2, 2), 0);
+    }
+
+    /// The `port`th of the tests' players, each at an address of their own.
     fn client(port: u16) -> SocketAddr {
-        SocketAddr::from((Ipv4Addr::LOCALHOST, port))
+        let [high, low] = port.to_be_bytes();
+        SocketAddr::from((Ipv4Addr::new(127, 1, high, low), port))
     }
 
     fn id(value: u8) -> PlayerId {
@@ -2325,6 +2411,61 @@ mod tests {
         // The one who came is the Mario there now, and not the one who went.
         assert_eq!(session.players().len(), 3);
         assert!(session.is_player(client(3)) && !session.is_player(client(0)));
+    }
+
+    /// Only a newcomer's first word on who they are frees a name: a player already in the
+    /// session cannot have someone removed by saying their name over and over until they
+    /// happen to be silent for a moment.
+    #[test]
+    fn a_player_already_named_cannot_remove_another_by_claiming_their_name() {
+        let now = Instant::now();
+        let mut session = named_session(now);
+        session.take_events();
+        let claim = Packet::Introduce {
+            name: Name::new("Mario"),
+            outfit: None,
+            host_password: String::new(),
+        };
+
+        send(&mut session, client(1), &claim, now + HOST_SILENT_AFTER);
+
+        assert_eq!(names(&session), ["Mario", "Luigi", "Peach"]);
+        assert_eq!(session.take_events(), []);
+    }
+
+    /// A ban is of an address, and shuts out everyone who plays from it.
+    #[test]
+    fn a_ban_in_the_chat_is_refused_if_it_would_shut_out_more_than_the_actor_may_remove() {
+        let now = Instant::now();
+        let mut session = named_session(now);
+        let from_address_of = |port: u16| SocketAddr::from((client(port).ip(), 9000));
+        // Daisy plays from the host's address, and Toad from Luigi's.
+        for (address, name) in [(from_address_of(0), "Daisy"), (from_address_of(1), "Toad")] {
+            send(&mut session, address, &hello(), now);
+            let introduce = Packet::Introduce {
+                name: Name::new(name),
+                outfit: None,
+                host_password: String::new(),
+            };
+            send(&mut session, address, &introduce, now);
+        }
+        say(&mut session, 0, 0, "/mod Luigi", now);
+        say(&mut session, 0, 1, "/mod Peach", now);
+        chat_for(&mut session, 0, now);
+        chat_for(&mut session, 2, now);
+
+        // The host's own address, and a moderator's, which only the host may shut out.
+        say(&mut session, 0, 2, "/ban Daisy", now);
+        say(&mut session, 2, 0, "/ban Toad", now);
+        assert_eq!(session.take_orders(), []);
+        let told = chat_for(&mut session, 0, now).join(" ");
+        assert!(told.contains("Daisy plays from your own address"), "{told}");
+        let told = chat_for(&mut session, 2, now).join(" ");
+        assert!(told.contains("the address Luigi does"), "{told}");
+
+        // The host may: Luigi goes with Toad, which removing the player then sees to.
+        say(&mut session, 0, 3, "/ban Toad", now);
+        assert_eq!(session.take_orders(), [Command::Ban(id(4))]);
     }
 
     #[test]

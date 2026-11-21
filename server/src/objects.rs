@@ -245,17 +245,15 @@ impl Objects {
         for (&id, _) in area.owners.iter().filter(|&(_, &owner)| owner == player) {
             owned.insert(id);
         }
-        let mut due: Vec<(u64, ObjectUpdate)> = area
+        // Each with the version this player last had of it, none counting as the oldest.
+        let mut due: Vec<(u64, u64, ObjectUpdate)> = area
             .states
             .iter()
-            .filter(|&(&id, stored)| {
-                area.owner_of(id) != Some(player)
-                    && sent
-                        .versions
-                        .get(&id)
-                        .is_none_or(|&seen| seen < stored.version)
+            .filter(|&(&id, _)| area.owner_of(id) != Some(player))
+            .filter_map(|(&id, stored)| {
+                let seen = sent.versions.get(&id).copied().unwrap_or(0);
+                (seen < stored.version).then_some((seen, stored.version, stored.update))
             })
-            .map(|(_, stored)| (stored.version, stored.update))
             .collect();
         let children = area.live_children();
         let is_changed = sent.owned != owned || sent.gone != area.gone || sent.children != children;
@@ -270,9 +268,12 @@ impl Objects {
         if due.is_empty() && !refresh && !is_changed {
             return None;
         }
-        due.sort_unstable_by_key(|&(version, _)| version);
+        // The copies this player has had no news of for longest go first. By each state's own
+        // age alone, an area with more news than a packet holds would send the same objects
+        // every time, those whose owner's packets come first, and the rest would never move.
+        due.sort_unstable_by_key(|&(seen, version, _)| (seen, version));
         due.truncate(MAX_OBJECTS_PER_PACKET);
-        for (version, update) in &due {
+        for (_, version, update) in &due {
             sent.versions.insert(object_id(&update.state), *version);
         }
         sent.owned = owned;
@@ -284,7 +285,7 @@ impl Objects {
             owned,
             gone: area.gone,
             children,
-            states: due.into_iter().map(|(_, update)| update).collect(),
+            states: due.into_iter().map(|(_, _, update)| update).collect(),
         })
     }
 
@@ -779,5 +780,22 @@ mod tests {
         assert_eq!(first, (1..=full).collect::<Vec<_>>());
         let rest: Vec<u16> = updates(&mut objects, 1).1.iter().map(|&(o, _)| o).collect();
         assert_eq!(rest, (full + 1..=15).collect::<Vec<_>>());
+    }
+
+    /// Ten objects that all move in every tick are more than a packet holds. Each must still
+    /// reach the other player in turn, not the same eight every time.
+    #[test]
+    fn with_more_news_than_a_packet_holds_every_object_still_has_its_turn() {
+        let mut objects = Objects::default();
+        let players = [at(0, 0.0, 0), at(1, 0.0, 1)];
+        assign(&mut objects, &players);
+        let mut told = std::collections::HashSet::new();
+        for round in 1..=3 {
+            let moved: Vec<ObjectState> =
+                (1..=10).map(|object| state(object, 0.0, round)).collect();
+            receive(&mut objects, 0, &none(), &moved);
+            told.extend(updates(&mut objects, 1).1.iter().map(|&(object, _)| object));
+        }
+        assert_eq!(told.len(), 10, "told of {told:?}");
     }
 }

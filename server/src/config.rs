@@ -54,7 +54,8 @@ pub const SETTINGS: [Setting; 12] = [
     },
     Setting {
         key: "packets_per_second",
-        help: "Packets per second taken from any one address; more are dropped (40-1000).",
+        help: "Packets per second taken from any one address; more are dropped (40-1000). A game \
+               in play sends about 60, so under 100 drops some of an ordinary player's.",
     },
     Setting {
         key: "joins_per_second",

@@ -6,7 +6,7 @@ use crate::gate::Gate;
 use crate::{Command, Config, Event, Session, TICK_INTERVAL};
 use b3313_protocol::{MAX_DATAGRAM_SIZE, Packet, PlayerId, RemoveReason, is_oversized_datagram};
 use std::io;
-use std::net::{SocketAddr, UdpSocket};
+use std::net::{IpAddr, SocketAddr, UdpSocket};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver};
 use std::thread;
@@ -77,6 +77,18 @@ fn remove_player(
     Some(address)
 }
 
+/// Bans `ip`, and removes everyone playing from it, each told why: a ban is of an address,
+/// and the gate hears nobody from it afterwards, whoever of them was meant.
+fn ban_address(socket: &UdpSocket, session: &mut Session, gate: &mut Gate, ip: IpAddr) {
+    let ip = ip.to_canonical();
+    for (player, address) in session.players() {
+        if address.ip().to_canonical() == ip {
+            remove_player(socket, session, gate, player, RemoveReason::Banned);
+        }
+    }
+    gate.ban(ip);
+}
+
 /// Carries out one console command.
 fn obey(
     command: Command,
@@ -92,21 +104,19 @@ fn obey(
             removed.is_none().then(|| no_player(player))
         }
         Command::Ban(player) => {
-            match remove_player(socket, session, gate, player, RemoveReason::Banned) {
+            let playing = session.players();
+            let address = playing.iter().find(|&&(other, _)| other == player);
+            let address = address.map(|&(_, address)| address);
+            match address {
                 Some(address) => {
-                    gate.ban(address.ip());
+                    ban_address(socket, session, gate, address.ip());
                     Some(Event::Banned(player, address.ip()))
                 }
                 None => Some(no_player(player)),
             }
         }
         Command::BanAddress(ip) => {
-            let players = session.players();
-            let playing = players.iter().filter(|(_, address)| address.ip() == ip);
-            for &(player, _) in playing {
-                remove_player(socket, session, gate, player, RemoveReason::Banned);
-            }
-            gate.ban(ip);
+            ban_address(socket, session, gate, ip);
             Some(Event::AddressBanned(ip))
         }
         Command::Unban(ip) => Some(if gate.unban(ip) {

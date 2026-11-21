@@ -79,7 +79,7 @@ impl Gate {
             peers: HashMap::new(),
             failures: HashMap::new(),
             rate_limited: 0,
-            bans: config.bans.iter().copied().collect(),
+            bans: config.bans.iter().map(IpAddr::to_canonical).collect(),
         })
     }
 
@@ -136,7 +136,7 @@ impl Gate {
         handshake: &[u8],
         now: Instant,
     ) -> Option<Vec<u8>> {
-        if self.bans.contains(&from.ip()) {
+        if self.bans.contains(&from.ip().to_canonical()) {
             return None;
         }
         // A repeat means the reply was lost.
@@ -193,14 +193,19 @@ impl Gate {
     }
 
     /// Refuses `ip` from now on, and drops the channels of everyone joined from it.
+    ///
+    /// Bans are kept in one form: a socket that hears both kinds of address gives an IPv4
+    /// sender's as an IPv6 one, which a ban of the IPv4 address must still match.
     pub fn ban(&mut self, ip: IpAddr) {
+        let ip = ip.to_canonical();
         self.bans.insert(ip);
-        self.peers.retain(|address, _| address.ip() != ip);
+        self.peers
+            .retain(|address, _| address.ip().to_canonical() != ip);
     }
 
     /// Lets `ip` join again, returning whether it was banned.
     pub fn unban(&mut self, ip: IpAddr) -> bool {
-        self.bans.remove(&ip)
+        self.bans.remove(&ip.to_canonical())
     }
 
     /// Drops the channels of players the session no longer has, and anything else gone stale.
@@ -503,6 +508,11 @@ mod tests {
         assert_eq!(gate.receive(&mut session, client(5), &ping, now), None);
         let elsewhere = Ipv4Addr::new(10, 0, 0, 1).into();
         assert!(!gate.unban(elsewhere), "never banned");
+
+        // A socket that hears both kinds of address gives the same sender as an IPv6 one.
+        let as_ipv6 = SocketAddr::from((Ipv4Addr::LOCALHOST.to_ipv6_mapped(), 5));
+        let refused = join(&mut gate, &mut session, as_ipv6, "", now).err();
+        assert_eq!(refused, Some(None));
         Ok(())
     }
 
