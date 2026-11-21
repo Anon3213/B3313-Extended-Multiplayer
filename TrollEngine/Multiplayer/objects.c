@@ -944,7 +944,10 @@ static u8 spawn_copy(volatile struct MpObjectState *state) {
     }
     obj->oBehParams = state->behParams;
     obj->oBehParams2ndByte = (state->behParams >> 16) & 0xFF;
-    if (child_name(owning_number(name), obj) != name) {
+    // A goomba, the one kind made here, looks its size up by these bits in a list of three:
+    // the fourth is none, and what follows the list would be its scale and its damage.
+    if ((obj->oBehParams2ndByte & GOOMBA_BP_SIZE_MASK) > GOOMBA_SIZE_TINY
+        || child_name(owning_number(name), obj) != name) {
         obj_mark_for_deletion(obj);
         return NO_SLOT;
     }
@@ -1130,6 +1133,13 @@ void mp_take_object_states(void) {
         }
         if (sCopies->slots[i].claim != 0) {
             sCopies->slots[i].claim--;
+        }
+        // What this game runs has no state to follow. One kept from before it ran the
+        // object would be followed again, seconds old, in the frame the object passed back
+        // to another game: the enemy would flick to where it was then.
+        if (sCopies->slots[i].id != 0 && sCopies->knowsOwners
+            && (!is_others(sCopies->slots[i].id) || sCopies->slots[i].claim != 0)) {
+            sCopies->slots[i].framesSinceState = FOLLOW_FRAMES;
         }
     }
     take_object_states();

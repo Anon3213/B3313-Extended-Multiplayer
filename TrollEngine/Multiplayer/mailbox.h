@@ -14,9 +14,10 @@
 // GhostPeach.asm reads a flag at 0x807D0000, between the mailbox and the game's private data.
 #define MP_MAILBOX_ADDR 0x807C0200
 // The multiplayer code segment; Multiplayer/segment.asm and boot.c must agree. It began at
-// 0x807C8000, and has twice been brought down into the mailbox's spare room when it filled;
-// the mailbox ends 0x124 short of it.
-#define MP_CODE_ADDR 0x807C5C00
+// 0x807C8000, and has three times been brought down into the mailbox's spare room when it
+// filled; the mailbox now ends 4 bytes short of it, so the next time it fills, or the mailbox
+// grows, something must move or shrink.
+#define MP_CODE_ADDR 0x807C5AE0
 #define MP_CODE_END 0x807CC000
 // After the code, private object sync data (Multiplayer/objects.c); never loaded from the ROM.
 #define MP_COPIES_ADDR 0x807CC000

@@ -4,7 +4,7 @@
 //! edit it, change the header and run the script.
 
 pub const MAILBOX_ADDR: u32 = 0x807C_0200;
-pub const CODE_ADDR: u32 = 0x807C_5C00;
+pub const CODE_ADDR: u32 = 0x807C_5AE0;
 pub const CODE_END: u32 = 0x807C_C000;
 pub const COPIES_ADDR: u32 = 0x807C_C000;
 pub const COPIES_END: u32 = 0x807D_0000;
@@ -189,7 +189,7 @@ pub const NO_LEVEL: i16 = -1;
 /// The same numbers as lengths.
 pub mod len {
     pub const MAILBOX_ADDR: usize = 0x807C_0200;
-    pub const CODE_ADDR: usize = 0x807C_5C00;
+    pub const CODE_ADDR: usize = 0x807C_5AE0;
     pub const CODE_END: usize = 0x807C_C000;
     pub const COPIES_ADDR: usize = 0x807C_C000;
     pub const COPIES_END: usize = 0x807D_0000;

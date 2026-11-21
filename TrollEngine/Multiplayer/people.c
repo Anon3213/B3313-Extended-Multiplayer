@@ -395,6 +395,9 @@ void mp_read_pads(OSContPad *pads) {
         bzero(gMpMailbox->players, sizeof(gMpMailbox->players));
         gMpMailbox->objectsOwned.levelNum = MP_NO_LEVEL;
         gMpMailbox->chat.shown = 0;
+        // Nor is Mario dressed for a session any more. A bridge that is still there after
+        // all writes who is who again within a moment.
+        gMpMailbox->people.localRole = 0;
         // Nor is the session's progress added to a save any more: see read_session_progress.
         gMpMailbox->progressIn.sequence = 0;
     }
