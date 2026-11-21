@@ -398,7 +398,7 @@ mod tests {
     fn the_real_files_make_the_multiplayer_rom() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
         let vanilla = std::fs::read(root.join("ROM/Super Mario 64 (USA).n64"));
-        let b3313 = std::fs::read(root.join("B3313_ua_a2_anniversary_edition.bps"));
+        let b3313 = std::fs::read(root.join("patches/B3313_ua_a2_anniversary_edition.bps"));
         let (Ok(vanilla), Ok(b3313)) = (vanilla, b3313) else {
             unreachable!("the ROM and the patch must be in place to run this test");
         };
