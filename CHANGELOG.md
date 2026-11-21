@@ -6,18 +6,13 @@ that does not play with the ones before it says so.
 
 ## 0.2.1
 
-Plays with 0.2.0, and builds the same games.
+**About the version numbers:** 0.2.0 was made the same day and never published, and this
+takes its place. It holds everything 0.2.0 was to have, listed here, and what was put right
+after it, at the end. So the versions published go from 0.1.4 straight to 0.2.1. The tag
+`v0.2.0` is still in the repository, and anything built from it plays with this version.
 
-- **A game that could not be brought up to date is no longer played as it was.** With a game
-  built by an older version of the panel, and a patch for another version of B3313 chosen on
-  the Play page, joining built the patch's game and then played the old one. The panel now
-  says which patch to choose.
-- The panel says "a B3313 patch" where it said "the B3313 patch", as there are several.
-
-## 0.2.0
-
-This version does not play with earlier ones: the panel, the bridge and the server must all
-be this version. The panel builds the game again by itself when you join, if your Super
+This version does not play with 0.1.4 and earlier: the panel, the bridge and the server must
+all be this version. The panel builds the game again by itself when you join, if your Super
 Mario 64 ROM and your patch are still where they were.
 
 - **The mod plays three versions of B3313:** Unabandoned A2 Anniversary Edition, 1.0.2
@@ -38,6 +33,18 @@ Mario 64 ROM and your patch are still where they were.
 - The two 1.0.2 versions have been through less than the Anniversary Edition: the automatic
   tests, and two linked games in levels 4, 5 and part of 9. In level 4 area 4, a player
   standing where the area is entered is pushed into a warp by the next one to arrive.
+
+Put right since 0.2.0:
+
+- **A game that could not be brought up to date is no longer played as it was.** With a game
+  built by an older version of the panel, and a patch for another version of B3313 chosen on
+  the Play page, joining built the patch's game and then played the old one. The panel now
+  says which patch to choose.
+- The panel says "a B3313 patch" where it said "the B3313 patch", as there are several.
+
+## 0.2.0
+
+Never published: 0.2.1 took its place the same day, and its changes are listed there.
 
 ## 0.1.4
 
