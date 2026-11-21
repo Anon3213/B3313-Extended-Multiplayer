@@ -104,6 +104,13 @@ pub fn take_new_report() -> bool {
     NEW_REPORT.swap(false, Ordering::Relaxed)
 }
 
+/// This run's own report, if a part of the panel has failed during it: every failure of one
+/// run goes into the one file.
+#[must_use]
+pub fn this_runs_report() -> Option<PathBuf> {
+    try_lock(&WRITTEN).and_then(|written| written.clone())
+}
+
 /// Reports written after `seen`, by file name without extension, the newest first.
 #[must_use]
 pub fn unread_reports(seen: Option<&str>) -> Vec<PathBuf> {

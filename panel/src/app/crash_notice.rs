@@ -41,7 +41,12 @@ impl Panel {
     /// Looks for reports written since the user last saw one; `during_run` when the crash
     /// reporter just wrote one.
     pub(super) fn find_crash_reports(&mut self, during_run: bool) {
-        let unread = crash::unread_reports(self.preferences.seen_crash.as_deref());
+        let mut unread = crash::unread_reports(self.preferences.seen_crash.as_deref());
+        // A later failure of this run is written into the report its first one made, which
+        // the user may have been told of and dismissed: it is news all the same.
+        if during_run && unread.is_empty() {
+            unread.extend(crash::this_runs_report());
+        }
         self.crash_notice = unread.first().map(|newest| CrashNotice {
             newest: newest.clone(),
             count: unread.len(),

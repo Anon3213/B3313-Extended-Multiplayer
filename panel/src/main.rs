@@ -149,7 +149,12 @@ fn main() {
                 }
             }
             Err(error) => {
-                eprintln!("cannot open the panel's window: {error}");
+                // Said in a box: a program with a window has no terminal to say it in, and
+                // the panel would seem to do nothing when started.
+                alert::say_without_a_window(&format!(
+                    "The panel could not open its window: {error}.\n\nA graphics driver that \
+                     is out of date is the usual cause."
+                ));
                 cx.quit();
             }
         }

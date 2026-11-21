@@ -24,6 +24,30 @@ pub fn sound() {
     }
 }
 
+/// Tells the user of a failure that leaves the panel no window to say it in, in a box of
+/// Windows' own, and waits for them to close it. On other platforms, in the terminal.
+pub fn say_without_a_window(message: &str) {
+    #[cfg(windows)]
+    {
+        use windows::Win32::UI::WindowsAndMessaging::{MB_ICONERROR, MB_OK, MessageBoxW};
+        use windows::core::{HSTRING, w};
+
+        let text = HSTRING::from(message);
+        // SAFETY: both strings are valid and end in zero for the length of the call, and
+        // the box has no window of the panel's to belong to.
+        let _ = unsafe {
+            MessageBoxW(
+                None,
+                &text,
+                w!("B3313 Extended Multiplayer"),
+                MB_OK | MB_ICONERROR,
+            )
+        };
+    }
+    #[cfg(not(windows))]
+    eprintln!("{message}");
+}
+
 #[cfg(windows)]
 fn windows_flash(window: &Window) {
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
