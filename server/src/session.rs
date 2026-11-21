@@ -2413,6 +2413,35 @@ mod tests {
         assert!(session.is_player(client(3)) && !session.is_player(client(0)));
     }
 
+    /// A server with no host password has no host until its owner names one: every bridge
+    /// that knows none gives an empty one, which must match nothing.
+    #[test]
+    fn nobody_is_the_host_of_a_server_that_has_no_host_password() {
+        let now = Instant::now();
+        let mut session = Session::new();
+        for port in 0..2 {
+            send(&mut session, client(port), &hello(), now);
+            let introduce = Packet::Introduce {
+                name: None,
+                outfit: None,
+                host_password: String::new(),
+            };
+            send(&mut session, client(port), &introduce, now);
+        }
+
+        let hosts = session
+            .roster()
+            .into_iter()
+            .filter(|entry| entry.role == Role::Host);
+        assert_eq!(hosts.count(), 0);
+        let events = session.take_events();
+        assert!(
+            !events
+                .iter()
+                .any(|event| matches!(event, Event::HostPasswordWrong(_)))
+        );
+    }
+
     /// Only a newcomer's first word on who they are frees a name: a player already in the
     /// session cannot have someone removed by saying their name over and over until they
     /// happen to be silent for a moment.

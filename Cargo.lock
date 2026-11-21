@@ -55,6 +55,8 @@ name = "b3313-server"
 version = "0.1.0"
 dependencies = [
  "b3313-protocol",
+ "libc",
+ "windows-sys",
 ]
 
 [[package]]

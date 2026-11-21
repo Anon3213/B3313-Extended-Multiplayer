@@ -12,3 +12,11 @@ workspace = true
 
 [dependencies]
 b3313-protocol = { path = "../protocol", version = "0.1.0" }
+
+# Only the program's main uses these, to end a session in order when the server is stopped
+# from outside: Ctrl+C in its console on Windows, a signal elsewhere.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_System_Console"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

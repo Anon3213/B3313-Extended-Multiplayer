@@ -9,9 +9,64 @@ use std::error::Error;
 use std::io::BufRead;
 use std::net::UdpSocket;
 use std::process::ExitCode;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::thread;
+
+/// Set when the server is stopped from outside: it then tells every player's bridge that
+/// the session has ended, as `end` does, where a server simply gone leaves them to wait out
+/// the silence and try to join again for two minutes.
+static STOP: AtomicBool = AtomicBool::new(false);
+
+/// Has Ctrl+C and Ctrl+Break set `STOP`, where they would end the program at once.
+#[cfg(windows)]
+fn stop_in_order() {
+    use windows_sys::Win32::System::Console::{
+        CTRL_BREAK_EVENT, CTRL_C_EVENT, SetConsoleCtrlHandler,
+    };
+
+    /// Called by Windows on a thread of its own; says whether the key was dealt with.
+    unsafe extern "system" fn on_control(kind: u32) -> windows_sys::core::BOOL {
+        let is_ours = kind == CTRL_C_EVENT || kind == CTRL_BREAK_EVENT;
+        if is_ours {
+            STOP.store(true, Ordering::Relaxed);
+        }
+        windows_sys::core::BOOL::from(is_ours)
+    }
+
+    // SAFETY: `on_control` has the signature the call asks for and lives as long as the
+    // program, and all it does is store to an atomic, which any thread may.
+    let added = unsafe { SetConsoleCtrlHandler(Some(on_control), 1) };
+    if added == 0 {
+        eprintln!("Ctrl+C will end the server at once, without telling the players.");
+    }
+}
+
+/// Has the signals that ask a program to stop, Ctrl+C's and a service manager's, set `STOP`.
+#[cfg(unix)]
+fn stop_in_order() {
+    extern "C" fn on_signal(_: libc::c_int) {
+        STOP.store(true, Ordering::Relaxed);
+    }
+
+    let handler: extern "C" fn(libc::c_int) = on_signal;
+    #[expect(
+        clippy::as_conversions,
+        reason = "signal takes its handler as a number, and a function's address is one"
+    )]
+    let handler = handler as libc::sighandler_t;
+    for signal in [libc::SIGINT, libc::SIGTERM] {
+        // SAFETY: the handler lives as long as the program, and all it does is store to an
+        // atomic, which a signal handler may.
+        let before = unsafe { libc::signal(signal, handler) };
+        if before == libc::SIG_ERR {
+            eprintln!("Signal {signal} will end the server at once, without telling the players.");
+        }
+    }
+}
+
+#[cfg(not(any(windows, unix)))]
+fn stop_in_order() {}
 
 const USAGE: &str = "Usage: b3313-server <address:port to listen on, such as 127.0.0.1:41313> \
 [--config <file>]
@@ -58,7 +113,8 @@ fn run() -> Result<(), Box<dyn Error>> {
         }
         println!("{event}");
     };
-    serve_with_console(&socket, config, &AtomicBool::new(false), &received, log)?;
+    stop_in_order();
+    serve_with_console(&socket, config, &STOP, &received, log)?;
     Ok(())
 }
 

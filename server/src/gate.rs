@@ -394,6 +394,11 @@ mod tests {
         let locked = join(&mut gate, &mut session, client(9), "hunter2", start).err();
         assert_eq!(locked, Some(None));
         assert!(!session.is_player(client(9)));
+        // Another machine is not kept out for those guesses.
+        let elsewhere = SocketAddr::from((Ipv4Addr::new(10, 0, 0, 2), 9));
+        let joined = join(&mut gate, &mut session, elsewhere, "hunter2", start);
+        assert!(joined.is_ok(), "a machine that guessed nothing");
+        session.kick(id(0), b3313_protocol::RemoveReason::Kicked);
 
         let later = start + LOCKOUT;
         let joined = join(&mut gate, &mut session, client(9), "hunter2", later);
