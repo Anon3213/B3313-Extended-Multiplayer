@@ -731,15 +731,20 @@ static s32 is_held_here(struct Object *obj) {
 // be hit out of, so an object that did not run here would hold him for good.
 static s32 is_engaged_here(struct Object *obj) {
     return gMarioState->usedObj == obj
-        && (gMarioState->action == ACT_GRABBED || gMarioState->action == ACT_WAITING_FOR_DIALOG);
+        && (gMarioState->action == ACT_GRABBED || gMarioState->action == ACT_WAITING_FOR_DIALOG
+            || gMarioState->action == ACT_READING_NPC_DIALOG);
 }
 
 // Whether this object is a copy that should mirror its owner this frame: this game's Mario does
-// not hold it, and this game has not claimed it.
+// not hold it, and this game has not claimed it. Nor has it stopped time here, as a character
+// does while it speaks: only its own behavior starts time again, so whoever the server says
+// runs it, it runs here until it has, or this game would stand still for good.
 static struct MpCopy *following(struct Object *obj) {
     struct MpCopy *copy = copy_of(obj);
 
-    if (copy == NULL || is_held_here(obj) || copy->claim != 0) {
+    if (copy == NULL || is_held_here(obj) || copy->claim != 0
+        || ((obj->activeFlags & ACTIVE_FLAG_INITIATED_TIME_STOP)
+            && (gTimeStopState & TIME_STOP_ENABLED))) {
         return NULL;
     }
     return copy;
