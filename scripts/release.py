@@ -94,11 +94,13 @@ def _copy_sources() -> None:
 def names_home(file: Path) -> bool:
     """Whether `file` holds the path of the builder's home folder, in either way of writing
     a path and in either of the encodings a program keeps text in."""
-    home = str(Path.home()).lower()
+    home = str(Path.home())
+    # Lowered as bytes on both sides, which changes only plain letters: lowering the name as
+    # text would change an accented capital too, which the file's bytes still have.
     contents = file.read_bytes().lower()
     spellings = (home, home.replace("\\", "/"))
     return any(
-        spelling.encode(encoding) in contents
+        spelling.encode(encoding).lower() in contents
         for spelling in spellings
         for encoding in ("utf-8", "utf-16-le")
     )

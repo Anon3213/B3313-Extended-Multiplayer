@@ -159,19 +159,26 @@ pub struct ObjectSync {
 /// it cannot tell a game that was at a menu, whose area is loaded again with every coin back,
 /// from one that was paused, which still has what it took away. A coin's name is not always
 /// one coin's alone, so a game told twice takes away two: coins nobody collected went from a
-/// game each time it was paused. The game counts its area loads (`areaLoads`), and the word is
-/// passed on only if the area was loaded since it last was.
+/// game each time it was paused.
 ///
-/// Which word a coin belongs to cannot be read off it, so this goes by when each was asked
-/// for. A break within a second of the last asking, before its word can have come, or two
-/// loads as close, are taken wrongly: rare, and what it costs is a coin too many or too few.
+/// So this counts. The game counts its area loads (`areaLoads`), each of which puts every
+/// coin back. Since the last, the bridge keeps how many coins of each name the game has had
+/// taken from it: those its own Mario collected, those others collected while it was there,
+/// and those of the server's earlier words. Of a later word it passes on only as many of a
+/// name as go beyond that: none of a word it has had, and of the word a server joined again
+/// gives, the coins collected while it was away.
+///
+/// Where one word ends and the next begins cannot be read off a coin, so a word is taken to
+/// begin with the state that asks for it. The end of one still on its way then counts toward
+/// the next: rare, and what it costs is a coin too many taken away.
 #[derive(Debug, Default)]
 struct EarlierCoins {
-    /// The game's count of area loads when the server's word was last asked for, by a state
-    /// after a break, and when that was.
-    asked: Option<(u32, Instant)>,
-    /// The word asked for last is one the game has already had.
-    is_repeat: bool,
+    /// The game's count of area loads that the counts below are since.
+    loads: Option<u32>,
+    /// How many coins of each name the game has had taken from it since that load.
+    taken: HashMap<(Place, u16), u32>,
+    /// How many of each name the server's word now arriving has named so far.
+    in_word: HashMap<(Place, u16), u32>,
     /// States are going to the server, with no break since the last.
     sending: bool,
     /// Send slots still to go without a state, for the break the server is to see.
@@ -181,40 +188,66 @@ struct EarlierCoins {
 /// How many send slots go without a state for the server to see a break in them: each is a
 /// packet that may be lost, and the server gives its word again only if one arrives.
 const BREAK_SLOTS: u8 = 3;
-/// How long the server's word takes to come at most, a round trip and the packets it fills.
-/// A break sooner than this after asking for it does not make the next word a repeat.
-const WORD_ARRIVES_WITHIN: Duration = Duration::from_secs(1);
 
 impl EarlierCoins {
-    /// Whether a state may go in this send slot, at `now`, the game having loaded
-    /// `area_loads` areas. Not for a few slots if it loaded one since the server's word was
-    /// asked for with states going all the while, as when Mario dies: the server would not
-    /// give its word again without a break.
-    fn state_may_go(&mut self, area_loads: u32, now: Instant) -> bool {
-        let loaded_since = self.asked.is_none_or(|(loads, _)| loads != area_loads);
-        if self.sending && loaded_since {
-            self.sending = false;
-            self.withheld = BREAK_SLOTS;
+    /// Whether a state may go in this send slot, the game having loaded `area_loads` areas.
+    /// Not for a few slots if it loaded one with states going all the while, as when Mario
+    /// dies: the server would not give its word again without a break.
+    fn state_may_go(&mut self, area_loads: u32) -> bool {
+        if self.loads != Some(area_loads) {
+            self.loads = Some(area_loads);
+            self.taken.clear();
+            self.in_word.clear();
+            if self.sending {
+                self.sending = false;
+                self.withheld = BREAK_SLOTS;
+            }
         }
         if self.withheld > 0 {
             self.withheld -= 1;
             return false;
         }
         if !self.sending {
-            self.is_repeat = self.asked.is_some_and(|(loads, at)| {
-                loads == area_loads && now.saturating_duration_since(at) >= WORD_ARRIVES_WITHIN
-            });
-            self.asked = Some((area_loads, now));
+            // The server's word follows this state, and begins anew.
+            self.in_word.clear();
             self.sending = true;
         }
         true
     }
 
-    /// What is kept of this for a server joined again, with the game where it was: the word
-    /// a server that still has the session gives is one the game has had.
+    /// Notes a coin the game has had taken from it: one its Mario collected, or one another
+    /// player did that it was given. A coin with no name is not one the server names later.
+    fn note_taken(&mut self, coin: RingCoin) {
+        if coin.name != 0 {
+            *self.taken.entry((coin.place, coin.name)).or_default() += 1;
+        }
+    }
+
+    /// Whether the game is to be given `coin`, which another player collected. One worth
+    /// nothing is of the server's word on earlier coins, and is given only if the game has
+    /// not had as many of its name taken already.
+    fn is_wanted(&mut self, coin: RingCoin) -> bool {
+        if coin.value != 0 || coin.name == 0 {
+            self.note_taken(coin);
+            return true;
+        }
+        let key = (coin.place, coin.name);
+        let named = self.in_word.entry(key).or_default();
+        *named += 1;
+        let taken = self.taken.entry(key).or_default();
+        let is_more = *named > *taken;
+        if is_more {
+            *taken = *named;
+        }
+        is_more
+    }
+
+    /// What is kept of this for a server joined again, with the game where it was: what the
+    /// game has had taken from it, so that of the new server's word it is given the rest.
     fn for_server_joined_again(&self) -> Self {
         Self {
-            asked: self.asked,
+            loads: self.loads,
+            taken: self.taken.clone(),
             ..Self::default()
         }
     }
@@ -244,12 +277,8 @@ impl ObjectSync {
     ///
     /// # Errors
     /// Fails if the game's memory cannot be read.
-    pub fn state_may_go<M: ProcessMemory>(
-        &mut self,
-        mailbox: &Mailbox<M>,
-        now: Instant,
-    ) -> io::Result<bool> {
-        Ok(self.earlier_coins.state_may_go(mailbox.area_loads()?, now))
+    pub fn state_may_go<M: ProcessMemory>(&mut self, mailbox: &Mailbox<M>) -> io::Result<bool> {
+        Ok(self.earlier_coins.state_may_go(mailbox.area_loads()?))
     }
 
     /// Object sync for a server joined again, with the same game: nothing kept of the server
@@ -322,6 +351,7 @@ impl ObjectSync {
         let (coins, count) = mailbox.read_coins_out(seen)?;
         self.coins_seen = Some(count);
         for coin in &coins {
+            self.earlier_coins.note_taken(*coin);
             connection.queue_coin(coin);
         }
         Ok(())
@@ -331,11 +361,11 @@ impl ObjectSync {
     /// this game's Mario collected too: a name is not always one coin's alone, so that cannot
     /// be told, and a coin two players reach together counts for each of them twice.
     fn queue_coins(&mut self, coins: &[RingCoin]) {
-        // Worth nothing: one collected before this game came to its area. See `EarlierCoins`.
-        let wanted = coins
-            .iter()
-            .filter(|coin| coin.value != 0 || !self.earlier_coins.is_repeat);
-        for coin in wanted {
+        for coin in coins {
+            // Not one of an earlier word the game has had: see `EarlierCoins`.
+            if !self.earlier_coins.is_wanted(*coin) {
+                continue;
+            }
             if self.coins_waiting.len() >= COINS_WAITING_MOST {
                 self.coins_waiting.pop_front();
             }
@@ -476,9 +506,7 @@ fn collect_interactions<M: ProcessMemory>(
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        BREAK_SLOTS, ObjectNews, ObjectSender, ObjectSync, REFRESH_INTERVAL, WORD_ARRIVES_WITHIN,
-    };
+    use super::{BREAK_SLOTS, ObjectNews, ObjectSender, ObjectSync, REFRESH_INTERVAL};
     use crate::layout;
     use crate::mailbox::testing::game;
     use crate::mailbox::{COIN_ENTRIES, Mailbox, ObjectsOut, RingCoin};
@@ -604,33 +632,36 @@ mod tests {
         };
         let earlier = [coin(1, 7, 0), coin(1, 7, 0)];
 
-        let start = Instant::now();
-        let later = start + WORD_ARRIVES_WITHIN;
-
         // Come to the area: the first state goes, and the server's word is taken.
         load_area(1)?;
-        assert!(sync.state_may_go(&mailbox, start)?);
+        assert!(sync.state_may_go(&mailbox)?);
         assert_eq!(waiting_after(&mut sync, &earlier), 2);
 
-        // Paused and on again: the same word comes, and is left out. A coin collected now is not.
+        // Paused and on again: the same word comes, and is left out. A coin collected now
+        // is not, and the word after the next pause has it as one the game has had.
         sync.no_state_went();
-        assert!(sync.state_may_go(&mailbox, later)?);
+        assert!(sync.state_may_go(&mailbox)?);
         assert_eq!(waiting_after(&mut sync, &earlier), 0);
         assert_eq!(waiting_after(&mut sync, &[coin(1, 7, 1)]), 1);
+        let grown = [coin(1, 7, 0), coin(1, 7, 0), coin(1, 7, 0)];
+        sync.no_state_went();
+        assert!(sync.state_may_go(&mailbox)?);
+        assert_eq!(waiting_after(&mut sync, &grown), 0);
 
-        // The server is joined again with the game where it was: its word is still a repeat.
+        // The server is joined again with the game where it was. Its word has a coin more,
+        // collected while this game was away: that one is given, and no other.
         let mut sync = sync.for_server_joined_again();
-        assert!(sync.state_may_go(&mailbox, later + WORD_ARRIVES_WITHIN)?);
-        assert_eq!(waiting_after(&mut sync, &earlier), 0);
+        assert!(sync.state_may_go(&mailbox)?);
+        let while_away = [grown.as_slice(), &[coin(1, 7, 0), coin(1, 9, 0)]].concat();
+        assert_eq!(waiting_after(&mut sync, &while_away), 2);
 
         // The area is loaded again with states going, as after Mario dies: a few slots go
-        // without a state, so that the server gives its word again, and then it is taken.
+        // without a state, so that the server gives its word again, and then all is taken.
         load_area(2)?;
-        let much_later = later + 2 * WORD_ARRIVES_WITHIN;
         for _ in 0..BREAK_SLOTS {
-            assert!(!sync.state_may_go(&mailbox, much_later)?);
+            assert!(!sync.state_may_go(&mailbox)?);
         }
-        assert!(sync.state_may_go(&mailbox, much_later)?);
+        assert!(sync.state_may_go(&mailbox)?);
         assert_eq!(waiting_after(&mut sync, &earlier), 2);
         Ok(())
     }

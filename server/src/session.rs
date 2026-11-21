@@ -242,9 +242,12 @@ impl Session {
             // It keeps the last state shown, and counts toward the player's loss report.
             (Packet::Alive { sequence }, Some(index)) => {
                 let player = self.players.get_mut(index)?.as_mut()?;
-                player.meter.arrived(sequence, now);
                 // Out of the level: its coins are back in this player's game when they return.
-                player.coins_told_of = None;
+                // Not for one that comes late, after a state sent since: the break it marks
+                // is over, and the coins would be named a second time.
+                if player.meter.arrived(sequence, now) {
+                    player.coins_told_of = None;
+                }
                 None
             }
             // Answered at once, so the time measured is the network's, not the tick's.

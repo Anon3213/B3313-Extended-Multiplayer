@@ -951,7 +951,7 @@ impl Session {
             let running = playing && self.is_game_running(mailbox)?;
             // Asked after the state was read: an area the state is in was loaded before it.
             let state = match state.filter(|_| running) {
-                Some(state) if self.objects.state_may_go(mailbox, now)? => Some(state),
+                Some(state) if self.objects.state_may_go(mailbox)? => Some(state),
                 _ => None,
             };
             if let Some(state) = state {
