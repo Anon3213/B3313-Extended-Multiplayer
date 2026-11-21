@@ -1,8 +1,18 @@
 # Changelog
 
 What each version changed, newest first. Versions of the same protocol play together:
-those from 0.1.0 to 0.1.4 join each other's servers, and a version that does not play with
-the ones before it says so.
+those from 0.1.0 to 0.1.4 join each other's servers, as do those from 0.2.0 on, and a version
+that does not play with the ones before it says so.
+
+## 0.2.1
+
+Plays with 0.2.0, and builds the same games.
+
+- **A game that could not be brought up to date is no longer played as it was.** With a game
+  built by an older version of the panel, and a patch for another version of B3313 chosen on
+  the Play page, joining built the patch's game and then played the old one. The panel now
+  says which patch to choose.
+- The panel says "a B3313 patch" where it said "the B3313 patch", as there are several.
 
 ## 0.2.0
 
