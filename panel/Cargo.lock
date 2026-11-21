@@ -442,7 +442,7 @@ dependencies = [
 
 [[package]]
 name = "b3313-panel"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "b3313-bridge",
  "b3313-protocol",

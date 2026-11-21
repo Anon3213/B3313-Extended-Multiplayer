@@ -4,10 +4,11 @@ What each version changed, newest first. Versions of the same protocol play toge
 those from 0.1.0 to 0.1.4 join each other's servers, as do those from 0.2.0 on, and a version
 that does not play with the ones before it says so.
 
-## Not yet released
+## 0.2.2
 
 From a review of the whole project. It plays with 0.2.1's servers and players; the panel
-builds the game again by itself at the next join, as the game changed.
+builds the game again by itself at the next join, as the game changed. Everyone in a session
+is better off with it: several of these are faults one player's game shows another.
 
 In the game:
 
@@ -27,6 +28,7 @@ In the game:
 - **With three or more players, two could become one Mario** after a level loaded: one was
   not drawn, and a hit on the other landed on both.
 - The other players no longer turn see-through or metal when you put on such a cap.
+- Mario no longer keeps the session's colors after its bridge was closed without leaving.
 - A player who takes the number of one who just left is no longer shown frozen where that
   one stood for minutes; for a second at most.
 - **A game no longer stands still for good** when another player talks to a character
@@ -37,7 +39,8 @@ In the server:
 - **A ban removes everyone who plays from the banned address**, each told why. The others
   used to be left in the session unheard until they timed out. In the chat, a ban that would
   shut out your own address, or a moderator only the host may remove, is refused.
-- One machine can no longer keep newcomers out by sending from a thousand ports.
+- One machine can no longer keep newcomers out by sending from a thousand ports, nor cut a
+  player off by sending a flood under that player's address.
 - A player already in the session can no longer have another removed by claiming their name.
 - In a busy area, every enemy now moves for everyone: with more news than a packet holds,
   the same few were sent each time.
@@ -64,6 +67,8 @@ In the panel and the bridge:
   calls a second in a busy area.
 - The game the panel builds is written whole or not at all.
 - The panel says when it found no save of the game to copy aside before a session.
+- A panel that cannot open its window says why in a box, where it seemed to do nothing.
+- A moderator's ban in the game no longer takes away the panel's message with your Undo.
 - Restart keeps the router's port open for the server it starts, where it closed it and
   asked again, and the closing could arrive last and shut the port just opened.
 - A host password taken out of the settings no longer lives on through Restart.
