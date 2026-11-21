@@ -181,6 +181,14 @@ where
     Ok(parsed)
 }
 
+/// `text` without the mark some editors put at the start of a file to say it is UTF-8, as
+/// Notepad's "UTF-8 with BOM" does: it is no part of the first line, which would otherwise
+/// be refused for it.
+#[must_use]
+pub fn without_mark(text: &str) -> &str {
+    text.strip_prefix('\u{feff}').unwrap_or(text)
+}
+
 impl Config {
     /// Reads settings from `text`; anything not set keeps its default.
     ///
@@ -189,7 +197,7 @@ impl Config {
     pub fn parse(text: &str) -> Result<Self, ConfigError> {
         let mut config = Self::default();
         let mut seen: Vec<&str> = Vec::new();
-        for (index, raw) in text.lines().enumerate() {
+        for (index, raw) in without_mark(text).lines().enumerate() {
             let line = index + 1;
             let error = |message: String| ConfigError { line, message };
             let content = raw.split('#').next().unwrap_or_default().trim();
@@ -324,6 +332,13 @@ mod tests {
         };
         assert_eq!(config, Ok(expected));
         assert_eq!(Config::parse(""), Ok(Config::default()));
+    }
+
+    #[test]
+    fn a_file_saved_with_a_mark_at_its_start_is_read_all_the_same() {
+        // As Notepad's "UTF-8 with BOM" writes one.
+        let config = Config::parse("\u{feff}# Settings\nmax_players = 4\n");
+        assert_eq!(config.map(|config| config.max_players).ok(), Some(4));
     }
 
     #[test]

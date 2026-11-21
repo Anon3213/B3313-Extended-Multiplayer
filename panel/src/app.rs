@@ -37,7 +37,7 @@ use crate::widgets::{
     Button, Tone, TooltipDuration, dismiss_tooltips, follow_tooltips, track_mouse_navigation,
 };
 use crate::zoom::Zoom;
-use b3313_protocol::{Message, PlayerId};
+use b3313_protocol::PlayerId;
 use b3313_server::bans::{BanList, read_ban_file};
 use b3313_server::{Command, Config, Event};
 use gpui::{
@@ -753,6 +753,12 @@ impl Panel {
     fn stop_server(&mut self, restarting: bool, cx: &mut Context<Self>) {
         if let Some(running) = self.running.take() {
             let notices = if restarting {
+                // The router is told to close the port, and heard out, before the next
+                // server asks for it again: left to close by itself, the old closing could
+                // reach the router after the new opening, and shut the port just opened.
+                if let RouterPort::Open(map) = running.port {
+                    map.close();
+                }
                 self.restart_password = Some(running.host.host_password().to_owned());
                 running.host.stop_to_restart()
             } else {
@@ -859,6 +865,9 @@ impl Panel {
                     Event::CommandFailed(message) => {
                         self.show_toast(ToastTone::Error, message.clone());
                     }
+                    // The answer to `/list`, which the Log keeps among its reports, out of
+                    // sight unless asked for: shown, or the command would seem to do nothing.
+                    Event::Players(_) => self.show_toast(ToastTone::Success, event.to_string()),
                     _ => {}
                 }
                 self.dashboard.apply(&event, now);
@@ -963,10 +972,20 @@ impl Panel {
                     return;
                 }
             }
-        } else if let Some(message) = Message::new(&typed) {
-            Command::Say(message)
-        } else {
+        } else if typed.trim().is_empty() {
             return;
+        } else {
+            // As the console's `say`, which refuses a line too long for the chat: sent as
+            // it is, its end would be cut off for the players and shown whole here.
+            match Command::parse(&format!("say {typed}")) {
+                Ok(command) => command,
+                Err(why) => {
+                    let why = why.replacen("say takes", "A line takes", 1);
+                    self.show_toast(ToastTone::Error, why);
+                    cx.notify();
+                    return;
+                }
+            }
         };
         if let Some(running) = &self.running {
             running.host.send(command);

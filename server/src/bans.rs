@@ -12,7 +12,8 @@ use std::path::{Path, PathBuf};
 /// # Errors
 /// Fails, naming the line, on anything that is not an IP address.
 pub fn parse_bans(text: &str) -> Result<Vec<IpAddr>, ConfigError> {
-    text.lines()
+    crate::config::without_mark(text)
+        .lines()
         .enumerate()
         .filter_map(|(index, raw)| {
             let content = raw.split('#').next().unwrap_or_default().trim();
@@ -101,11 +102,20 @@ impl BanList {
     /// Fails if the file cannot be written; the list in memory, like the server's, has changed
     /// anyway, and the ban holds until the server stops.
     pub fn update(&mut self, event: &Event) -> Result<(), String> {
+        // In one form, as the server holds them: an IPv4 address written as an IPv6 one is
+        // the same address, and an unban of either must take the other out of the file.
         match event {
-            Event::Banned(_, ip) | Event::AddressBanned(ip) if !self.bans.contains(ip) => {
-                self.bans.push(*ip);
+            Event::Banned(_, ip) | Event::AddressBanned(ip) => {
+                let ip = ip.to_canonical();
+                if self.bans.iter().any(|banned| banned.to_canonical() == ip) {
+                    return Ok(());
+                }
+                self.bans.push(ip);
             }
-            Event::Unbanned(ip) => self.bans.retain(|banned| banned != ip),
+            Event::Unbanned(ip) => {
+                let ip = ip.to_canonical();
+                self.bans.retain(|banned| banned.to_canonical() != ip);
+            }
             _ => return Ok(()),
         }
         self.write()
@@ -181,6 +191,25 @@ mod tests {
 
         assert_eq!(list.bans(), [second]);
         assert_eq!(read_ban_file(&file.0), Ok(vec![second]));
+    }
+
+    /// An editor may begin a file with a mark that says it is UTF-8, and an IPv4 address may
+    /// be written as an IPv6 one: neither makes it another ban.
+    #[test]
+    fn a_file_saved_with_a_mark_is_read_and_an_unban_matches_either_way_of_writing() {
+        let ip: IpAddr = Ipv4Addr::new(203, 0, 113, 9).into();
+        assert_eq!(
+            parse_bans("\u{feff}# Bans\n203.0.113.9\n").ok(),
+            Some(vec![ip])
+        );
+
+        let mapped: IpAddr = Ipv4Addr::new(203, 0, 113, 9).to_ipv6_mapped().into();
+        let mut list = BanList::new(None, Vec::new());
+        assert_eq!(list.update(&Event::AddressBanned(mapped)), Ok(()));
+        assert_eq!(list.update(&Event::AddressBanned(ip)), Ok(()));
+        assert_eq!(list.bans(), [ip], "one ban, however written");
+        assert_eq!(list.update(&Event::Unbanned(mapped)), Ok(()));
+        assert!(list.bans().is_empty());
     }
 
     #[test]

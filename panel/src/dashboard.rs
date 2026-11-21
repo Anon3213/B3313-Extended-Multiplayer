@@ -368,6 +368,8 @@ fn for_crash_report(event: &Event) -> String {
     match event {
         Event::Named(player, _) => format!("Player {} took a name", player.get()),
         Event::Chat { text, .. } => crate::crash::chat_note(text.as_str()),
+        // Why a command failed often names the player it was about.
+        Event::CommandFailed(why) => format!("A command failed ({} characters)", why.len()),
         other => other.to_string(),
     }
 }
@@ -457,6 +459,10 @@ impl Dashboard {
             }
             Event::Left(id) | Event::TimedOut(id) | Event::Kicked(id) => {
                 self.players.remove(&id.get());
+                // Whoever has the number next is not the one the world came from.
+                if self.world_from == Some(*id) {
+                    self.world_from = None;
+                }
             }
             Event::WorldSet(id) => self.world_from = Some(*id),
             Event::Link(id, report) => {
