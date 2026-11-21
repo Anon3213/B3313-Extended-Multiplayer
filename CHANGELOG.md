@@ -64,8 +64,8 @@ In the panel and the bridge:
   calls a second in a busy area.
 - The game the panel builds is written whole or not at all.
 - The panel says when it found no save of the game to copy aside before a session.
-- Restart waits for the router to close the port before it asks for it again, which made
-  it less likely, not impossible, that the port just opened is closed.
+- Restart keeps the router's port open for the server it starts, where it closed it and
+  asked again, and the closing could arrive last and shut the port just opened.
 - A host password taken out of the settings no longer lives on through Restart.
 - A setting in your emulator's file that is not valid text no longer stops every join, and
   a file far too large to be a ROM or a patch is refused unread.

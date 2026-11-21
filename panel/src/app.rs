@@ -306,6 +306,11 @@ pub struct Panel {
     running: Option<Running>,
     /// The host password of a server stopped to be started again, for the next to take.
     restart_password: Option<String>,
+    /// The router's port of a server stopped to be started again, with the address on this
+    /// network it leads to, for the next to keep.
+    restart_port: Option<(SocketAddr, PortMap)>,
+    /// The address the router has been asked to open a port for and has not yet answered.
+    port_asked: Option<SocketAddr>,
     dashboard: Dashboard,
     bans: BanList,
     ban_input: Entity<TextInput>,
@@ -449,6 +454,8 @@ impl Panel {
             address,
             running: None,
             restart_password: None,
+            restart_port: None,
+            port_asked: None,
             dashboard: Dashboard::new(now).with_time_of_day(system::local_time_of_day()),
             bans: BanList::default(),
             ban_input,
@@ -565,6 +572,10 @@ impl Panel {
         if self.running.is_some() {
             return;
         }
+        // The router's port of a server stopped to be started again: kept open for this
+        // one if it listens where that one did, and closed as this returns if it does not
+        // start, or listens elsewhere.
+        let kept_port = self.restart_port.take();
         let Some(config) = self.settings_to_serve(cx) else {
             return;
         };
@@ -611,8 +622,16 @@ impl Panel {
                     reach,
                     port: RouterPort::NotAsked,
                 });
-                if let (Reach::Network(local), true) = (reach, self.preferences.open_port) {
-                    self.open_router_port(local, started, cx);
+                match (reach, self.preferences.open_port, kept_port) {
+                    // Still open, for the same address: closing it and asking again could
+                    // have the old closing reach the router after the new opening.
+                    (Reach::Network(local), true, Some((mapped, map))) if mapped == local => {
+                        if let Some(running) = &mut self.running {
+                            running.port = RouterPort::Open(map);
+                        }
+                    }
+                    (Reach::Network(local), true, _) => self.open_router_port(local, cx),
+                    _ => {}
                 }
             }
             Err(message) => self.report_problem(message),
@@ -621,20 +640,33 @@ impl Panel {
     }
 
     /// Asks the router to send the server's port to `local`, this PC's address on its network,
-    /// and notes the answer for the server started at `started`, if it is still the one
-    /// running. Waiting on the router happens off the panel's thread.
-    fn open_router_port(&mut self, local: SocketAddr, started: Instant, cx: &mut Context<Self>) {
+    /// and notes the answer for whichever server is then running there and waiting for it:
+    /// the one that asked, or one started in its place meanwhile. Waiting on the router
+    /// happens off the panel's thread.
+    fn open_router_port(&mut self, local: SocketAddr, cx: &mut Context<Self>) {
         if let Some(running) = &mut self.running {
             running.port = RouterPort::Asking;
         }
+        // The router was asked for this already, for a server since stopped, and has yet to
+        // answer: that answer is this server's. A second asking would make two keepers of
+        // one port, and the first to go would close it under the other.
+        if self.port_asked == Some(local) {
+            return;
+        }
+        self.port_asked = Some(local);
         let asked = cx
             .background_executor()
             .spawn(async move { port_map::open(local) });
         cx.spawn(async move |this, cx| {
             let answer = asked.await;
             let _ = this.update(cx, |this, cx| {
-                let Some(running) = this.running.as_mut().filter(|r| r.started == started) else {
-                    // That server has stopped; dropping the answer closes the port again.
+                this.port_asked = None;
+                let waiting = |running: &&mut Running| {
+                    running.reach == Reach::Network(local)
+                        && matches!(running.port, RouterPort::Asking)
+                };
+                let Some(running) = this.running.as_mut().filter(waiting) else {
+                    // No server waits for it; dropping the answer closes the port again.
                     return;
                 };
                 let (port, message) = match answer {
@@ -753,11 +785,11 @@ impl Panel {
     fn stop_server(&mut self, restarting: bool, cx: &mut Context<Self>) {
         if let Some(running) = self.running.take() {
             let notices = if restarting {
-                // The router is told to close the port, and heard out, before the next
-                // server asks for it again: left to close by itself, the old closing could
-                // reach the router after the new opening, and shut the port just opened.
-                if let RouterPort::Open(map) = running.port {
-                    map.close();
+                // The router's port stays open for the next server: see `start`.
+                if let (RouterPort::Open(map), Reach::Network(local)) =
+                    (running.port, running.reach)
+                {
+                    self.restart_port = Some((local, map));
                 }
                 // Only one the panel made up: the settings' own is theirs to change, and
                 // one taken out of them to revoke it must not live on in the next server.
