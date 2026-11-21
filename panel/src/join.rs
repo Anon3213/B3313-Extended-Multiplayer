@@ -204,15 +204,25 @@ impl Request {
         match read() {
             Ok(rom) if built_here.is_none_or(|game| game.is_current(&rom)) => Ok(rom),
             outdated => {
-                let rebuilt = built_here.and(self.sources.as_ref());
-                let Some((sm64, patch)) = rebuilt else {
+                let rebuilt = built_here.zip(self.sources.as_ref());
+                let Some((game, (sm64, patch))) = rebuilt else {
                     return outdated.and(Err(
                         "This panel is newer than its game. Set the game up again on the Play \
                          page."
                             .to_owned(),
                     ));
                 };
-                game_setup::set_up(sm64, patch)?;
+                let built = game_setup::set_up(sm64, patch)?;
+                // The patch chosen may be another version's than the ROM joined with, and
+                // building that one leaves this ROM as old as it was.
+                if built.rom != self.rom {
+                    return Err(format!(
+                        "This panel is newer than its game, B3313 {}, and the patch chosen on \
+                         the Play page is for B3313 {}. Choose the patch of the version you \
+                         play there.",
+                        game.name, built.game.name
+                    ));
+                }
                 read()
             }
         }
