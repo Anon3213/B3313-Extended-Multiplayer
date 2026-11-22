@@ -64,10 +64,12 @@ pub fn server_key(config: &Config, beside: Option<&Path>) -> Result<Option<Serve
         return Ok(None);
     };
     // The panel's folder is made when its preferences are first saved, which may be later.
-    if let Some(folder) = path.parent().filter(|folder| !folder.as_os_str().is_empty()) {
-        std::fs::create_dir_all(folder).map_err(|error| {
-            format!("could not make the folder {}: {error}", folder.display())
-        })?;
+    if let Some(folder) = path
+        .parent()
+        .filter(|folder| !folder.as_os_str().is_empty())
+    {
+        std::fs::create_dir_all(folder)
+            .map_err(|error| format!("could not make the folder {}: {error}", folder.display()))?;
     }
     load_or_create(&path).map(Some)
 }

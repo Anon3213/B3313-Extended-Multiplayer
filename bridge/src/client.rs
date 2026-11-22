@@ -319,7 +319,13 @@ impl Connection {
         game: u8,
         limit: Duration,
     ) -> io::Result<Self> {
-        Self::join_unless((server, None), password, game, limit, &AtomicBool::new(false))
+        Self::join_unless(
+            (server, None),
+            password,
+            game,
+            limit,
+            &AtomicBool::new(false),
+        )
     }
 
     /// Joins as `join_within` does, giving up as soon as `stop` is set: for a session that may

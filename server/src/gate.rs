@@ -408,7 +408,10 @@ mod tests {
         assert_eq!(key_met(&config, 2)?, key.public());
         // A server given no key is some server all the same, and no two of them are one.
         assert_ne!(key_met(&Config::default(), 3)?, key.public());
-        assert_ne!(key_met(&Config::default(), 4)?, key_met(&Config::default(), 5)?);
+        assert_ne!(
+            key_met(&Config::default(), 4)?,
+            key_met(&Config::default(), 5)?
+        );
         Ok(())
     }
 

@@ -624,7 +624,10 @@ impl Preferences {
         let (place, None) = server_parts(address) else {
             return None;
         };
-        let server = self.servers.iter_mut().find(|kept| kept.address == address)?;
+        let server = self
+            .servers
+            .iter_mut()
+            .find(|kept| kept.address == address)?;
         server.address = join_code(place, key);
         Some(server.address.clone())
     }
@@ -771,10 +774,10 @@ mod tests {
     use crate::overview_layout::{OverviewLayout, PanelKind};
     use crate::page_layout::{ArrangedPage, PageLayouts};
     use crate::sort::{Sort, SortOrder};
-    use b3313_protocol::secure::{SecureError, ServerKey, join_code};
     use crate::theme::{Mode, ThemeName};
     use crate::zoom::Zoom;
     use b3313_protocol::Outfit;
+    use b3313_protocol::secure::{SecureError, ServerKey, join_code};
     use std::path::{Path, PathBuf};
 
     #[test]

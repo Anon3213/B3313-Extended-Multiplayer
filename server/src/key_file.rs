@@ -60,12 +60,8 @@ fn create(path: &Path) -> io::Result<ServerKey> {
 /// this another server without its owner having asked.
 pub fn load_or_create(path: &Path) -> Result<ServerKey, String> {
     match std::fs::read_to_string(path) {
-        Ok(text) => parse(&text).map_err(|error| {
-            format!(
-                "{} is not a server's key file: {error}",
-                path.display()
-            )
-        }),
+        Ok(text) => parse(&text)
+            .map_err(|error| format!("{} is not a server's key file: {error}", path.display())),
         Err(error) if error.kind() == io::ErrorKind::NotFound => create(path).map_err(|error| {
             format!(
                 "could not keep this server's key in {}: {error}",

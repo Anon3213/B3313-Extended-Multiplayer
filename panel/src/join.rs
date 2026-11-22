@@ -309,8 +309,8 @@ impl Request {
                  Paste the invite again, or type the address without it."
             )
         })?;
-        let server = resolve(name)
-            .map_err(|error| format!("Could not find the server {name}: {error}."))?;
+        let server =
+            resolve(name).map_err(|error| format!("Could not find the server {name}: {error}."))?;
         let name = name.to_owned();
         let rom = self.current_rom()?;
         // Looking the name up and building the game take a while: a player who left
@@ -328,9 +328,7 @@ impl Request {
             .filter(|hosting| is_own_server(server, hosting.address));
         // This panel's own server is known by its key without an invite.
         let server_key = key.or(own.as_ref().map(|hosting| hosting.key));
-        let host_password = own
-            .map(|hosting| hosting.host_password)
-            .unwrap_or_default();
+        let host_password = own.map(|hosting| hosting.host_password).unwrap_or_default();
         Ok(Options {
             rom,
             pid,

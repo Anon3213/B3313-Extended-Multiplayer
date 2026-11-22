@@ -67,9 +67,7 @@ impl Invite {
         match self {
             Self::Address => Some(server.to_owned()),
             Self::WithPassword if password.is_empty() => None,
-            Self::WithPassword => {
-                Some(format!("Server address: {server}\nPassword: {password}\n"))
-            }
+            Self::WithPassword => Some(format!("Server address: {server}\nPassword: {password}\n")),
             Self::Full => Some(full_invitation(server, password)),
         }
     }

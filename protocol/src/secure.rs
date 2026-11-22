@@ -486,7 +486,10 @@ mod tests {
         let cut = text.get(1..).unwrap_or_default();
         assert!(cut.parse::<PublicKey>().is_err(), "too short");
         assert!(format!("{text}A").parse::<PublicKey>().is_err(), "too long");
-        assert!(format!("1{cut}").parse::<PublicKey>().is_err(), "no such letter");
+        assert!(
+            format!("1{cut}").parse::<PublicKey>().is_err(),
+            "no such letter"
+        );
         // The last letter carries one bit of the key and four that no key sets: two texts
         // must never be read as one key.
         let all_ones = "7".repeat(KEY_TEXT_LENGTH);
