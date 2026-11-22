@@ -197,6 +197,20 @@ pub struct Hosting {
     pub host_password: String,
 }
 
+/// Where the server the player gave is, and its key if they gave one after a `#`.
+///
+/// # Errors
+/// Fails, with a message for the player, if what follows the `#` is no key: it is never
+/// taken for an address with none, which would join whatever answers there.
+pub fn read_server(server: &str) -> Result<(&str, Option<PublicKey>), String> {
+    split_join_code(server).map_err(|error| {
+        format!(
+            "What follows the # in the server's address is not a server's key ({error}). \
+             Paste the invite again, or type the address without it."
+        )
+    })
+}
+
 /// What the player is told when the server that answered is not the one whose key they had,
 /// from an invite or from joining it before.
 fn wrong_server_reason(wrong: &WrongServer) -> String {
@@ -303,12 +317,7 @@ impl Request {
     /// What the session needs, read and looked up; or why that failed, in a sentence.
     fn options(self, stop: &AtomicBool, notify: &Sender<Notice>) -> Result<Options, String> {
         // Before the emulator is started, which a mistyped name or key should not do.
-        let (name, key) = split_join_code(&self.server).map_err(|error| {
-            format!(
-                "What follows the # in the server's address is not a server's key ({error}). \
-                 Paste the invite again, or type the address without it."
-            )
-        })?;
+        let (name, key) = read_server(&self.server)?;
         let server =
             resolve(name).map_err(|error| format!("Could not find the server {name}: {error}."))?;
         let name = name.to_owned();

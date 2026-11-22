@@ -252,6 +252,13 @@ impl Panel {
                         }),
                 )
                 .child(hint(theme, &explanation))
+                // Why what is copied is longer than the address above it.
+                .child(hint(
+                    theme,
+                    "What you copy also carries this server's key, after a # in the address: \
+                     with it, a player's panel joins this server and nobody else who answers \
+                     there.",
+                ))
                 .child(
                     div()
                         .flex()

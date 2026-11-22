@@ -89,7 +89,8 @@ pub const SETTINGS: [Setting; 13] = [
                Players' programs\nknow this server by its key, wherever its address moves: \
                keep the file to stay the same server,\ncopy it to move the server to another \
                PC, and show it to nobody, as whoever has it can pose as\nthis server. Empty \
-               keeps it in server.key beside this file.",
+               keeps it in server.key beside this file, or in the control panel's own \
+               folder when\nthe panel runs the server.",
     },
 ];
 

@@ -8,7 +8,7 @@ use crate::emulator::{Change, Install};
 use crate::format::{self, byte_rate, clock, millis};
 use crate::game_setup;
 use crate::icons::{IconName, icon};
-use crate::join::{Bridge, Hosting, Notice, Request};
+use crate::join::{Bridge, Hosting, Notice, Request, read_server};
 use crate::network::read_invite;
 use crate::page_layout::ArrangedPage;
 use crate::preferences::{SavedServer, server_parts};
@@ -21,6 +21,7 @@ use crate::widgets::{
 use b3313_bridge::process::{EMULATOR, find_processes};
 use b3313_bridge::session::Event;
 use b3313_protocol::metrics::LinkReport;
+use b3313_protocol::secure::{PublicKey, join_code};
 use b3313_protocol::{HitKind, Outfit, PlayerId, Role, RosterEntry};
 use gpui::{
     AnyElement, Context, Div, Entity, FontWeight, PathPromptOptions, SharedString, Subscription,
@@ -72,7 +73,12 @@ pub(super) enum PlayState {
 
 /// The Play page's own state.
 pub(super) struct Play {
+    /// Where the server is. Its key is not shown here: it is long, tells the eye nothing,
+    /// and would push the address out of the field.
     address: Entity<TextInput>,
+    /// The key of the server filled in, from an invite or a recent server, and the address it
+    /// came with: it stands for as long as that is the address in the field.
+    key: Option<(String, PublicKey)>,
     password: Entity<TextInput>,
     show_password: bool,
     remember_password: bool,
@@ -123,9 +129,10 @@ impl std::fmt::Debug for Play {
 impl Play {
     /// The page as the panel opens, the last server filled in.
     pub(super) fn new(last: Option<&SavedServer>, name: &str, cx: &mut Context<Panel>) -> Self {
-        let address = last.map_or("", |server| server.address.as_str());
+        let (place, key) = server_parts(last.map_or("", |server| server.address.as_str()));
+        let key = key.map(|key| (place.to_owned(), key));
         let password = last.and_then(|server| server.password.as_deref());
-        let address = cx.new(|cx| TextInput::new(cx, address, "Such as 203.0.113.7:41313"));
+        let address = cx.new(|cx| TextInput::new(cx, place, "Such as 203.0.113.7:41313"));
         let password = cx.new(|cx| {
             let mut input =
                 TextInput::new(cx, password.unwrap_or_default(), "If the server has one");
@@ -150,8 +157,15 @@ impl Play {
                 this.send_chat(cx);
             }
         }));
+        // Whether the server's key is known is said under the field, for the address in it.
+        subscriptions.push(cx.subscribe(&address, |_: &mut Panel, _, event, cx| {
+            if *event == InputEvent::Changed {
+                cx.notify();
+            }
+        }));
         Self {
             address,
+            key,
             password,
             show_password: false,
             remember_password: last.is_some_and(|server| server.password.is_some()),
@@ -427,6 +441,13 @@ impl Panel {
         let Some(rom) = self.preferences.rom.clone() else {
             return;
         };
+        // Said before the server is remembered, or a mistyped key would stay under Recent.
+        let server = self.server_to_join(cx);
+        if let Err(message) = read_server(&server) {
+            self.show_toast(ToastTone::Error, message);
+            cx.notify();
+            return;
+        }
         // With no emulator running, the session starts the game itself.
         let pid = self.play.emulator();
         if pid.is_none()
@@ -443,11 +464,6 @@ impl Panel {
             .sm64_rom
             .clone()
             .zip(self.preferences.b3313_patch.clone());
-        let typed = self.play.address.read(cx).text().trim().to_owned();
-        // An address typed alone, of a server joined before: with the key it had then, so
-        // that it is that server which is joined, and not whatever answers there now.
-        let with_key = self.preferences.server_with_its_key(&typed);
-        let server = with_key.map(str::to_owned).unwrap_or(typed);
         let password = self.play.password.read(cx).text().to_owned();
         let kept = self.play.remember_password.then_some(password.as_str());
         self.preferences.remember_server(&server, kept);
@@ -532,27 +548,50 @@ impl Panel {
             return;
         };
         let password = invite.password.unwrap_or_default();
-        self.play
-            .address
-            .update(cx, |input, cx| input.set_text(&invite.address, cx));
+        self.fill_server(&invite.address, cx);
         self.play
             .password
             .update(cx, |input, cx| input.set_text(&password, cx));
-        let message = if password.is_empty() {
-            "Invite pasted".to_owned()
-        } else {
-            "Invite pasted, with its password".to_owned()
+        let message = match (self.play.key.is_some(), password.is_empty()) {
+            (true, true) => "Invite pasted, with the server's key",
+            (true, false) => "Invite pasted, with the server's key and its password",
+            (false, true) => "Invite pasted",
+            (false, false) => "Invite pasted, with its password",
         };
-        self.show_toast(ToastTone::Success, message);
+        self.show_toast(ToastTone::Success, message.to_owned());
         cx.notify();
+    }
+
+    /// Fills the address field with where `server` is, and keeps its key, if it is written
+    /// with one, beside the field and out of it.
+    fn fill_server(&mut self, server: &str, cx: &mut Context<Self>) {
+        let (place, key) = server_parts(server);
+        self.play.key = key.map(|key| (place.to_owned(), key));
+        self.play
+            .address
+            .update(cx, |input, cx| input.set_text(place, cx));
+    }
+
+    /// The server Join joins as the fields stand: the address in the field, and its key
+    /// where that is known, so that it is that server which is joined and not whatever
+    /// answers there now. The key is the one filled in with this address, from an invite
+    /// or a recent server, or else the one kept from having joined there before; an invite's
+    /// comes first, as it is how a server that was set up anew is joined again.
+    fn server_to_join(&self, cx: &Context<Self>) -> String {
+        let typed = self.play.address.read(cx).text().trim().to_owned();
+        match &self.play.key {
+            Some((place, key)) if *place == typed => join_code(&typed, key),
+            _ => {
+                let kept = self.preferences.server_with_its_key(&typed);
+                kept.map(str::to_owned).unwrap_or(typed)
+            }
+        }
     }
 
     /// Fills the fields from a recent server.
     fn use_saved_server(&mut self, saved: &SavedServer, cx: &mut Context<Self>) {
         let password = saved.password.clone().unwrap_or_default();
-        self.play
-            .address
-            .update(cx, |input, cx| input.set_text(&saved.address, cx));
+        self.fill_server(&saved.address, cx);
         self.play
             .password
             .update(cx, |input, cx| input.set_text(&password, cx));
@@ -1073,6 +1112,7 @@ impl Panel {
                 .update(cx, |input, cx| input.set_masked(masked, cx));
             cx.notify();
         }));
+        let key_known = server_parts(&self.server_to_join(cx)).1.is_some();
         div()
             .flex()
             .flex_col()
@@ -1090,7 +1130,14 @@ impl Panel {
                             .flex_1()
                             .min_w(scaled(240.))
                             .child(label(theme, "Server address"))
-                            .child(div().font_family(MONO).child(self.play.address.clone())),
+                            .child(div().font_family(MONO).child(self.play.address.clone()))
+                            .when(key_known, |field| {
+                                field.child(hint(
+                                    theme,
+                                    "This server's key is known, so only that server is \
+                                     joined, whoever answers at this address.",
+                                ))
+                            }),
                     )
                     .child(
                         div()
