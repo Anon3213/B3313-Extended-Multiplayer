@@ -1228,7 +1228,9 @@ impl Panel {
         )
     }
 
-    /// One recent server: its address, whether its password is kept, and a way to forget it.
+    /// One recent server: its address, a padlock if its password is kept, and a way to
+    /// forget it. That its key is known is said by its tooltip alone: it is so of every
+    /// server joined since servers had keys, and a mark on every chip marks nothing.
     fn saved_server_chip(
         &self,
         theme: &Theme,
@@ -1239,7 +1241,6 @@ impl Panel {
         let accent = theme.accent;
         let fill = saved.clone();
         let forget = saved.address.clone();
-        // The key is long and tells the eye nothing: the chip says only that it is known.
         let (place, key) = server_parts(&saved.address);
         let tip = match (saved.password.is_some(), key.is_some()) {
             (true, true) => {
@@ -1308,21 +1309,9 @@ impl Panel {
                     .text_size(scaled(13.))
                     .child(self.shown_text(place)),
             )
-            .when(key.is_some(), |chip| {
-                chip.child(
-                    div()
-                        .text_size(scaled(11.))
-                        .text_color(theme.text_faint)
-                        .child("key known"),
-                )
-            })
+            // The size and color of the chip's other mark, the X that forgets it.
             .when(saved.password.is_some(), |chip| {
-                chip.child(
-                    div()
-                        .text_size(scaled(11.))
-                        .text_color(theme.text_faint)
-                        .child("password saved"),
-                )
+                chip.child(icon(IconName::Lock, 12., theme.text_muted))
             })
             .child(forget_button)
             .into_any_element()

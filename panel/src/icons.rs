@@ -59,6 +59,7 @@ icons! {
     History => "history.svg",
     Keyboard => "keyboard.svg",
     LayoutDashboard => "layout-dashboard.svg",
+    Lock => "lock.svg",
     MessageSquare => "message-square.svg",
     Minus => "minus.svg",
     PanelLeftClose => "panel-left-close.svg",
