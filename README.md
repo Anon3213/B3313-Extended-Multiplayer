@@ -11,6 +11,12 @@ already have, starts it, and connects you to a session. It can also host a sessi
 This is an unofficial fan project. It is not affiliated with Nintendo or the B3313 team, and
 it does not contain any ROM.
 
+> [!TIP]
+> **Download** the latest
+> [`B3313-Extended-Multiplayer-<version>-windows-x64.zip`](https://github.com/Anon3213/B3313-Extended-Multiplayer/releases/latest),
+> unzip it anywhere, and start **`B3313 Extended Multiplayer.exe`**.
+> You'll also need the files listed under [What you need](#what-you-need).
+
 > **Still experimental.** This has only been tested by programs that run two games side by
 > side on one PC. Nobody has played it with other people yet, so expect problems. See
 > [Known limits](#known-limits) before you start.
@@ -29,10 +35,6 @@ it does not contain any ROM.
 
   Everyone in a session must play the same version. See
   [Versions of B3313](#versions-of-b3313).
-
-Download the latest `B3313-Extended-Multiplayer-<version>-windows-x64.zip` from the
-[Releases page](https://github.com/Anon3213/B3313-Extended-Multiplayer/releases) and unzip
-it anywhere.
 
 ## Getting started
 
