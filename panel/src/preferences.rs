@@ -245,8 +245,10 @@ impl Default for Preferences {
     }
 }
 
-/// Servers kept as recent on the Play page.
-pub const RECENT_SERVERS: usize = 5;
+/// Servers kept as recent on the Play page: three rows of chips or so, and more than the
+/// servers most players go back to. A server dropped from the end is forgotten with its key,
+/// and is then joined as a new one would be, so the list is not kept short.
+pub const RECENT_SERVERS: usize = 10;
 
 /// Where the server kept or typed as `server` is, and its key if that is written after it,
 /// as in an invite. What follows a `#` and is no key is left as part of the place, which
