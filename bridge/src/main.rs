@@ -6,6 +6,7 @@
 use b3313_bridge::client::resolve;
 use b3313_bridge::session::{self, End, Event, Input, Options};
 use b3313_bridge::typing::{DEFAULT_CHAT_KEY, DEFAULT_CHAT_SECONDS, chat_key, chat_seconds};
+use b3313_protocol::secure::{PublicKey, split_join_code};
 use b3313_protocol::{Name, Outfit};
 use std::error::Error;
 use std::net::SocketAddr;
@@ -15,9 +16,13 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver};
 use std::thread;
 
-const USAGE: &str = "Usage: b3313-bridge <multiplayer ROM> <emulator PID> <server address:port>
+const USAGE: &str = "Usage: b3313-bridge <multiplayer ROM> <emulator PID> <server address:port, \
+or its join code>
 
-The session password, if the server has one, goes in the B3313_PASSWORD environment variable, not
+A join code is the server's address, a # and the server's key, as the server's owner gives it:
+with it, only that server is joined, and nobody else who answers at its address. The key alone
+can be given as B3313_SERVER_KEY. The session password, if the server has one, goes in the
+B3313_PASSWORD environment variable, not
 the command line, where other programs on the PC could read it. B3313_NAME is the name the other
 players see, B3313_COLOR the colors they see you in (red, green and so on; /color in the chat
 lists them), and B3313_HOST_PASSWORD, for the host alone, the server's host password. Lines typed
@@ -25,6 +30,9 @@ here go to the chat, and so do lines typed in the game: there, T opens the chat,
 in B3313_CHAT_KEY, and \"off\" for that leaves the keyboard unread; B3313_CHAT_SECONDS is how long
 the game shows a line, 8 unless given. The control panel's Play page
 does all this without a command line.";
+/// The key the server must have, for a server given by its address alone; unset joins
+/// whatever answers there.
+const SERVER_KEY_VARIABLE: &str = "B3313_SERVER_KEY";
 /// Where the session password comes from; unset means an open session.
 const PASSWORD_VARIABLE: &str = "B3313_PASSWORD";
 /// The player's name; unset leaves it to the server.
@@ -39,7 +47,15 @@ const CHAT_KEY_VARIABLE: &str = "B3313_CHAT_KEY";
 /// How many seconds the game shows chat for, from 3 to 120; unset, or anything else, is 8.
 const CHAT_SECONDS_VARIABLE: &str = "B3313_CHAT_SECONDS";
 
-fn parse_args() -> Result<(PathBuf, u32, SocketAddr), Box<dyn Error>> {
+/// The server as the command line gave it: where it is now, the name that was looked up for
+/// that, and the key it must have, from a join code or `SERVER_KEY_VARIABLE`.
+struct Server {
+    address: SocketAddr,
+    name: String,
+    key: Option<PublicKey>,
+}
+
+fn parse_args() -> Result<(PathBuf, u32, Server), Box<dyn Error>> {
     let mut args = std::env::args_os().skip(1);
     let (Some(rom), Some(pid), Some(server), None) =
         (args.next(), args.next(), args.next(), args.next())
@@ -47,7 +63,17 @@ fn parse_args() -> Result<(PathBuf, u32, SocketAddr), Box<dyn Error>> {
         return Err(USAGE.into());
     };
     let pid = pid.to_str().ok_or(USAGE)?.parse()?;
-    let server = resolve(server.to_str().ok_or(USAGE)?)?;
+    let (name, in_code) = split_join_code(server.to_str().ok_or(USAGE)?)?;
+    let key = match (in_code, std::env::var(SERVER_KEY_VARIABLE)) {
+        (Some(key), _) => Some(key),
+        (None, Ok(key)) => Some(key.trim().parse()?),
+        (None, Err(_)) => None,
+    };
+    let server = Server {
+        address: resolve(name)?,
+        name: name.to_owned(),
+        key,
+    };
     Ok((PathBuf::from(rom), pid, server))
 }
 
@@ -60,6 +86,10 @@ fn print_event(server: SocketAddr, event: &Event) {
             limit.as_secs()
         ),
         Event::Joined(player) => println!("Joined {server} as player {}.", player.get()),
+        Event::Server(key) => println!(
+            "This server's key is {key}. Give it as {SERVER_KEY_VARIABLE}, or after a # at \
+             the end of the server's address, to join this server and no other."
+        ),
         Event::WrongRom(found) => eprintln!("{}", session::describe_wrong_rom(*found)),
         Event::Hit(target, kind) => println!("Hit player {} ({kind:?}).", target.get()),
         Event::HitBy(attacker, kind) => println!("Hit by player {} ({kind:?}).", attacker.get()),
@@ -139,7 +169,9 @@ fn run() -> Result<(), Box<dyn Error>> {
     let options = Options {
         rom: std::fs::read(rom_path)?,
         pid,
-        server,
+        server: server.address,
+        server_name: Some(server.name),
+        server_key: server.key,
         password: std::env::var(PASSWORD_VARIABLE).unwrap_or_default(),
         name,
         outfit,
@@ -153,8 +185,9 @@ fn run() -> Result<(), Box<dyn Error>> {
     };
     leave_on_ctrl_c();
     let says = chat_from_console();
+    let address = options.server;
     let end = session::run(&options, &STOP, &says, |event| {
-        print_event(server, &event);
+        print_event(address, &event);
     })?;
     match end {
         // Closing the game is the usual way to finish.

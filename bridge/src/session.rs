@@ -4,7 +4,7 @@
 
 use crate::client::{
     Connection, JOIN_TIMEOUT, Received, ShownPlayers, apply_snapshot, clear_all, player_for,
-    slot_for,
+    resolve_within, slot_for,
 };
 use crate::interpolation::Interpolator;
 use crate::keyboard::{Keyboard, WindowsKeys};
@@ -17,6 +17,7 @@ use crate::ram::{N64Ram, ProcessMemory, Search, attach};
 use crate::text::{self, ROW_BYTES, TEXT_END};
 use crate::typing::{Draft, Key};
 use b3313_protocol::metrics::LinkReport;
+use b3313_protocol::secure::PublicKey;
 use b3313_protocol::{
     HitKind, Hurt, Message, Name, Outfit, PlayerId, RemoveReason, RosterEntry, WorldInputs,
 };
@@ -69,6 +70,14 @@ pub struct Options {
     pub rom: Vec<u8>,
     pub pid: u32,
     pub server: SocketAddr,
+    /// What the player gave as the server, if it was a name: looked up again each time the
+    /// bridge joins again, as a home connection's address changes and the name follows it.
+    /// None keeps to `server`.
+    pub server_name: Option<String>,
+    /// The key the server must have, from a join code or an earlier join; none joins whatever
+    /// answers at the address. Either way the server joined first is the only one joined
+    /// again.
+    pub server_key: Option<PublicKey>,
     pub password: String,
     /// The name the player chose; empty leaves it to the server, which makes one up.
     pub name: String,
@@ -93,6 +102,9 @@ pub enum Event {
     Joining,
     /// In the session, as this player. Again after `Reconnecting`, and not always as the same.
     Joined(PlayerId),
+    /// The key of the server joined, said once, after the first `Joined`: what whoever keeps
+    /// the player's servers knows this one by from now on.
+    Server(PublicKey),
     /// The server went silent, or is being started again; joining it again, for this long
     /// at most.
     Reconnecting(Duration),
@@ -213,7 +225,7 @@ pub fn run(
     let mailbox = Mailbox::new(ram);
     events(Event::Joining);
     let joined = Connection::join_unless(
-        options.server,
+        (options.server, options.server_key),
         &options.password,
         mailbox.game()?,
         JOIN_TIMEOUT,
@@ -226,6 +238,7 @@ pub fn run(
         Err(error) => return Err(error),
     };
     events(Event::Joined(connection.player()));
+    events(Event::Server(connection.server_key()));
     let mut session = Session::new(Instant::now());
     let mut people = People::new(options);
     let mut keyboard = options
@@ -344,6 +357,10 @@ fn rejoin<M: ProcessMemory>(
     events(Event::Reconnecting(REJOIN_FOR));
     events(Event::Roster(Vec::new()));
     let me = link.connection.player();
+    // Only the server that was joined is joined again: what answers at its address now may
+    // be another, and the session's world and progress would not be this one's.
+    let server_key = link.connection.server_key();
+    let mut server = options.server;
     link.people.lose_link();
     let deadline = Instant::now() + REJOIN_FOR;
     let joined = loop {
@@ -360,8 +377,14 @@ fn rejoin<M: ProcessMemory>(
         link.connection.leave();
         // Read again each time: the player may have started another game meanwhile.
         let game = mailbox.game().map_err(End::GameClosed)?;
+        // The name may lead elsewhere by now, as when the server's router started again
+        // with a new address. Following it unasked is safe because the key is checked. A
+        // lookup that fails or takes too long leaves the address last known.
+        if let Some(name) = &options.server_name {
+            server = resolve_within(name, REJOIN_ATTEMPT).unwrap_or(server);
+        }
         let attempt = Connection::join_unless(
-            options.server,
+            (server, Some(server_key)),
             &options.password,
             game,
             REJOIN_ATTEMPT,
@@ -1086,13 +1109,14 @@ mod tests {
         End, Event, Input, Link, Options, People, Session, TYPING_RENEW_INTERVAL, leave_game,
         rejoin,
     };
-    use crate::client::{Connection, ShownPlayers, apply_snapshot};
+    use crate::client::{Connection, ShownPlayers, apply_snapshot, wrong_server};
     use crate::layout::{self, len};
     use crate::mailbox::testing::{game, make_ready, raw};
     use crate::mailbox::{Mailbox, Person};
     use crate::ram::N64Ram;
     use crate::text;
     use crate::typing::Key;
+    use b3313_protocol::secure::ServerKey;
     use b3313_protocol::{
         ObjectSet, Outfit, PLAYER_STATE_SIZE, PROGRESS_SIZE, PlayerId, Progress, RemoveReason,
         Role, RosterEntry, TICK_INTERVAL, WORLD_INPUTS_SIZE,
@@ -1142,6 +1166,8 @@ mod tests {
                 rom: Vec::new(),
                 pid: 0,
                 server,
+                server_name: None,
+                server_key: None,
                 password: String::new(),
                 name: "Luigi".to_owned(),
                 outfit: Outfit::named("green"),
@@ -1182,6 +1208,8 @@ mod tests {
             rom: Vec::new(),
             pid: 0,
             server,
+            server_name: None,
+            server_key: None,
             password: String::new(),
             name: String::new(),
             outfit: None,
@@ -1400,17 +1428,72 @@ mod tests {
         Ok(None)
     }
 
+    /// A server's settings with a key of its own, as a server started again has the same.
+    fn with_a_key() -> io::Result<Config> {
+        let key = ServerKey::generate().map_err(io::Error::other)?;
+        Ok(Config {
+            key: Some(key),
+            ..Config::default()
+        })
+    }
+
+    #[test]
+    fn a_bridge_joins_again_only_the_server_it_was_in() -> io::Result<()> {
+        let socket = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0))?;
+        let server = socket.local_addr()?;
+        let stop = AtomicBool::new(false);
+        thread::scope(|scope| {
+            let (socket, stop) = (&socket, &stop);
+            let first = scope.spawn(move || serve(socket, Config::default(), stop, |_| {}));
+            let process = game();
+            make_ready(&process)?;
+            let mailbox = Mailbox::new(N64Ram::new(&process, 0));
+            let options = options(server);
+            let mut people = People::new(&options);
+            let mut connection = Connection::join(server, "", 0)?;
+            let was_in = connection.server_key();
+            let mut session = Session::new(Instant::now());
+            let mut link = Link {
+                connection: &mut connection,
+                session: &mut session,
+                people: &mut people,
+            };
+
+            // The server goes, and another, with a key of its own, answers at its address:
+            // as when the address has come to be someone else's, or someone poses as it.
+            stop.store(true, std::sync::atomic::Ordering::Relaxed);
+            first
+                .join()
+                .map_err(|_| io::Error::other("the first server panicked"))??;
+            stop.store(false, std::sync::atomic::Ordering::Relaxed);
+            scope.spawn(move || serve(socket, Config::default(), stop, |_| {}));
+            let _stopping = StopOnDrop(stop);
+
+            let never = AtomicBool::new(false);
+            let ended = rejoin(&options, &never, &mailbox, &mut link, &mut |_| {});
+
+            let Err(End::Refused(error)) = ended else {
+                return Err(io::Error::other(format!("joined or ended as {ended:?}")));
+            };
+            let wrong = wrong_server(&error).ok_or_else(|| io::Error::other(error))?;
+            assert_eq!(wrong.expected, was_in);
+            assert_ne!(wrong.met, was_in);
+            Ok(())
+        })
+    }
+
     #[test]
     fn a_bridge_whose_server_starts_again_joins_the_new_one() -> io::Result<()> {
         let socket = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0))?;
         let server = socket.local_addr()?;
         let stop = AtomicBool::new(false);
         let (commands, received) = mpsc::channel();
+        let config = with_a_key()?;
+        let again = config.clone();
         thread::scope(|scope| {
             let (socket, stop) = (&socket, &stop);
-            let first = scope.spawn(move || {
-                serve_with_console(socket, Config::default(), stop, &received, |_| {})
-            });
+            let first =
+                scope.spawn(move || serve_with_console(socket, config, stop, &received, |_| {}));
             let _stopping = StopOnDrop(stop);
             let process = game();
             make_ready(&process)?;
@@ -1441,7 +1524,7 @@ mod tests {
             first
                 .join()
                 .map_err(|_| io::Error::other("the first server panicked"))??;
-            scope.spawn(move || serve(socket, Config::default(), stop, |_| {}));
+            scope.spawn(move || serve(socket, again, stop, |_| {}));
 
             let mut said = Vec::new();
             let never = AtomicBool::new(false);

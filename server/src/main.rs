@@ -2,12 +2,15 @@
 //!
 //! The server's owner types commands into its console; `console::HELP` lists them.
 
+use b3313_protocol::secure::{PublicKey, join_code};
 use b3313_server::bans::{BanList, read_ban_file};
 use b3313_server::console::HELP;
+use b3313_server::key_file::{beside, load_or_create};
 use b3313_server::{Command, Config, Event, serve_with_console};
 use std::error::Error;
 use std::io::BufRead;
 use std::net::UdpSocket;
+use std::path::Path;
 use std::process::ExitCode;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
@@ -71,17 +74,30 @@ fn stop_in_order() {}
 const USAGE: &str = "Usage: b3313-server <address:port to listen on, such as 127.0.0.1:41313> \
 [--config <file>]
 
-Without --config, every setting has its default; server/server.example.conf lists them.";
+Without --config, every setting has its default; server/server.example.conf lists them. The
+server's key is then kept in server.key, in the folder the server is run from.";
+
+/// What the server's owner is told of its key as it starts: what to give players, and
+/// where the private half is.
+fn key_notice(key: &PublicKey, kept_in: &Path) -> String {
+    let code = join_code("<the address players reach this server at>", key);
+    format!(
+        "Give players this join code, which lets their programs check that they reached this \
+         server and no other:\n  {code}\nThis server's key is kept in {}: show that file to \
+         nobody.",
+        kept_in.display()
+    )
+}
 
 fn run() -> Result<(), Box<dyn Error>> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     // No default address: listening beyond this PC must be a deliberate choice.
-    let (address, mut config) = match args.as_slice() {
-        [address] => (address, Config::default()),
+    let (address, mut config, settings) = match args.as_slice() {
+        [address] => (address, Config::default(), None),
         [address, flag, path] if flag == "--config" => {
             let text = std::fs::read_to_string(path)
                 .map_err(|error| format!("cannot read {path}: {error}"))?;
-            (address, Config::parse(&text)?)
+            (address, Config::parse(&text)?, Some(Path::new(path)))
         }
         _ => return Err(USAGE.into()),
     };
@@ -89,9 +105,19 @@ fn run() -> Result<(), Box<dyn Error>> {
         config.bans = read_ban_file(path)?;
     }
     let mut bans = BanList::new(config.ban_file.clone(), config.bans.clone());
+    // Kept where the settings say, or beside them, or with no settings in the folder the
+    // server is run from: a server started again must be the same server, or its players'
+    // bridges, which join again only the server they were in, would refuse it.
+    let key_file = config
+        .key_file
+        .clone()
+        .unwrap_or_else(|| beside(settings.unwrap_or_else(|| Path::new(""))));
+    let key = load_or_create(&key_file)?;
+    config.key = Some(key.clone());
 
     let socket = UdpSocket::bind(address)?;
     println!("Listening on {}. {HELP}", socket.local_addr()?);
+    println!("{}", key_notice(&key.public(), &key_file));
     let (commands, received) = mpsc::channel();
     // Reads the console for as long as the server runs; it ends with the process.
     thread::spawn(move || {

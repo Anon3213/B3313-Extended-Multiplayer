@@ -4,6 +4,7 @@
 //! at startup instead of weakening the server. `server/server.example.conf` lists them all.
 
 use b3313_protocol::MAX_HOST_PASSWORD_LENGTH;
+use b3313_protocol::secure::ServerKey;
 use std::fmt;
 use std::net::IpAddr;
 use std::path::PathBuf;
@@ -18,7 +19,7 @@ pub struct Setting {
 }
 
 /// Every setting, in the order `Config::format` writes them.
-pub const SETTINGS: [Setting; 12] = [
+pub const SETTINGS: [Setting; 13] = [
     Setting {
         key: "max_players",
         help: "Players admitted at once (1-16).",
@@ -82,6 +83,14 @@ pub const SETTINGS: [Setting; 12] = [
                and unbanned.\nEmpty keeps bans only until the server stops, or the control \
                panel that runs it closes.",
     },
+    Setting {
+        key: "key_file",
+        help: "The file this server's key is kept in, made the first time the server runs. \
+               Players' programs\nknow this server by its key, wherever its address moves: \
+               keep the file to stay the same server,\ncopy it to move the server to another \
+               PC, and show it to nobody, as whoever has it can pose as\nthis server. Empty \
+               keeps it in server.key beside this file.",
+    },
 ];
 
 const FILE_HEADER: &str = "# Settings for b3313-server, read with: b3313-server <address:port> \
@@ -120,6 +129,13 @@ pub struct Config {
     pub ban_file: Option<PathBuf>,
     /// The addresses banned at startup, read from `ban_file` by the program that runs the server.
     pub bans: Vec<IpAddr>,
+    /// The file the server's key is kept in. None leaves the place to the program that runs
+    /// the server.
+    pub key_file: Option<PathBuf>,
+    /// The server's key, read from its file by the program that runs the server
+    /// (`key_file::load_or_create`). None has the server make one up that lasts until it
+    /// stops, which suits tests: players' bridges would not join it again once restarted.
+    pub key: Option<ServerKey>,
 }
 
 impl Default for Config {
@@ -147,6 +163,8 @@ impl Default for Config {
             host_password: String::new(),
             ban_file: None,
             bans: Vec::new(),
+            key_file: None,
+            key: None,
         }
     }
 }
@@ -257,6 +275,11 @@ impl Config {
                 .as_ref()
                 .map(|path| path.display().to_string())
                 .unwrap_or_default(),
+            "key_file" => self
+                .key_file
+                .as_ref()
+                .map(|path| path.display().to_string())
+                .unwrap_or_default(),
             _ => return None,
         })
     }
@@ -304,6 +327,8 @@ impl Config {
             }
             "ban_file" if !value.is_empty() => self.ban_file = Some(PathBuf::from(value)),
             "ban_file" => self.ban_file = None,
+            "key_file" if !value.is_empty() => self.key_file = Some(PathBuf::from(value)),
+            "key_file" => self.key_file = None,
             _ => return Err(format!("unknown setting {key}")),
         }
         Ok(())
@@ -365,6 +390,8 @@ mod tests {
             host_password: "my own".to_owned(),
             ban_file: Some("bans here.txt".into()),
             bans: Vec::new(),
+            key_file: Some("my server.key".into()),
+            key: None,
         };
         assert_eq!(Config::parse(&changed.format()), Ok(changed));
     }

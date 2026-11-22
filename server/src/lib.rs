@@ -11,6 +11,7 @@ pub mod config;
 pub mod console;
 mod event;
 mod gate;
+pub mod key_file;
 mod limits;
 pub mod movement;
 pub mod objects;

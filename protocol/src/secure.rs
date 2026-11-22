@@ -1,20 +1,28 @@
 //! The encrypted channel between a bridge and the server.
 //!
 //! Both ends turn the session password into a key with Argon2id, using a salt the server picks for
-//! each run, then run the Noise `NNpsk0` handshake with that key. Its first message only decrypts
-//! with the right key, so the server learns of a wrong password at once. Every packet afterwards is
-//! sealed with ChaCha20-Poly1305 under an explicit nonce, because UDP loses and reorders packets,
-//! and a window of recent nonces turns away replays.
+//! each run, then run the Noise `NXpsk0` handshake with that key. Its first message only decrypts
+//! with the right key, so the server learns of a wrong password at once. The server's reply
+//! carries its own long-term public key and proves it holds the private half: the password says
+//! who may join, and that key says which server was reached, since every player knows the
+//! password and could otherwise pose as the server. Every packet afterwards is sealed with
+//! ChaCha20-Poly1305 under an explicit nonce, because UDP loses and reorders packets, and a
+//! window of recent nonces turns away replays.
 //!
 //! All the cryptography is the `snow` and `argon2` crates'; this module only wires them together.
 
 use argon2::Argon2;
 use snow::{Builder, HandshakeState, StatelessTransportState};
 use std::fmt;
+use std::str::FromStr;
 
-/// The Noise protocol: a pre-shared key mixed in first, fresh X25519 keys on both sides, and
-/// ChaCha20-Poly1305 with BLAKE2s.
-const NOISE_PATTERN: &str = "Noise_NNpsk0_25519_ChaChaPoly_BLAKE2s";
+/// The Noise protocol: a pre-shared key mixed in first, fresh X25519 keys on both sides, the
+/// server's long-term key sent in its reply, and ChaCha20-Poly1305 with BLAKE2s.
+///
+/// There is one pattern and no way to ask for another: a server that offered a handshake
+/// without its key would have to say so before anything is authenticated, and someone between
+/// the two could then choose the weaker one for them.
+const NOISE_PATTERN: &str = "Noise_NXpsk0_25519_ChaChaPoly_BLAKE2s";
 pub const SALT_SIZE: usize = 16;
 pub type Salt = [u8; SALT_SIZE];
 /// The key Argon2id derives from the password, and Noise mixes in as its pre-shared key.
@@ -63,6 +71,194 @@ fn builder(key: &Key) -> Result<Builder<'_>, SecureError> {
     Ok(Builder::new(params).psk(0, key)?)
 }
 
+/// The size of either half of a server's key.
+pub const KEY_SIZE: usize = 32;
+/// The letters a key is written in: RFC 4648's base32, which has no two that look alike in
+/// both cases.
+const KEY_ALPHABET: &[u8; 32] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+/// How many letters a key is written in: five bits a letter, the last one's low bits unused.
+pub const KEY_TEXT_LENGTH: usize = (KEY_SIZE * 8).div_ceil(5);
+
+/// Writes a key's bytes as letters.
+fn key_text(bytes: &[u8; KEY_SIZE]) -> String {
+    let mut text = String::with_capacity(KEY_TEXT_LENGTH);
+    let mut bits = 0_u32;
+    let mut count = 0_u32;
+    let mut letter = |index: u32| {
+        let letter = usize::try_from(index & 31)
+            .ok()
+            .and_then(|index| KEY_ALPHABET.get(index));
+        text.push(char::from(letter.copied().unwrap_or(b'A')));
+    };
+    for &byte in bytes {
+        bits = (bits << 8) | u32::from(byte);
+        count += 8;
+        while count >= 5 {
+            count -= 5;
+            letter(bits >> count);
+        }
+    }
+    if count > 0 {
+        letter(bits << (5 - count));
+    }
+    text
+}
+
+/// Reads a key's bytes from its letters, in either case, or returns `None` if they are not
+/// exactly one key: a letter outside the alphabet, too few or too many, or unused bits set,
+/// which no key is written with.
+fn key_bytes(text: &str) -> Option<[u8; KEY_SIZE]> {
+    if text.len() != KEY_TEXT_LENGTH {
+        return None;
+    }
+    let mut bytes = [0; KEY_SIZE];
+    let mut filled = bytes.iter_mut();
+    let mut bits = 0_u32;
+    let mut count = 0_u32;
+    for letter in text.bytes() {
+        let letter = letter.to_ascii_uppercase();
+        let value = KEY_ALPHABET.iter().position(|&known| known == letter)?;
+        bits = (bits << 5) | u32::try_from(value).ok()?;
+        count += 5;
+        if count >= 8 {
+            count -= 8;
+            *filled.next()? = u8::try_from((bits >> count) & 0xFF).ok()?;
+        }
+    }
+    let unused = bits & ((1 << count) - 1);
+    (unused == 0).then_some(bytes)
+}
+
+/// The public half of a server's key: what a player's bridge knows a server by, wherever the
+/// server's address has moved to. Written as `KEY_TEXT_LENGTH` letters.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub struct PublicKey([u8; KEY_SIZE]);
+
+impl fmt::Display for PublicKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&key_text(&self.0))
+    }
+}
+
+impl fmt::Debug for PublicKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "PublicKey({self})")
+    }
+}
+
+impl FromStr for PublicKey {
+    type Err = SecureError;
+
+    fn from_str(text: &str) -> Result<Self, SecureError> {
+        key_bytes(text).map(Self).ok_or_else(|| {
+            SecureError(format!(
+                "a server's key is {KEY_TEXT_LENGTH} letters and digits"
+            ))
+        })
+    }
+}
+
+/// What separates a server's address from its key in a join code.
+pub const JOIN_CODE_SEPARATOR: char = '#';
+
+/// Writes the join code for the server at `address` with `key`: what its owner gives players.
+#[must_use]
+pub fn join_code(address: &str, key: &PublicKey) -> String {
+    format!("{address}{JOIN_CODE_SEPARATOR}{key}")
+}
+
+/// Splits what a player gave as a server into its address and the key it must have: a join
+/// code has both, and a plain address no key.
+///
+/// # Errors
+/// Fails if there is a key and it is not one, so that a mistyped key is never taken for none.
+pub fn split_join_code(server: &str) -> Result<(&str, Option<PublicKey>), SecureError> {
+    match server.split_once(JOIN_CODE_SEPARATOR) {
+        Some((address, key)) => Ok((address.trim(), Some(key.trim().parse()?))),
+        None => Ok((server.trim(), None)),
+    }
+}
+
+/// A server's long-term key, both halves. The private half is what makes a server that
+/// server: whoever has it can pose as it, so it is kept in a file of its own and never shown.
+#[derive(Clone)]
+pub struct ServerKey {
+    private: [u8; KEY_SIZE],
+    public: PublicKey,
+}
+
+impl fmt::Debug for ServerKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ServerKey")
+            .field("public", &self.public)
+            .finish_non_exhaustive()
+    }
+}
+
+/// Two keys are one server's if their public halves are: the private half is never compared,
+/// which would take a time that tells of it.
+impl PartialEq for ServerKey {
+    fn eq(&self, other: &Self) -> bool {
+        self.public == other.public
+    }
+}
+
+impl Eq for ServerKey {}
+
+impl ServerKey {
+    /// Makes a new key, as a server does the first time it runs.
+    ///
+    /// # Errors
+    /// Fails if the system gives no random numbers.
+    pub fn generate() -> Result<Self, SecureError> {
+        let pair = builder(&[0; 32])?.generate_keypair()?;
+        let private = <[u8; KEY_SIZE]>::try_from(pair.private.as_slice())
+            .map_err(|_| SecureError("the new key has the wrong size".to_owned()))?;
+        Self::from_private(private)
+    }
+
+    /// The key whose private half is `private`.
+    ///
+    /// The public half is found by running the handshake against itself and reading the key
+    /// the client's side met, so that it is by construction the one players will see, and the
+    /// curve's arithmetic stays `snow`'s.
+    fn from_private(private: [u8; KEY_SIZE]) -> Result<Self, SecureError> {
+        let psk = [0; 32];
+        let (initiator, hello) = Initiator::start(&psk)?;
+        let mut state = builder(&psk)?
+            .local_private_key(&private)?
+            .build_responder()?;
+        let mut buffer = vec![0; HANDSHAKE_BUFFER];
+        state.read_message(&hello, &mut buffer)?;
+        let length = state.write_message(&[], &mut buffer)?;
+        let reply = buffer.get(..length).unwrap_or_default();
+        let (_, _, public) = initiator.finish(reply)?;
+        Ok(Self { private, public })
+    }
+
+    /// The public half, which players' bridges check.
+    #[must_use]
+    pub const fn public(&self) -> PublicKey {
+        self.public
+    }
+
+    /// The private half as text, for the server's key file and nowhere else.
+    #[must_use]
+    pub fn private_text(&self) -> String {
+        key_text(&self.private)
+    }
+
+    /// Reads a key back from `private_text`'s form, as a key file holds it.
+    ///
+    /// # Errors
+    /// Fails if the text is not a key.
+    pub fn from_private_text(text: &str) -> Result<Self, SecureError> {
+        let private = key_bytes(text.trim())
+            .ok_or_else(|| SecureError("this is not a server's key".to_owned()))?;
+        Self::from_private(private)
+    }
+}
+
 /// The client's half of a handshake in progress.
 #[derive(Debug)]
 pub struct Initiator(HandshakeState);
@@ -80,17 +276,24 @@ impl Initiator {
         Ok((Self(state), message))
     }
 
-    /// Completes the handshake with the server's reply, returning the channel and the payload the
-    /// server sent with it.
+    /// Completes the handshake with the server's reply, returning the channel, the payload the
+    /// server sent with it, and the server's key, which the reply proved the server holds.
+    /// Whether that is the server the player meant is the caller's to check.
     ///
     /// # Errors
-    /// Fails if the reply was not made by a server holding the same key.
-    pub fn finish(mut self, reply: &[u8]) -> Result<(Channel, Vec<u8>), SecureError> {
+    /// Fails if the reply was not made by a server holding the same password's key.
+    pub fn finish(mut self, reply: &[u8]) -> Result<(Channel, Vec<u8>, PublicKey), SecureError> {
         let mut payload = vec![0; HANDSHAKE_BUFFER];
         let length = self.0.read_message(reply, &mut payload)?;
         payload.truncate(length);
+        let server = self
+            .0
+            .get_remote_static()
+            .and_then(|key| <[u8; KEY_SIZE]>::try_from(key).ok())
+            .map(PublicKey)
+            .ok_or_else(|| SecureError("the server sent no key".to_owned()))?;
         let channel = Channel::new(self.0.into_stateless_transport_mode()?);
-        Ok((channel, payload))
+        Ok((channel, payload, server))
     }
 }
 
@@ -99,12 +302,14 @@ impl Initiator {
 pub struct Responder(HandshakeState);
 
 impl Responder {
-    /// Reads a client's first handshake message.
+    /// Reads a client's first handshake message, as the server whose key is `server`.
     ///
     /// # Errors
     /// Fails if the message is malformed or was made with another key, as with a wrong password.
-    pub fn accept(key: &Key, message: &[u8]) -> Result<Self, SecureError> {
-        let mut state = builder(key)?.build_responder()?;
+    pub fn accept(key: &Key, server: &ServerKey, message: &[u8]) -> Result<Self, SecureError> {
+        let mut state = builder(key)?
+            .local_private_key(&server.private)?
+            .build_responder()?;
         let mut payload = vec![0; HANDSHAKE_BUFFER];
         state.read_message(message, &mut payload)?;
         Ok(Self(state))
@@ -222,17 +427,83 @@ impl Channel {
 
 #[cfg(test)]
 mod tests {
-    use super::{Channel, Initiator, Key, Responder, SecureError, derive_key};
+    use super::{
+        Channel, Initiator, KEY_TEXT_LENGTH, Key, PublicKey, Responder, SecureError, ServerKey,
+        derive_key, join_code, split_join_code,
+    };
 
     const SALT: [u8; 16] = [7; 16];
 
     /// A handshake between two keys, as a client and server with these passwords would run it.
     fn connect(client: &Key, server: &Key) -> Result<(Channel, Channel, Vec<u8>), SecureError> {
         let (initiator, hello) = Initiator::start(client)?;
-        let responder = Responder::accept(server, &hello)?;
+        let responder = Responder::accept(server, &ServerKey::generate()?, &hello)?;
         let (server_channel, reply) = responder.finish(b"welcome")?;
-        let (client_channel, payload) = initiator.finish(&reply)?;
+        let (client_channel, payload, _) = initiator.finish(&reply)?;
         Ok((client_channel, server_channel, payload))
+    }
+
+    /// The key a client meets at a server that has `server`, both with one password.
+    fn key_met(server: &ServerKey) -> Result<PublicKey, SecureError> {
+        let key = derive_key("hunter2", &SALT)?;
+        let (initiator, hello) = Initiator::start(&key)?;
+        let (_, reply) = Responder::accept(&key, server, &hello)?.finish(b"")?;
+        let (_, _, met) = initiator.finish(&reply)?;
+        Ok(met)
+    }
+
+    #[test]
+    fn a_client_meets_the_servers_own_key_and_no_other_servers() -> Result<(), SecureError> {
+        let server = ServerKey::generate()?;
+        assert_eq!(key_met(&server)?, server.public());
+        assert_eq!(key_met(&server)?, server.public(), "the same at every join");
+        // Another server, though it has the password, is seen to be another.
+        let impostor = ServerKey::generate()?;
+        assert_ne!(key_met(&impostor)?, server.public());
+        Ok(())
+    }
+
+    #[test]
+    fn a_key_read_back_from_its_file_is_the_same_server() -> Result<(), SecureError> {
+        let server = ServerKey::generate()?;
+        let kept = server.private_text();
+        let restored = ServerKey::from_private_text(&format!("{kept}\n"))?;
+        assert_eq!(restored.public(), server.public());
+        assert_eq!(key_met(&restored)?, server.public());
+        assert!(!format!("{server:?}").contains(&kept), "shown in a log");
+        assert!(ServerKey::from_private_text("not a key").is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn a_public_key_is_read_from_its_text_and_from_nothing_else() -> Result<(), SecureError> {
+        let key = ServerKey::generate()?.public();
+        let text = key.to_string();
+        assert_eq!(text.len(), KEY_TEXT_LENGTH);
+        assert_eq!(text.parse::<PublicKey>()?, key);
+        assert_eq!(text.to_lowercase().parse::<PublicKey>()?, key);
+
+        let cut = text.get(1..).unwrap_or_default();
+        assert!(cut.parse::<PublicKey>().is_err(), "too short");
+        assert!(format!("{text}A").parse::<PublicKey>().is_err(), "too long");
+        assert!(format!("1{cut}").parse::<PublicKey>().is_err(), "no such letter");
+        // The last letter carries one bit of the key and four that no key sets: two texts
+        // must never be read as one key.
+        let all_ones = "7".repeat(KEY_TEXT_LENGTH);
+        assert!(all_ones.parse::<PublicKey>().is_err(), "unused bits set");
+        Ok(())
+    }
+
+    #[test]
+    fn a_join_code_gives_the_address_and_the_key() -> Result<(), SecureError> {
+        let key = ServerKey::generate()?.public();
+        let code = join_code("play.example:7777", &key);
+        assert_eq!(split_join_code(&code)?, ("play.example:7777", Some(key)));
+        assert_eq!(split_join_code(" [::1]:7777 ")?, ("[::1]:7777", None));
+        // A key that is not one is an error, never a join with no key to check.
+        assert!(split_join_code("play.example:7777#oops").is_err());
+        assert!(split_join_code("play.example:7777#").is_err());
+        Ok(())
     }
 
     #[test]
@@ -254,7 +525,7 @@ mod tests {
         let right = derive_key("hunter2", &SALT)?;
         let wrong = derive_key("hunter3", &SALT)?;
         let (_, hello) = Initiator::start(&wrong)?;
-        assert!(Responder::accept(&right, &hello).is_err());
+        assert!(Responder::accept(&right, &ServerKey::generate()?, &hello).is_err());
         // The salt matters as much as the password.
         assert_ne!(derive_key("hunter2", &[8; 16])?, right);
         Ok(())

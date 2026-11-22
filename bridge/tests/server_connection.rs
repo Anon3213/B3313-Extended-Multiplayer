@@ -1,7 +1,8 @@
 //! The bridge's connection code against a real server on a loopback socket.
 
-use b3313_bridge::client::Connection;
+use b3313_bridge::client::{Connection, wrong_server};
 use b3313_protocol::metrics::REPORT_INTERVAL;
+use b3313_protocol::secure::ServerKey;
 use b3313_protocol::{
     ChatLine, HitKind, Message, Name, Outfit, PLAYER_STATE_SIZE, PlayerId, PlayerUpdate,
     RemoveReason,
@@ -57,6 +58,36 @@ fn first_snapshot(
 
 /// Windows fails a receive of a datagram longer than its buffer, where other systems cut the
 /// datagram short; neither may end the server, which anyone can send to.
+#[test]
+fn a_join_that_names_the_servers_key_joins_that_server_and_no_other() -> io::Result<()> {
+    let key = ServerKey::generate().map_err(io::Error::other)?;
+    let another = ServerKey::generate().map_err(io::Error::other)?.public();
+    // One place, so that the second join shows the first gave its place back.
+    let config = Config {
+        key: Some(key.clone()),
+        max_players: 1,
+        ..Config::default()
+    };
+    with_configured_server(config, |server| {
+        let stop = AtomicBool::new(false);
+        let join = |expected| {
+            let limit = Duration::from_secs(5);
+            Connection::join_unless((server, Some(expected)), "", 0, limit, &stop)
+        };
+
+        // The server answers, and knows the password, and is not the one meant.
+        let Err(error) = join(another) else {
+            return Err(io::Error::other("joined a server with another key"));
+        };
+        let wrong = wrong_server(&error).ok_or_else(|| io::Error::other(error))?;
+        assert_eq!((wrong.expected, wrong.met), (another, key.public()));
+
+        let joined = join(key.public())?;
+        assert_eq!(joined.server_key(), key.public());
+        Ok(())
+    })
+}
+
 #[test]
 fn a_datagram_too_long_to_be_a_packet_is_dropped() -> io::Result<()> {
     with_server(|server| {

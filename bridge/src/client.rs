@@ -6,7 +6,7 @@ use crate::mailbox::{
 use crate::objects::ObjectNews;
 use crate::ram::ProcessMemory;
 use b3313_protocol::metrics::{LinkMeter, LinkReport};
-use b3313_protocol::secure::{Channel, Initiator, Salt, derive_key};
+use b3313_protocol::secure::{Channel, Initiator, PublicKey, Salt, derive_key};
 use b3313_protocol::{
     Ack, ChatLine, Coin, DecodeError, Hit, HitKind, Hurt, Inbox, Interaction, MAX_COIN_VALUE,
     MAX_COINS_PER_PACKET, MAX_DATAGRAM_SIZE, MAX_HITS_PER_PACKET, MAX_INTERACTIONS_PER_PACKET,
@@ -15,9 +15,11 @@ use b3313_protocol::{
     is_oversized_datagram,
 };
 use std::collections::VecDeque;
+use std::fmt;
 use std::io;
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs, UdpSocket};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -176,6 +178,8 @@ pub struct Received {
 pub struct Connection {
     socket: UdpSocket,
     player: PlayerId,
+    /// The key the server proved it holds in the handshake.
+    server_key: PublicKey,
     /// Seals every packet sent and opens every packet received after the handshake.
     channel: Channel,
     sequence: u32,
@@ -218,6 +222,54 @@ pub fn resolve(server: &str) -> io::Result<SocketAddr> {
         .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "the name has no address"))
 }
 
+/// Looks `server` up as `resolve` does, giving up after `limit`: for a bridge with a game to
+/// keep going meanwhile, as a name's lookup can take many seconds to fail. None if there was
+/// no answer in time, or no address.
+///
+/// An address written out needs no lookup and is answered at once. A lookup given up on runs
+/// to its end on a thread of its own, and its answer is dropped.
+#[must_use]
+pub fn resolve_within(server: &str, limit: Duration) -> Option<SocketAddr> {
+    if let Ok(address) = server.parse() {
+        return Some(address);
+    }
+    let (answer, answered) = mpsc::channel();
+    let name = server.to_owned();
+    thread::spawn(move || {
+        // Nobody waits any more if the limit has passed.
+        let _ = answer.send(resolve(&name).ok());
+    });
+    answered.recv_timeout(limit).ok().flatten()
+}
+
+/// Why a join was given up though the server answered and knew the password: it is not the
+/// server the player meant, whose key they had from a join code or an earlier join.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WrongServer {
+    pub expected: PublicKey,
+    pub met: PublicKey,
+}
+
+impl fmt::Display for WrongServer {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "the server that answered is not the one expected: its key is {}, and the one \
+             expected is {}. If its owner set it up anew or moved it to another PC, ask them \
+             for its new join code",
+            self.met, self.expected
+        )
+    }
+}
+
+impl std::error::Error for WrongServer {}
+
+/// The two keys, if `error` is a join given up because another server answered.
+#[must_use]
+pub fn wrong_server(error: &io::Error) -> Option<WrongServer> {
+    error.get_ref()?.downcast_ref().copied()
+}
+
 /// What a player is told whose game is the version of B3313 numbered `own`, on being refused
 /// by a session that plays the one numbered `session`.
 fn wrong_game(session: u8, own: u8) -> String {
@@ -247,6 +299,8 @@ impl Connection {
     /// The server first challenges the client to prove it receives at its address, and sends the
     /// salt for the password's key; the client then completes the encrypted handshake.
     ///
+    /// Whatever server answers there is joined: `join_unless` takes the key it must have.
+    ///
     /// # Errors
     /// Fails if the password is wrong, the server is full, plays another version of B3313, runs
     /// another protocol version, or does not answer.
@@ -265,16 +319,20 @@ impl Connection {
         game: u8,
         limit: Duration,
     ) -> io::Result<Self> {
-        Self::join_unless(server, password, game, limit, &AtomicBool::new(false))
+        Self::join_unless((server, None), password, game, limit, &AtomicBool::new(false))
     }
 
     /// Joins as `join_within` does, giving up as soon as `stop` is set: for a session that may
     /// be left while it is still joining, which must not wait out a server that never answers.
+    /// The server is its address and, if the player knows it, the key it must have: an
+    /// address may come to be another server's, and the password is known to every player,
+    /// so only the key says that this is the server meant.
     ///
     /// # Errors
-    /// As `join_within`; one given up for `stop` is `io::ErrorKind::Interrupted`.
+    /// As `join_within`; one given up for `stop` is `io::ErrorKind::Interrupted`, and a
+    /// server with another key than the one given is told by `wrong_server`.
     pub fn join_unless(
-        server: SocketAddr,
+        (server, key): (SocketAddr, Option<PublicKey>),
         password: &str,
         game: u8,
         limit: Duration,
@@ -337,11 +395,22 @@ impl Connection {
                     let Some((_, initiator, _)) = handshake.take() else {
                         continue;
                     };
-                    let (channel, payload) = initiator.finish(&reply).map_err(|_| {
+                    let (channel, payload, met) = initiator.finish(&reply).map_err(|_| {
                         io::Error::other("the server's handshake did not check out")
                     })?;
                     return match Packet::decode(&payload) {
-                        Ok(Packet::Welcome { player }) => Self::joined(socket, player, channel),
+                        Ok(Packet::Welcome { player }) => {
+                            let mut joined = Self::joined(socket, player, channel, met)?;
+                            match key {
+                                Some(expected) if expected != met => {
+                                    // It has this player down as joined: free the place.
+                                    joined.leave();
+                                    let wrong = WrongServer { expected, met };
+                                    Err(io::Error::new(io::ErrorKind::InvalidData, wrong))
+                                }
+                                _ => Ok(joined),
+                            }
+                        }
                         Ok(Packet::Rejected(RejectReason::Full)) => {
                             Err(io::Error::other("the session is full"))
                         }
@@ -378,12 +447,18 @@ impl Connection {
         ))
     }
 
-    fn joined(socket: UdpSocket, player: PlayerId, channel: Channel) -> io::Result<Self> {
+    fn joined(
+        socket: UdpSocket,
+        player: PlayerId,
+        channel: Channel,
+        server_key: PublicKey,
+    ) -> io::Result<Self> {
         socket.set_nonblocking(true)?;
         let now = Instant::now();
         Ok(Self {
             socket,
             player,
+            server_key,
             channel,
             sequence: 0,
             last_heard: now,
@@ -492,6 +567,12 @@ impl Connection {
     #[must_use]
     pub const fn player(&self) -> PlayerId {
         self.player
+    }
+
+    /// The key of the server joined, which it proved it holds: what to know it by next time.
+    #[must_use]
+    pub const fn server_key(&self) -> PublicKey {
+        self.server_key
     }
 
     /// Sends this player's latest state, in this send slot.
@@ -1007,7 +1088,7 @@ mod tests {
                 std::thread::sleep(Duration::from_millis(50));
                 stop.store(true, Ordering::Relaxed);
             });
-            Connection::join_unless(server, "", 0, Duration::from_secs(30), &stop)
+            Connection::join_unless((server, None), "", 0, Duration::from_secs(30), &stop)
         });
         assert_eq!(
             joined.err().map(|error| error.kind()),

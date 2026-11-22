@@ -28,7 +28,7 @@ pub use reliable::{Ack, Inbox, OUTBOX_MOST, Outbox, Stream};
 /// snapshots in time by their tick, so both ends must agree on this.
 pub const TICK_INTERVAL: Duration = Duration::from_millis(33);
 
-pub const PROTOCOL_VERSION: u8 = 26;
+pub const PROTOCOL_VERSION: u8 = 27;
 const MAGIC: [u8; 4] = *b"B3NP";
 const HEADER_SIZE: usize = MAGIC.len() + 2;
 
@@ -1647,7 +1647,7 @@ mod tests {
         let encoded = hello.encode();
         assert_eq!(
             encoded.get(..16),
-            Some(&b"B3NP\x1A\x01\x01\x02\x03\x04\x05\x06\x07\x08\x03\x30"[..])
+            Some(&b"B3NP\x1B\x01\x01\x02\x03\x04\x05\x06\x07\x08\x03\x30"[..])
         );
         // Longer than the padding reaches, so every byte of it is needed.
         for length in 5..encoded.len() {
@@ -1675,7 +1675,7 @@ mod tests {
         .encode();
         assert_eq!(
             encoded.get(..10),
-            Some(&b"B3NP\x1A\x04\x01\x02\x03\x04"[..])
+            Some(&b"B3NP\x1B\x04\x01\x02\x03\x04"[..])
         );
         assert_eq!(encoded.len(), 10 + PLAYER_STATE_SIZE);
     }
@@ -1726,32 +1726,32 @@ mod tests {
     #[test]
     fn out_of_range_values_are_rejected() {
         assert_eq!(
-            Packet::decode(b"B3NP\x1A\x02\x10"),
+            Packet::decode(b"B3NP\x1B\x02\x10"),
             Err(DecodeError::Malformed)
         );
         assert_eq!(
-            Packet::decode(b"B3NP\x1A\x03\x05"),
+            Packet::decode(b"B3NP\x1B\x03\x05"),
             Err(DecodeError::Malformed)
         );
-        assert_eq!(Packet::decode(b"B3NP\x1A\x63"), Err(DecodeError::Malformed));
+        assert_eq!(Packet::decode(b"B3NP\x1B\x63"), Err(DecodeError::Malformed));
         // Hits beyond the per-packet limit, an unknown kind, and a target outside the session.
-        let mut nine_hits = b"B3NP\x1A\x0C\x09".to_vec();
+        let mut nine_hits = b"B3NP\x1B\x0C\x09".to_vec();
         nine_hits.extend(std::iter::repeat_n([1, 1, 0, 1], 9).flatten());
         assert_eq!(Packet::decode(&nine_hits), Err(DecodeError::Malformed));
         assert_eq!(
-            Packet::decode(b"B3NP\x1A\x0C\x01\x01\x04\0\x01"),
+            Packet::decode(b"B3NP\x1B\x0C\x01\x01\x04\0\x01"),
             Err(DecodeError::Malformed)
         );
         assert_eq!(
-            Packet::decode(b"B3NP\x1A\x0D\x01\x10\x01\0\x01"),
+            Packet::decode(b"B3NP\x1B\x0D\x01\x10\x01\0\x01"),
             Err(DecodeError::Malformed)
         );
         // A snapshot can never list sixteen others.
-        let mut too_many = b"B3NP\x1A\x05\0\0\0\0\xFF\xFF\x10".to_vec();
+        let mut too_many = b"B3NP\x1B\x05\0\0\0\0\xFF\xFF\x10".to_vec();
         too_many.extend(std::iter::repeat_n(0, 16 * (1 + 4 + PLAYER_STATE_SIZE)));
         assert_eq!(Packet::decode(&too_many), Err(DecodeError::Malformed));
         // A state for player 1, who the present mask says is not there.
-        let mut absent = b"B3NP\x1A\x05\0\0\0\0\0\x01\x01\x01".to_vec();
+        let mut absent = b"B3NP\x1B\x05\0\0\0\0\0\x01\x01\x01".to_vec();
         absent.extend(std::iter::repeat_n(0, 4 + PLAYER_STATE_SIZE));
         assert_eq!(Packet::decode(&absent), Err(DecodeError::Malformed));
     }
@@ -1760,7 +1760,7 @@ mod tests {
     fn object_states_must_name_objects_and_fit_the_limit() {
         let objects = |gone_children: &[u16], states: Vec<ObjectState>| {
             // Objects, level 16, area 1, send slot 5, no numbered object gone.
-            let mut encoded = b"B3NP\x1A\x12\0\x10\x01\0\0\0\x05".to_vec();
+            let mut encoded = b"B3NP\x1B\x12\0\x10\x01\0\0\0\x05".to_vec();
             encoded.extend([0; 32]);
             encoded.push(u8::try_from(gone_children.len()).unwrap_or(0));
             for name in gone_children {
@@ -1830,7 +1830,7 @@ mod tests {
             object.copy_from_slice(&241_u16.to_be_bytes());
         }
         assert_eq!(Packet::decode(&wrong), Err(DecodeError::Malformed));
-        let mut too_many = b"B3NP\x1A\x14\x09".to_vec();
+        let mut too_many = b"B3NP\x1B\x14\x09".to_vec();
         too_many.extend(std::iter::repeat_n([0, 9, 1, 0, 1, 0, 0, 0xC0, 1, 0, 0], 9).flatten());
         assert_eq!(Packet::decode(&too_many), Err(DecodeError::Malformed));
     }

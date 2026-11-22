@@ -34,3 +34,6 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 .vscode/
+
+# A server run from here keeps its key in this file, which is that server's alone.
+server.key

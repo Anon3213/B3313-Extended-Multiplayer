@@ -8,7 +8,7 @@
 use crate::Session;
 use crate::config::Config;
 use crate::limits::Limits;
-use b3313_protocol::secure::{Channel, Key, Responder, Salt, SecureError, derive_key};
+use b3313_protocol::secure::{Channel, Key, Responder, Salt, SecureError, ServerKey, derive_key};
 use b3313_protocol::{DecodeError, Packet, RejectReason, is_unsealed_kind};
 use std::collections::{HashMap, HashSet};
 use std::hash::{BuildHasher, Hash, Hasher, RandomState};
@@ -45,6 +45,8 @@ pub struct Gate {
     cookie_start: Instant,
     salt: Salt,
     key: Key,
+    /// This server's own key, which every handshake proves it holds.
+    identity: ServerKey,
     peers: HashMap<SocketAddr, Peer>,
     failures: HashMap<IpAddr, Failures>,
     rate_limited: u64,
@@ -64,13 +66,20 @@ fn fresh_salt() -> Salt {
 }
 
 impl Gate {
-    /// Sets up the gate, deriving the handshake key from the config's password.
+    /// Sets up the gate, deriving the handshake key from the config's password. A config with
+    /// no server key gets one that lasts as long as the gate.
     ///
     /// # Errors
-    /// Fails only if Argon2 rejects its own parameters.
+    /// Fails only if Argon2 rejects its own parameters, or the system gives no random numbers
+    /// for a key.
     pub fn new(config: &Config, now: Instant) -> Result<Self, SecureError> {
         let salt = fresh_salt();
+        let identity = match &config.key {
+            Some(key) => key.clone(),
+            None => ServerKey::generate()?,
+        };
         Ok(Self {
+            identity,
             limits: Limits::new(config.packets_per_second, config.joins_per_second, now),
             cookie_key: RandomState::new(),
             cookie_start: now,
@@ -172,7 +181,7 @@ impl Gate {
             self.rate_limited += 1;
             return None;
         }
-        let Ok(responder) = Responder::accept(&self.key, handshake) else {
+        let Ok(responder) = Responder::accept(&self.key, &self.identity, handshake) else {
             self.record_failure(from.ip(), now);
             return Some(Packet::Rejected(RejectReason::WrongPassword).encode());
         };
@@ -288,7 +297,7 @@ impl Gate {
 mod tests {
     use super::{COOKIE_PERIOD, Gate, LOCKOUT, MAX_FAILURES};
     use crate::{Config, Session};
-    use b3313_protocol::secure::{Channel, Initiator, derive_key};
+    use b3313_protocol::secure::{Channel, Initiator, PublicKey, ServerKey, derive_key};
     use b3313_protocol::{PLAYER_STATE_SIZE, Packet, PlayerId, RejectReason};
     use std::net::{Ipv4Addr, SocketAddr};
     use std::time::Instant;
@@ -348,6 +357,18 @@ mod tests {
         (password, playing): (&str, u8),
         now: Instant,
     ) -> Result<(Packet, Channel), Option<Packet>> {
+        join_meeting(gate, session, from, (password, playing), now)
+            .map(|(answer, channel, _)| (answer, channel))
+    }
+
+    /// As `join_playing`, returning also the server's key as the client met it.
+    fn join_meeting(
+        gate: &mut Gate,
+        session: &mut Session,
+        from: SocketAddr,
+        (password, playing): (&str, u8),
+        now: Instant,
+    ) -> Result<(Packet, Channel, PublicKey), Option<Packet>> {
         let (cookie, salt) = challenge(gate, session, from, now);
         let key = derive_key(password, &salt).map_err(|_| None)?;
         let (initiator, handshake) = Initiator::start(&key).map_err(|_| None)?;
@@ -360,9 +381,35 @@ mod tests {
         let Some(Packet::Accept { handshake }) = reply else {
             return Err(reply);
         };
-        let (channel, payload) = initiator.finish(&handshake).map_err(|_| None)?;
+        let (channel, payload, met) = initiator.finish(&handshake).map_err(|_| None)?;
         let answer = Packet::decode(&payload).map_err(|_| None)?;
-        Ok((answer, channel))
+        Ok((answer, channel, met))
+    }
+
+    /// The key a client meets at a server run with `config`.
+    fn key_met(config: &Config, port: u16) -> Result<PublicKey, Box<dyn std::error::Error>> {
+        let now = Instant::now();
+        let mut gate = Gate::new(config, now)?;
+        let mut session = Session::new();
+        let joined = join_meeting(&mut gate, &mut session, client(port), ("", 0), now);
+        let (_, _, met) = joined.map_err(|reply| format!("refused: {reply:?}"))?;
+        Ok(met)
+    }
+
+    #[test]
+    fn players_meet_the_key_the_server_was_given_at_every_start() -> TestResult {
+        let key = ServerKey::generate()?;
+        let config = Config {
+            key: Some(key.clone()),
+            ..Config::default()
+        };
+        // Two starts with one key are one server, whatever else is new: the salt, the cookies.
+        assert_eq!(key_met(&config, 1)?, key.public());
+        assert_eq!(key_met(&config, 2)?, key.public());
+        // A server given no key is some server all the same, and no two of them are one.
+        assert_ne!(key_met(&Config::default(), 3)?, key.public());
+        assert_ne!(key_met(&Config::default(), 4)?, key_met(&Config::default(), 5)?);
+        Ok(())
     }
 
     fn id(value: u8) -> PlayerId {
@@ -543,7 +590,7 @@ mod tests {
         let mut session = Session::new();
         let mut answer = |data: &[u8]| decode(gate.receive(&mut session, client(0), data, now));
         assert_eq!(answer(b"hello?"), None);
-        assert_eq!(answer(b"B3NP\x1A\x04\0"), None);
+        assert_eq!(answer(b"B3NP\x1B\x04\0"), None);
         assert_eq!(
             answer(b"B3NP\x00\x01"),
             Some(Packet::Rejected(RejectReason::WrongVersion))
