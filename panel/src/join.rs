@@ -321,8 +321,10 @@ impl Request {
     fn options(self, stop: &AtomicBool, notify: &Sender<Notice>) -> Result<Options, String> {
         // Before the emulator is started, which a mistyped name or key should not do.
         let (name, key) = read_server(&self.server)?;
-        let server =
-            resolve(name).map_err(|error| format!("Could not find the server {name}: {error}."))?;
+        // What happened first and in few words, which is all the sidebar shows of it.
+        let server = resolve(name).map_err(|error| {
+            format!("Server not found: {name} could not be looked up. {error}.")
+        })?;
         let name = name.to_owned();
         let rom = self.current_rom()?;
         // Looking the name up and building the game take a while: a player who left

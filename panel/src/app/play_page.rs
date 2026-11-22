@@ -1687,9 +1687,30 @@ impl Panel {
                 let who = self.shown_text(&self.play.called(*player));
                 Some((format!("Playing as {who}"), theme.success))
             }
-            PlayState::Ended { reason, .. } => Some((self.shown_text(reason), theme.danger)),
+            // Only what happened: the sidebar has room for a few words, and the Play page
+            // says why and what to do about it.
+            PlayState::Ended { reason, .. } => {
+                Some((self.shown_text(headline(reason)), theme.danger))
+            }
         }
     }
+}
+
+/// The few words that say what happened in `reason`, why a session ended: what stands before
+/// its first colon, or its first sentence. "Did not join" of "Did not join: the server…".
+///
+/// A colon or a full stop counts only before a space or at the end, so that the address in
+/// "Could not find the server play.example.net:41313: …" is kept whole.
+fn headline(reason: &str) -> &str {
+    let ends = |mark: char| {
+        reason.match_indices(mark).map(|(at, _)| at).find(|&at| {
+            reason
+                .get(at + 1..)
+                .is_none_or(|rest| rest.is_empty() || rest.starts_with(' '))
+        })
+    };
+    let end = [ends(':'), ends('.')].into_iter().flatten().min();
+    end.and_then(|end| reason.get(..end)).unwrap_or(reason)
 }
 
 /// The mark of a host or a moderator beside their name: a crown or a shield, so the shape tells
@@ -1711,6 +1732,44 @@ impl Page {
                 Some(theme.warning)
             }
             PlayState::Idle | PlayState::Ended { .. } => None,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::headline;
+
+    #[test]
+    fn the_sidebar_says_what_happened_and_leaves_why_to_the_play_page() {
+        let said = [
+            (
+                "Did not join: the server at this address is not the one you joined before \
+                 or were invited to. This is usual when its owner set it up anew.",
+                "Did not join",
+            ),
+            (
+                "Could not join: the session password is wrong.",
+                "Could not join",
+            ),
+            (
+                "The server stopped answering.",
+                "The server stopped answering",
+            ),
+            // An address has colons and full stops of its own, which end nothing.
+            (
+                "Could not find the server play.example.net:41313: no such host is known.",
+                "Could not find the server play.example.net:41313",
+            ),
+            (
+                "Could not find the server 192.168.1.20:41313: timed out.",
+                "Could not find the server 192.168.1.20:41313",
+            ),
+            ("Left with nothing to end it", "Left with nothing to end it"),
+            ("", ""),
+        ];
+        for (reason, expected) in said {
+            assert_eq!(headline(reason), expected, "{reason}");
         }
     }
 }
