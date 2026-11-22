@@ -5,12 +5,14 @@ use std::fmt::Write as _;
 use std::time::Duration;
 
 /// Settings whose values a report leaves out: the session's and the host's passwords in server
-/// settings, and in the panel's preferences remembered server passwords and the player's name.
-const LEFT_OUT_KEYS: [&str; 4] = [
+/// settings, and in the panel's preferences remembered server passwords, the player's name,
+/// and the name invites give for the server, which leads to its owner's home.
+const LEFT_OUT_KEYS: [&str; 5] = [
     "password",
     "host_password",
     "server_password",
     "player_name",
+    "invite_name",
 ];
 /// Settings that hold a path, of which a report gives only the file name: folders can name
 /// the user, as on another drive than their user folder.

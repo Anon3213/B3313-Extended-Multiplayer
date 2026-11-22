@@ -196,9 +196,10 @@ answers at the address: the password alone could not tell them apart, as every p
 - If your address changes, as most home connections' do now and then, send the new invite. Your
   players' panels know the server by its key, wherever it is.
 - If you have a name that follows your address (dynamic DNS, which many routers can keep up to
-  date), put it in the invite in place of the address before the `#`. The invite then goes on
-  working when your address changes, and players in a session find the server again by
-  themselves.
+  date), type it under **Name for invites** on **Overview**. Invites then give the name in place
+  of the address, with the server's port, and go on working when your address changes; players
+  in a session find the server again by themselves. The name must lead to your public address,
+  and your router must let the server's port in, as for any player over the internet.
 
 ## Building
 

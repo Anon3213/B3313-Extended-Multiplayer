@@ -2,7 +2,7 @@
 
 use b3313_protocol::secure::{PublicKey, join_code};
 use std::fmt::Write as _;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, UdpSocket};
 
 /// This PC's address on its local network: the one it would reach the internet from.
 /// Connecting a UDP socket sends nothing; it only has the system choose a route, and so the
@@ -83,10 +83,38 @@ impl Invite {
 const HOW_TO_JOIN: &str = "To join, copy this message, open Play in the B3313 Extended Multiplayer \
                            control panel, and select Paste invite.\n";
 
-/// What an invite gives as the server at `address` whose key is `key`: its join code.
+/// Where an invite says the server is: at the name its owner gave for invites, if they gave
+/// one, or else at `address`, if that is known. A name follows a home connection's address
+/// as it changes (dynamic DNS), so an invite with it goes on working, where one with the
+/// address stops when the address does.
+///
+/// A name is given `port`, where players reach the server, unless it has a port of its own,
+/// as the owner of a router that forwards another port would write it.
 #[must_use]
-pub fn server_to_give(address: SocketAddr, key: &PublicKey) -> String {
-    join_code(&address.to_string(), key)
+pub fn place_to_give(name: &str, port: u16, address: Option<SocketAddr>) -> Option<String> {
+    let name = name.trim();
+    if name.is_empty() {
+        return address.map(|address| address.to_string());
+    }
+    // An address with its port, of either kind, or a name with one: `[::1]:41313` and
+    // `home.example:41313`, where a bare `::1` has colons and no port.
+    let has_port = name.parse::<SocketAddr>().is_ok()
+        || name
+            .rsplit_once(':')
+            .is_some_and(|(host, port)| !host.contains(':') && port.parse::<u16>().is_ok());
+    Some(if has_port {
+        name.to_owned()
+    } else if name.parse::<Ipv6Addr>().is_ok() {
+        format!("[{name}]:{port}")
+    } else {
+        format!("{name}:{port}")
+    })
+}
+
+/// What an invite gives as the server at `place` whose key is `key`: its join code.
+#[must_use]
+pub fn server_to_give(place: &str, key: &PublicKey) -> String {
+    join_code(place, key)
 }
 
 fn full_invitation(server: &str, password: &str) -> String {
@@ -139,7 +167,7 @@ pub fn read_invite(text: &str) -> Option<Invitation> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Invitation, Invite, Reach, reach, read_invite, server_to_give};
+    use super::{Invitation, Invite, Reach, place_to_give, reach, read_invite, server_to_give};
     use b3313_protocol::secure::{SecureError, ServerKey, split_join_code};
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
@@ -215,9 +243,8 @@ mod tests {
 
     #[test]
     fn every_invite_carries_the_servers_key_to_the_player() -> Result<(), SecureError> {
-        let address: SocketAddr = (Ipv4Addr::new(192, 168, 1, 20), 41313).into();
         let key = ServerKey::generate()?.public();
-        let server = server_to_give(address, &key);
+        let server = server_to_give("192.168.1.20:41313", &key);
         for invite in Invite::ALL {
             let read = invite
                 .text(&server, "hunter2")
@@ -227,6 +254,36 @@ mod tests {
             assert_eq!(read, Some(("192.168.1.20:41313", Some(key))), "{invite:?}");
         }
         Ok(())
+    }
+
+    #[test]
+    fn an_invite_gives_the_owners_name_for_the_server_where_they_gave_one() {
+        let address: SocketAddr = (Ipv4Addr::new(203, 0, 113, 5), 41313).into();
+        let given = |name: &str| place_to_give(name, 41313, Some(address));
+        // No name: the address, which stops working when it changes.
+        assert_eq!(given("").as_deref(), Some("203.0.113.5:41313"));
+        assert_eq!(given("   ").as_deref(), Some("203.0.113.5:41313"));
+        assert_eq!(place_to_give("", 41313, None), None);
+        // A name takes the port players reach the server at, which they would not know.
+        let named = Some("home.example.org:41313");
+        assert_eq!(given(" home.example.org ").as_deref(), named);
+        // A port of the owner's own stands, as for a router that forwards another one.
+        assert_eq!(
+            given("home.example.org:5000").as_deref(),
+            Some("home.example.org:5000")
+        );
+        // And a name is enough where this PC's own address could not be found.
+        assert_eq!(
+            place_to_give("home.example.org", 41313, None).as_deref(),
+            named
+        );
+        // An address written out is taken the same way, of either kind.
+        assert_eq!(given("198.51.100.7").as_deref(), Some("198.51.100.7:41313"));
+        assert_eq!(given("2001:db8::7").as_deref(), Some("[2001:db8::7]:41313"));
+        assert_eq!(
+            given("[2001:db8::7]:5000").as_deref(),
+            Some("[2001:db8::7]:5000")
+        );
     }
 
     #[test]

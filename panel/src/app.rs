@@ -319,6 +319,9 @@ pub struct Panel {
     focus: FocusHandle,
     page: Page,
     address: Entity<TextInput>,
+    /// The name invites give for the server in place of its address; see
+    /// `Preferences::invite_name`.
+    invite_name: Entity<TextInput>,
     running: Option<Running>,
     pending: Pending,
     dashboard: Dashboard,
@@ -447,6 +450,7 @@ impl Panel {
             }),
         ];
         let fields = Self::setting_fields(&form, &mut subscriptions, cx);
+        let invite_name = Self::invite_name_input(&preferences, &mut subscriptions, cx);
         let poll = cx.spawn_in(window, async move |this, cx| {
             loop {
                 cx.background_executor().timer(POLL_INTERVAL).await;
@@ -462,6 +466,7 @@ impl Panel {
             focus: cx.focus_handle(),
             page: Page::from(preferences.start_page),
             address,
+            invite_name,
             running: None,
             pending: Pending::default(),
             dashboard: Dashboard::new(now).with_time_of_day(system::local_time_of_day()),
@@ -542,6 +547,26 @@ impl Panel {
         self.find_crash_reports(false);
         self.share_state();
         window.focus(&self.focus);
+    }
+
+    /// The field for the name invites give for the server, filled from `preferences` and kept
+    /// there as it is typed: the invite beside it is written from it at once.
+    fn invite_name_input(
+        preferences: &Preferences,
+        subscriptions: &mut Vec<Subscription>,
+        cx: &mut Context<Self>,
+    ) -> Entity<TextInput> {
+        let name = preferences.invite_name.as_deref().unwrap_or_default();
+        let input = cx.new(|cx| TextInput::new(cx, name, "Such as myserver.duckdns.org"));
+        subscriptions.push(cx.subscribe(&input, |this, input, event, cx| {
+            if *event == InputEvent::Changed {
+                let name = input.read(cx).text().trim().to_owned();
+                this.preferences.invite_name = (!name.is_empty()).then_some(name);
+                this.save_preferences();
+                cx.notify();
+            }
+        }));
+        input
     }
 
     /// A field for each server setting, filled from `form`, each updating the form as it is
@@ -1383,6 +1408,8 @@ impl Panel {
             .chain(std::iter::once(self.play.server()))
             .chain(self.play.servers_joined())
             .map(|server| preferences::server_parts(server).0)
+            // The name the panel's own server is invited to by, which leads to this PC.
+            .chain(self.preferences.invite_name.as_deref())
     }
 
     /// A log entry as one line on screen, hidden as streamer mode needs.
@@ -1437,7 +1464,13 @@ impl Panel {
         if on {
             self.play.hide_password(cx);
         }
-        for input in [&self.address, &self.ban_input, self.play.address_input()] {
+        let addresses = [
+            &self.address,
+            &self.invite_name,
+            &self.ban_input,
+            self.play.address_input(),
+        ];
+        for input in addresses {
             input.update(cx, |input, cx| input.set_masked(on, cx));
         }
         for (key, input) in &self.fields {

@@ -4,13 +4,14 @@
 use super::arrange::{PanelContent, accept_panel_drops};
 use super::players::player_name;
 use super::{
-    NOT_SAVED, Page, Panel, RouterPort, ToastTone, display_name, page_frame, server_buttons,
+    NOT_SAVED, Page, Panel, RouterPort, Running, ToastTone, display_name, page_frame,
+    server_buttons,
 };
 use crate::dashboard::{Kind, LogEntry, Series, SessionTrends};
 use crate::format::{byte_rate, clock, millis, scale_count, scale_millis};
 use crate::health::{self, Health};
 use crate::icons::{IconName, icon};
-use crate::network::{Invite, Reach, server_to_give};
+use crate::network::{Invite, Reach, place_to_give, server_to_give};
 use crate::overview_layout::{PanelKind, PanelState};
 use crate::theme::{MONO, Theme, scaled};
 use crate::widgets::{
@@ -204,10 +205,62 @@ impl Panel {
             .into_any_element()
     }
 
+    /// The name the owner gave for invites, if `running` can be reached by one: a server that
+    /// hears this PC alone cannot, and an invite to it by a name would lead nowhere.
+    fn invite_name_for(&self, running: &Running) -> &str {
+        match running.reach {
+            Reach::ThisPc(_) => "",
+            Reach::Network(_) | Reach::Unknown { .. } => {
+                self.preferences.invite_name.as_deref().unwrap_or_default()
+            }
+        }
+    }
+
+    /// Where an invite says `running` is: at the owner's name for it, or at the address the
+    /// panel found for it, if it found one.
+    fn invite_place(&self, running: &Running) -> Option<String> {
+        let (_, _, address) = where_to_join(running.reach, &running.port);
+        // The port players reach it at: the one the router opened, or the one it hears.
+        let port = match (running.reach, &running.port) {
+            (_, RouterPort::Open(map)) => map.public.port(),
+            (Reach::ThisPc(heard) | Reach::Network(heard), _) => heard.port(),
+            (Reach::Unknown { port }, _) => port,
+        };
+        place_to_give(self.invite_name_for(running), port, address)
+    }
+
+    /// The field for the name invites give for the server, and what such a name is for.
+    fn render_invite_name(&self, theme: &Theme, reach: Reach) -> gpui::Div {
+        let what_for = if matches!(reach, Reach::ThisPc(_)) {
+            "Not used while the server listens on this PC only: a name leads here from outside."
+        } else {
+            "If you have a name that follows your address as it changes (dynamic DNS, which \
+             many routers can keep up to date), invites give it in place of the address and \
+             go on working when the address changes. The server's port is added unless you \
+             type one."
+        };
+        div()
+            .flex()
+            .flex_col()
+            .gap_1p5()
+            .pt_2()
+            .child(label(theme, "Name for invites (optional)"))
+            .child(
+                div()
+                    .w(scaled(360.))
+                    .max_w_full()
+                    .font_family(MONO)
+                    .child(self.invite_name.clone()),
+            )
+            .child(hint(theme, what_for))
+    }
+
     /// Where players connect, and a button that copies everything they need to.
     fn render_invite(&self, theme: &Theme, cx: &mut Context<Self>) -> Option<AnyElement> {
         let running = self.running.as_ref()?;
-        let (shown, explanation, copyable) = where_to_join(running.reach, &running.port);
+        let (found, explanation, _) = where_to_join(running.reach, &running.port);
+        let place = self.invite_place(running);
+        let named = !self.invite_name_for(running).trim().is_empty();
         let password = &running.config.password;
         // The buttons copy the real details; what they show on hover hides them in streamer
         // mode, the password included.
@@ -217,7 +270,9 @@ impl Panel {
             password.as_str()
         };
         // With the server's key, so that a player's panel joins this server and no other.
-        let server = copyable.map(|address| server_to_give(address, &running.host.key()));
+        let server = place
+            .as_deref()
+            .map(|place| server_to_give(place, &running.host.key()));
         let copy_buttons: Vec<AnyElement> = Invite::ALL
             .into_iter()
             .map(|invite| {
@@ -225,9 +280,16 @@ impl Panel {
                     .as_deref()
                     .and_then(|server| invite.text(server, shown_password))
                     .map(|text| self.shown_text(&text));
-                invite_button(invite, copyable, preview, cx)
+                invite_button(invite, server.is_some(), preview, cx)
             })
             .collect();
+        // What invites give: the owner's name where they gave one, else what was found.
+        let explanation = if named {
+            where_a_name_leads(running.reach, &running.port)
+        } else {
+            explanation
+        };
+        let shown = place.filter(|_| named).unwrap_or(found);
         let (shown, explanation) = (self.shown_text(&shown), self.shown_text(&explanation));
         Some(
             div()
@@ -259,6 +321,7 @@ impl Panel {
                      with it, a player's panel joins this server and nobody else who answers \
                      there.",
                 ))
+                .child(self.render_invite_name(theme, running.reach))
                 .child(
                     div()
                         .flex()
@@ -281,12 +344,15 @@ impl Panel {
 
     /// Puts `invite` on the clipboard and says what went there, warning when that includes
     /// the password.
-    fn copy_invite(&mut self, invite: Invite, address: SocketAddr, cx: &mut Context<Self>) {
+    fn copy_invite(&mut self, invite: Invite, cx: &mut Context<Self>) {
         let Some(running) = &self.running else {
             return;
         };
+        let Some(place) = self.invite_place(running) else {
+            return;
+        };
         let password = &running.config.password;
-        let server = server_to_give(address, &running.host.key());
+        let server = server_to_give(&place, &running.host.key());
         let Some(text) = invite.text(&server, password) else {
             return;
         };
@@ -577,13 +643,39 @@ fn where_to_join(reach: Reach, port: &RouterPort) -> (String, String, Option<Soc
     }
 }
 
+/// What to tell the server's owner about the name their invites give, in place of what
+/// `where_to_join` says of the address: what the name must lead to for a player to arrive.
+fn where_a_name_leads(reach: Reach, port: &RouterPort) -> String {
+    match (reach, port) {
+        (Reach::Network(address), RouterPort::Open(map)) => format!(
+            "Invites give this name, which must lead to your public address, {}. Your router \
+             opened port {} for this server. A player on your own network joins at {address}.",
+            map.public.ip(),
+            address.port()
+        ),
+        (Reach::Network(address), _) => format!(
+            "Invites give this name, which must lead to your public IP address, with UDP \
+             port {} forwarded to this PC on your router. A player on your own network joins \
+             at {address}.",
+            address.port()
+        ),
+        (Reach::Unknown { port }, _) => format!(
+            "Invites give this name, which must lead to your public IP address, with UDP \
+             port {port} forwarded to this PC on your router."
+        ),
+        // A name is not used for a server that hears this PC alone.
+        (Reach::ThisPc(_), _) => String::new(),
+    }
+}
+
 /// One of the invite's copy buttons, from least to most information. Each shows on hover
 /// exactly what it copies, or why it cannot; the full invite, which works for anyone, stands
 /// out.
-/// `preview` is what it copies as the screen may show it, none if it has nothing to copy.
+/// `preview` is what it copies as the screen may show it, none if it has nothing to copy;
+/// `placed` says the invite has somewhere to say the server is.
 fn invite_button(
     invite: Invite,
-    address: Option<SocketAddr>,
+    placed: bool,
     preview: Option<String>,
     cx: &mut Context<Panel>,
 ) -> AnyElement {
@@ -593,10 +685,12 @@ fn invite_button(
         Invite::Full => ("copy-invite", "Full invite"),
     };
     let enabled = preview.is_some();
-    let tooltip = match (preview, address) {
+    let tooltip = match (preview, placed) {
         (Some(text), _) => text.trim_end().to_owned(),
-        (None, None) => "This PC's address is unknown, so there is nothing to copy.".to_owned(),
-        (None, Some(_)) => "No password is set, so this would copy only the address.".to_owned(),
+        (None, false) => "This PC's address is unknown, so there is nothing to copy. A name \
+                          for invites, below, would do in its place."
+            .to_owned(),
+        (None, true) => "No password is set, so this would copy only the address.".to_owned(),
     };
     Button::new(id, label)
         .small()
@@ -607,11 +701,7 @@ fn invite_button(
         })
         .enabled(enabled)
         .tooltip(tooltip)
-        .on_click(cx.listener(move |this, _, _, cx| {
-            if let Some(address) = address {
-                this.copy_invite(invite, address, cx);
-            }
-        }))
+        .on_click(cx.listener(move |this, _, _, cx| this.copy_invite(invite, cx)))
         .into_any_element()
 }
 

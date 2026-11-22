@@ -190,6 +190,9 @@ pub struct Preferences {
     pub open_port: bool,
     /// The address the server last started on.
     pub listen_address: Option<String>,
+    /// The name invites give for the server in place of its address, if its owner has one
+    /// that follows their address as it changes (dynamic DNS).
+    pub invite_name: Option<String>,
     /// Settings files opened or saved, most recent first.
     pub recent_files: Vec<PathBuf>,
     /// The newest crash report the user has been told of, by file name without extension.
@@ -239,6 +242,7 @@ impl Default for Preferences {
             streamer_mode: false,
             open_port: true,
             listen_address: None,
+            invite_name: None,
             recent_files: Vec::new(),
             seen_crash: None,
         }
@@ -480,6 +484,7 @@ impl Preferences {
             "listen_address" if !value.is_empty() => {
                 self.listen_address = Some(value.to_owned());
             }
+            "invite_name" if !value.is_empty() => self.invite_name = Some(value.to_owned()),
             "seen_crash" if !value.is_empty() => self.seen_crash = Some(value.to_owned()),
             "recent_file" if !value.is_empty() && self.recent_files.len() < RECENT_FILES => {
                 self.recent_files.push(PathBuf::from(value));
@@ -544,6 +549,9 @@ impl Preferences {
         }
         if let Some(address) = &self.listen_address {
             let _ = writeln!(text, "listen_address = {address}");
+        }
+        if let Some(name) = &self.invite_name {
+            let _ = writeln!(text, "invite_name = {name}");
         }
         if let Some(seen) = &self.seen_crash {
             let _ = writeln!(text, "seen_crash = {seen}");
@@ -668,6 +676,7 @@ impl Preferences {
             player_outfit: self.player_outfit,
             servers: self.servers.clone(),
             listen_address: self.listen_address.clone(),
+            invite_name: self.invite_name.clone(),
             overview: self.overview.clone(),
             pages: self.pages.clone(),
             // Reports already told of are not news again.
@@ -830,6 +839,7 @@ mod tests {
             streamer_mode: true,
             open_port: false,
             listen_address: Some("0.0.0.0:41313".to_owned()),
+            invite_name: Some("home.example.org".to_owned()),
             recent_files: Vec::new(),
             seen_crash: Some("crash-2026-11-09-140322".to_owned()),
             alert_kinds: Vec::new(),

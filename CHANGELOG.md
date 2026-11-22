@@ -20,6 +20,11 @@ server greet each other changed, so everyone in a session updates together.
 - **A session survives the server's address changing**, where the server was given by a
   name: your program looks the name up again each time it joins again, and joins only the
   server it was in.
+- **A name for invites.** If you host and have a name that follows your address (dynamic
+  DNS), type it on **Overview**: invites give it in place of the address, and go on working
+  when the address changes.
+- The Play page keeps ten recent servers, where it kept five, and marks one whose password is
+  saved with a padlock.
 - For whoever runs a server: its key is kept in `server.key`, in the panel's own folder, or
   beside the settings file of a `b3313-server` (the new `key_file` setting names another
   place). Keep that file to stay the same server, copy it to move the server to another PC,
