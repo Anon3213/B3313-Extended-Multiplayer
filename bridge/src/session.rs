@@ -161,7 +161,28 @@ pub enum End {
     NetworkFailing(io::Error),
 }
 
+/// The most characters in the few words that say how a session stands, where there is room
+/// for no more: the panel's sidebar shows them on every page, in a box they must not run
+/// out of.
+pub const HEADLINE_MOST: usize = 20;
+
 impl End {
+    /// What happened, in at most `HEADLINE_MOST` characters; `describe` says it in full.
+    #[must_use]
+    pub const fn headline(&self) -> &'static str {
+        match self {
+            Self::Left => "Left",
+            Self::GameClosed(_) => "Game closed",
+            Self::ServerSilent => "Server went silent",
+            Self::Removed(RemoveReason::Kicked) => "Removed",
+            Self::Removed(RemoveReason::Banned) => "Banned",
+            Self::Removed(RemoveReason::Ended) => "Session ended",
+            Self::Removed(RemoveReason::Restarting) => "Server restarting",
+            Self::Refused(_) => "Could not rejoin",
+            Self::NetworkFailing(_) => "Connection failing",
+        }
+    }
+
     /// What it means for the player, in a sentence.
     #[must_use]
     pub fn describe(&self) -> String {
@@ -1106,8 +1127,8 @@ fn deliver_hurts<M: ProcessMemory>(
 #[cfg(test)]
 mod tests {
     use super::{
-        End, Event, Input, Link, Options, People, Session, TYPING_RENEW_INTERVAL, leave_game,
-        rejoin,
+        End, Event, HEADLINE_MOST, Input, Link, Options, People, Session, TYPING_RENEW_INTERVAL,
+        leave_game, rejoin,
     };
     use crate::client::{Connection, ShownPlayers, apply_snapshot, wrong_server};
     use crate::layout::{self, len};
@@ -1592,6 +1613,29 @@ mod tests {
             assert!(matches!(ended, Err(End::Left)), "{ended:?}");
             Ok(())
         })
+    }
+
+    #[test]
+    fn every_way_a_session_ends_is_said_in_few_enough_words_for_the_sidebar() {
+        let failed = || io::Error::other("the system's own words, however long they are");
+        let ends = [
+            End::Left,
+            End::GameClosed(failed()),
+            End::ServerSilent,
+            End::Removed(RemoveReason::Kicked),
+            End::Removed(RemoveReason::Banned),
+            End::Removed(RemoveReason::Ended),
+            End::Removed(RemoveReason::Restarting),
+            End::Refused(failed()),
+            End::NetworkFailing(failed()),
+        ];
+        for end in ends {
+            let headline = end.headline();
+            let length = headline.chars().count();
+            assert!((1..=HEADLINE_MOST).contains(&length), "{headline}");
+            // A few words of its own, not the sentence cut short.
+            assert!(!headline.ends_with('.'), "{headline}");
+        }
     }
 
     #[test]

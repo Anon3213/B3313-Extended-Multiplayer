@@ -19,7 +19,7 @@ use crate::widgets::{
     Button, FocusRing as _, OneLine as _, Tip, Tone, card, card_header, dot, switch,
 };
 use b3313_bridge::process::{EMULATOR, find_processes};
-use b3313_bridge::session::Event;
+use b3313_bridge::session::{Event, HEADLINE_MOST};
 use b3313_protocol::metrics::LinkReport;
 use b3313_protocol::secure::{PublicKey, join_code};
 use b3313_protocol::{HitKind, Outfit, PlayerId, Role, RosterEntry};
@@ -62,9 +62,11 @@ pub(super) enum PlayState {
     Reconnecting {
         until: Instant,
     },
-    /// Ended, saying why; `left` when the player chose to. `detail` is what the system said of
-    /// it, shown on hover.
+    /// Ended, saying what happened in the few words the sidebar has room for, and why;
+    /// `left` when the player chose to. `detail` is what the system said of it, shown on
+    /// hover.
     Ended {
+        headline: &'static str,
         reason: String,
         left: bool,
         detail: Option<String>,
@@ -79,6 +81,9 @@ pub(super) struct Play {
     /// The key of the server filled in, from an invite or a recent server, and the address it
     /// came with: it stands for as long as that is the address in the field.
     key: Option<(String, PublicKey)>,
+    /// The password to keep with the server being joined, once it is joined, if the player
+    /// asked for it to be remembered.
+    kept_password: Option<String>,
     password: Entity<TextInput>,
     show_password: bool,
     remember_password: bool,
@@ -166,6 +171,7 @@ impl Play {
         Self {
             address,
             key,
+            kept_password: None,
             password,
             show_password: false,
             remember_password: last.is_some_and(|server| server.password.is_some()),
@@ -336,15 +342,8 @@ impl Panel {
                 // Worth looking up for, from the game or another page.
                 self.alert_due = true;
             }
-            Notice::Event(Event::Joined(player)) => {
-                self.play.state = PlayState::Playing {
-                    player,
-                    since: Instant::now(),
-                };
-                let (place, _) = server_parts(&self.play.server);
-                let text = format!("Joined {place} as player {}", player.get());
-                self.play.note(text);
-            }
+            Notice::GameStarted => self.note_game_started(),
+            Notice::Event(Event::Joined(player)) => self.note_joined(player),
             Notice::Event(Event::Server(key)) => {
                 // Joined by its address alone: kept with the key it has, so that the next
                 // join there is to this server or to none.
@@ -389,7 +388,11 @@ impl Panel {
                 }
             }
             Notice::Event(Event::Said { from, name, text }) => self.play.hear(from, name, text),
-            Notice::Ended { reason, detail } => {
+            Notice::Ended {
+                headline,
+                reason,
+                detail,
+            } => {
                 let left = matches!(self.play.state, PlayState::Ended { left: true, .. });
                 // The thread has finished; this only collects it.
                 drop(self.play.bridge.take());
@@ -404,12 +407,44 @@ impl Panel {
                     crate::crash::note("play", detail);
                 }
                 self.play.state = PlayState::Ended {
+                    headline,
                     reason,
                     left,
                     detail,
                 };
             }
         }
+    }
+
+    /// Puts on the record that the session started the game, and with how many changes to
+    /// the emulator's settings, as they are the player's; the Game panel lists them.
+    fn note_game_started(&mut self) {
+        let text = match self.emulator_changes() {
+            Some(Ok(changes)) => format!(
+                "Started the game with {} changes to the emulator's settings, for this run only",
+                changes.len()
+            ),
+            _ => "Started the game".to_owned(),
+        };
+        self.play.note(text);
+    }
+
+    /// Takes in that the session is joined, as `player`, and remembers its server: now and
+    /// not when Join was pressed, as only a server that was joined is one to fill in again,
+    /// and not a mistyped or a dead address.
+    fn note_joined(&mut self, player: PlayerId) {
+        self.play.state = PlayState::Playing {
+            player,
+            since: Instant::now(),
+        };
+        let server = self.play.server.clone();
+        let password = self.play.kept_password.clone();
+        self.preferences
+            .remember_server(&server, password.as_deref());
+        self.save_preferences();
+        let (place, _) = server_parts(&self.play.server);
+        let text = format!("Joined {place} as player {}", player.get());
+        self.play.note(text);
     }
 
     /// Why Join cannot go ahead yet, if it cannot.
@@ -436,7 +471,8 @@ impl Panel {
         }
     }
 
-    /// Joins the server in the fields with the chosen ROM and emulator, remembering the server.
+    /// Joins the server in the fields with the chosen ROM and emulator. The server is
+    /// remembered once it is joined.
     fn join(&mut self, cx: &mut Context<Self>) {
         if let Some(blocker) = self.join_blocker(cx) {
             self.show_toast(ToastTone::Error, blocker.to_owned());
@@ -446,32 +482,23 @@ impl Panel {
         let Some(rom) = self.preferences.rom.clone() else {
             return;
         };
-        // Said before the server is remembered, or a mistyped key would stay under Recent.
+        // Said here, where the player is looking, and before a session is begun for it.
         let server = self.server_to_join(cx);
         if let Err(message) = read_server(&server) {
             self.show_toast(ToastTone::Error, message);
             cx.notify();
             return;
         }
-        // With no emulator running, the session starts the game itself.
+        // With no emulator running, the session starts the game itself, and says so then.
         let pid = self.play.emulator();
-        if pid.is_none()
-            && let Some(Ok(changes)) = self.emulator_changes()
-        {
-            // On the record, as they are the player's settings; the Game panel lists them.
-            self.play.note(format!(
-                "Starting the game with {} changes to the emulator's settings, for this run only",
-                changes.len()
-            ));
-        }
         let sources = self
             .preferences
             .sm64_rom
             .clone()
             .zip(self.preferences.b3313_patch.clone());
         let password = self.play.password.read(cx).text().to_owned();
-        let kept = self.play.remember_password.then_some(password.as_str());
-        self.preferences.remember_server(&server, kept);
+        self.play.kept_password = self.play.remember_password.then(|| password.clone());
+        // Known to streamer mode from now, though it is not yet among the recent ones.
         if !self.play.joined.contains(&server) {
             self.play.joined.push(server.clone());
         }
@@ -530,6 +557,7 @@ impl Panel {
             // until it had. Its end comes as any other's, and is taken then.
             bridge.ask_to_leave();
             self.play.state = PlayState::Ended {
+                headline: "",
                 reason: String::new(),
                 left: true,
                 detail: None,
@@ -1685,32 +1713,24 @@ impl Panel {
             )),
             PlayState::Playing { player, .. } => {
                 let who = self.shown_text(&self.play.called(*player));
-                Some((format!("Playing as {who}"), theme.success))
+                Some((playing_headline(&who), theme.success))
             }
             // Only what happened: the sidebar has room for a few words, and the Play page
             // says why and what to do about it.
-            PlayState::Ended { reason, .. } => {
-                Some((self.shown_text(headline(reason)), theme.danger))
-            }
+            PlayState::Ended { headline, .. } => Some(((*headline).to_owned(), theme.danger)),
         }
     }
 }
 
-/// The few words that say what happened in `reason`, why a session ended: what stands before
-/// its first colon, or its first sentence. "Did not join" of "Did not join: the server…".
-///
-/// A colon or a full stop counts only before a space or at the end, so that the address in
-/// "Could not find the server play.example.net:41313: …" is kept whole.
-fn headline(reason: &str) -> &str {
-    let ends = |mark: char| {
-        reason.match_indices(mark).map(|(at, _)| at).find(|&at| {
-            reason
-                .get(at + 1..)
-                .is_none_or(|rest| rest.is_empty() || rest.starts_with(' '))
-        })
-    };
-    let end = [ends(':'), ends('.')].into_iter().flatten().min();
-    end.and_then(|end| reason.get(..end)).unwrap_or(reason)
+/// That this PC's player is in a session as `who`, in the few words the sidebar has room
+/// for: without the name where it is too long for them, as a name may be 16 characters.
+fn playing_headline(who: &str) -> String {
+    let named = format!("Playing as {who}");
+    if named.chars().count() <= HEADLINE_MOST {
+        named
+    } else {
+        "Playing".to_owned()
+    }
 }
 
 /// The mark of a host or a moderator beside their name: a crown or a shield, so the shape tells
@@ -1738,38 +1758,18 @@ impl Page {
 
 #[cfg(test)]
 mod tests {
-    use super::headline;
+    use super::playing_headline;
+    use b3313_bridge::session::HEADLINE_MOST;
 
     #[test]
-    fn the_sidebar_says_what_happened_and_leaves_why_to_the_play_page() {
-        let said = [
-            (
-                "Did not join: the server at this address is not the one you joined before \
-                 or were invited to. This is usual when its owner set it up anew.",
-                "Did not join",
-            ),
-            (
-                "Could not join: the session password is wrong.",
-                "Could not join",
-            ),
-            (
-                "The server stopped answering.",
-                "The server stopped answering",
-            ),
-            // An address has colons and full stops of its own, which end nothing.
-            (
-                "Could not find the server play.example.net:41313: no such host is known.",
-                "Could not find the server play.example.net:41313",
-            ),
-            (
-                "Could not find the server 192.168.1.20:41313: timed out.",
-                "Could not find the server 192.168.1.20:41313",
-            ),
-            ("Left with nothing to end it", "Left with nothing to end it"),
-            ("", ""),
-        ];
-        for (reason, expected) in said {
-            assert_eq!(headline(reason), expected, "{reason}");
+    fn the_sidebar_names_the_player_only_where_the_name_fits() {
+        assert_eq!(playing_headline("Luigi"), "Playing as Luigi");
+        // The name the server makes up for the last of sixteen players.
+        assert_eq!(playing_headline("player 15"), "Playing as player 15");
+        // A name as long as one may be, and one of letters that are not one byte each.
+        for long in ["SixteenLettersOk", "ÉÉÉÉÉÉÉÉÉÉ"] {
+            assert_eq!(playing_headline(long), "Playing", "{long}");
         }
+        assert!(playing_headline("ÉÉÉÉÉÉÉÉÉ").chars().count() <= HEADLINE_MOST);
     }
 }

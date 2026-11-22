@@ -9,6 +9,7 @@ use b3313_bridge::client::{WrongServer, resolve, wrong_server};
 use b3313_bridge::session::{self, Event, Input, Options};
 use b3313_protocol::Outfit;
 use b3313_protocol::secure::{PublicKey, split_join_code};
+use std::io;
 use std::net::{SocketAddr, UdpSocket};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -23,13 +24,48 @@ pub enum Notice {
     /// No save of the game was found to copy aside before the session, which adds to it:
     /// the emulator keeps this game's save somewhere the panel did not look, or it has none.
     SaveNotCopied,
-    /// The session ended, saying why in a sentence for the player, with what the system said
-    /// of it when there is more to know.
+    /// The session started the game in the emulator, as it does when none was running it.
+    GameStarted,
+    /// The session ended, saying what happened in a few words for the sidebar and why in a
+    /// sentence for the player, with what the system said of it when there is more to know.
     Ended {
+        headline: &'static str,
         reason: String,
         detail: Option<String>,
     },
 }
+
+/// What happened to a session that the panel itself ended or never started, in the few
+/// words the sidebar has room for; `b3313_bridge::session::End::headline` has the bridge's.
+mod headline {
+    pub const PANEL_FAULT: &str = "Panel fault";
+    pub const DID_NOT_JOIN: &str = "Did not join";
+    pub const WRONG_PASSWORD: &str = "Wrong password";
+    pub const COULD_NOT_JOIN: &str = "Could not join";
+    pub const NOT_A_KEY: &str = "Not a server's key";
+    pub const SERVER_NOT_FOUND: &str = "Server not found";
+    pub const GAME_NOT_READY: &str = "Game not ready";
+    pub const LEFT: &str = "Left";
+    pub const SAVE_NOT_COPIED: &str = "Save not copied";
+    pub const EMULATOR_NOT_STARTED: &str = "Emulator not started";
+
+    #[cfg(test)]
+    pub const ALL: [&str; 10] = [
+        PANEL_FAULT,
+        DID_NOT_JOIN,
+        WRONG_PASSWORD,
+        COULD_NOT_JOIN,
+        NOT_A_KEY,
+        SERVER_NOT_FOUND,
+        GAME_NOT_READY,
+        LEFT,
+        SAVE_NOT_COPIED,
+        EMULATOR_NOT_STARTED,
+    ];
+}
+
+/// Why a session did not start: what happened in a few words, and why in a sentence.
+type Failure = (&'static str, String);
 
 #[derive(Debug)]
 pub struct Bridge {
@@ -129,6 +165,7 @@ impl Drop for EndedOnPanic<'_> {
                           written."
                 .to_owned();
             let _ = self.0.send(Notice::Ended {
+                headline: headline::PANEL_FAULT,
                 reason,
                 detail: None,
             });
@@ -150,17 +187,33 @@ fn play(
     };
     let options = request.options(stop, notify);
     preparing.store(false, Ordering::Relaxed);
-    let (reason, detail) = match options {
+    let (headline, reason, detail) = match options {
         Ok(options) => match session::run(&options, stop, typed, report) {
-            Ok(end) => (end.describe(), end.detail()),
-            Err(error) => match wrong_server(&error) {
-                Some(wrong) => wrong_server_reason(&wrong),
-                None => (format!("Could not join: {error}."), None),
-            },
+            Ok(end) => (end.headline(), end.describe(), end.detail()),
+            Err(error) => not_joined(&error),
         },
-        Err(message) => (message, None),
+        Err((headline, reason)) => (headline, reason, None),
     };
-    let _ = notify.send(Notice::Ended { reason, detail });
+    let _ = notify.send(Notice::Ended {
+        headline,
+        reason,
+        detail,
+    });
+}
+
+/// How a join that failed with `error` is told: in a few words, in a sentence, and with
+/// what more there is to know.
+fn not_joined(error: &io::Error) -> (&'static str, String, Option<String>) {
+    if let Some(wrong) = wrong_server(error) {
+        let (reason, keys) = wrong_server_reason(&wrong);
+        return (headline::DID_NOT_JOIN, reason, keys);
+    }
+    let headline = if error.kind() == io::ErrorKind::PermissionDenied {
+        headline::WRONG_PASSWORD
+    } else {
+        headline::COULD_NOT_JOIN
+    };
+    (headline, format!("Could not join: {error}."), None)
 }
 
 /// What the Play page asks to join with, as the player gave it.
@@ -292,10 +345,11 @@ impl Request {
         )
     }
 
-    /// The emulator to join with: the one named, or one started now with the ROM.
-    fn emulator(&self) -> Result<u32, String> {
+    /// The emulator to join with: the one named, or one started now with the ROM, and
+    /// whether it was started now.
+    fn emulator(&self) -> Result<(u32, bool), String> {
         if let Some(pid) = self.pid {
-            return Ok(pid);
+            return Ok((pid, false));
         }
         let install = Install::find().ok_or(
             "Parallel Launcher's emulator was not found. Install Parallel Launcher and start \
@@ -303,6 +357,7 @@ impl Request {
         )?;
         install
             .start(&self.rom, self.chat_key.is_some())
+            .map(|pid| (pid, true))
             .map_err(|error| format!("Could not start the emulator: {error}."))
     }
 
@@ -317,26 +372,36 @@ impl Request {
             .map_err(|error| format!("Could not copy your save aside before joining: {error}."))
     }
 
-    /// What the session needs, read and looked up; or why that failed, in a sentence.
-    fn options(self, stop: &AtomicBool, notify: &Sender<Notice>) -> Result<Options, String> {
+    /// What the session needs, read and looked up; or why that failed.
+    fn options(self, stop: &AtomicBool, notify: &Sender<Notice>) -> Result<Options, Failure> {
+        let failed = |headline: &'static str| move |reason: String| (headline, reason);
         // Before the emulator is started, which a mistyped name or key should not do.
-        let (name, key) = read_server(&self.server)?;
-        // What happened first and in few words, which is all the sidebar shows of it.
-        let server = resolve(name).map_err(|error| {
-            format!("Server not found: {name} could not be looked up. {error}.")
-        })?;
+        let (name, key) = read_server(&self.server).map_err(failed(headline::NOT_A_KEY))?;
+        let server = resolve(name)
+            .map_err(|error| format!("Server not found: {name} could not be looked up. {error}."))
+            .map_err(failed(headline::SERVER_NOT_FOUND))?;
         let name = name.to_owned();
-        let rom = self.current_rom()?;
+        let rom = self
+            .current_rom()
+            .map_err(failed(headline::GAME_NOT_READY))?;
         // Looking the name up and building the game take a while: a player who left
         // meanwhile is not to have the game start in front of them.
         if stop.load(Ordering::Relaxed) {
-            return Err("You left the session.".to_owned());
+            return Err((headline::LEFT, "You left the session.".to_owned()));
         }
-        if self.back_up_save()? == 0 {
+        let copied = self
+            .back_up_save()
+            .map_err(failed(headline::SAVE_NOT_COPIED))?;
+        if copied == 0 {
             // Said, not passed over: the session changes a save that then has no copy.
             let _ = notify.send(Notice::SaveNotCopied);
         }
-        let pid = self.emulator()?;
+        let (pid, started) = self
+            .emulator()
+            .map_err(failed(headline::EMULATOR_NOT_STARTED))?;
+        if started {
+            let _ = notify.send(Notice::GameStarted);
+        }
         let own = self
             .hosting
             .filter(|hosting| is_own_server(server, hosting.address));
@@ -363,8 +428,10 @@ impl Request {
 
 #[cfg(test)]
 mod tests {
-    use super::{current_rom, is_own_server};
+    use super::{current_rom, headline, is_own_server, not_joined};
     use crate::game_setup::{Built, GAMES, Game};
+    use b3313_bridge::session::HEADLINE_MOST;
+    use std::io;
     use std::net::SocketAddr;
     use std::path::{Path, PathBuf};
 
@@ -461,6 +528,21 @@ mod tests {
     fn address(text: &str) -> SocketAddr {
         text.parse()
             .unwrap_or_else(|_| unreachable!("the test's address"))
+    }
+
+    #[test]
+    fn what_happened_to_a_session_is_said_in_few_enough_words_for_the_sidebar() {
+        for headline in headline::ALL {
+            let length = headline.chars().count();
+            assert!((1..=HEADLINE_MOST).contains(&length), "{headline}");
+        }
+        // A join that failed is told by what failed, where the panel can tell.
+        let wrong_password = io::Error::new(io::ErrorKind::PermissionDenied, "wrong");
+        assert_eq!(not_joined(&wrong_password).0, headline::WRONG_PASSWORD);
+        let full = io::Error::other("the session is full");
+        let (headline, reason, _) = not_joined(&full);
+        assert_eq!(headline, headline::COULD_NOT_JOIN);
+        assert_eq!(reason, "Could not join: the session is full.");
     }
 
     #[test]
