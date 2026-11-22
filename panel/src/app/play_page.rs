@@ -235,6 +235,11 @@ impl Play {
         &self.server
     }
 
+    /// Where that server is, without its key: what to show of it.
+    fn place(&self) -> &str {
+        server_parts(&self.server).0
+    }
+
     /// Every server joined since the panel opened, as typed.
     pub(super) fn servers_joined(&self) -> impl Iterator<Item = &str> {
         self.joined.iter().map(String::as_str)
@@ -776,14 +781,14 @@ impl Panel {
             PlayState::Joining => (
                 theme.warning,
                 "Joining".to_owned(),
-                format!("Reaching {}…", self.shown_text(&self.play.server)),
+                format!("Reaching {}…", self.shown_text(self.play.place())),
             ),
             PlayState::Reconnecting { until } => (
                 theme.warning,
                 "Joining again".to_owned(),
                 format!(
                     "{} went silent. Your game plays on alone; trying for {} more.",
-                    self.shown_text(&self.play.server),
+                    self.shown_text(self.play.place()),
                     time_left(*until)
                 ),
             ),
@@ -792,7 +797,7 @@ impl Panel {
                 format!("Playing as {}", self.shown_text(&self.play.called(*player))),
                 format!(
                     "On {} for {}",
-                    self.shown_text(&self.play.server),
+                    self.shown_text(self.play.place()),
                     clock(since.elapsed())
                 ),
             ),
@@ -1237,6 +1242,17 @@ impl Panel {
             .on_click(cx.listener(move |this, _, _, cx| {
                 cx.stop_propagation();
                 this.preferences.forget_server(&forget);
+                // Its key is forgotten with it, where the address is still in the field: the
+                // next Join there is to whatever answers, which is what forgetting is for.
+                let place = server_parts(&forget).0;
+                if this
+                    .play
+                    .key
+                    .as_ref()
+                    .is_some_and(|(kept, _)| kept == place)
+                {
+                    this.play.key = None;
+                }
                 this.save_preferences();
                 cx.notify();
             }))

@@ -154,7 +154,7 @@ fn play(
         Ok(options) => match session::run(&options, stop, typed, report) {
             Ok(end) => (end.describe(), end.detail()),
             Err(error) => match wrong_server(&error) {
-                Some(wrong) => (wrong_server_reason(&wrong), None),
+                Some(wrong) => wrong_server_reason(&wrong),
                 None => (format!("Could not join: {error}."), None),
             },
         },
@@ -212,16 +212,19 @@ pub fn read_server(server: &str) -> Result<(&str, Option<PublicKey>), String> {
 }
 
 /// What the player is told when the server that answered is not the one whose key they had,
-/// from an invite or from joining it before.
-fn wrong_server_reason(wrong: &WrongServer) -> String {
-    format!(
-        "Did not join: the server that answered is not the one you joined before or were \
-         invited to (its key is {}, not {}). This is usual when its owner set the server up \
-         anew or moved it to another PC: ask them for a new invite. To join what is there now \
-         anyway, forget this server under Recent and type its address without the # and what \
-         follows it.",
+/// from an invite or from joining it before, and the two keys for whoever wants them: they
+/// are long, and tell the player nothing they can act on.
+fn wrong_server_reason(wrong: &WrongServer) -> (String, Option<String>) {
+    let reason = "Did not join: the server at this address is not the one you joined before \
+                  or were invited to. This is usual when its owner set it up anew or moved it \
+                  to another PC: ask them for a new invite and paste it. To join what is there \
+                  now anyway, forget this server under Recent and join again."
+        .to_owned();
+    let keys = format!(
+        "The server that answered has the key {}; the one expected was {}.",
         wrong.met, wrong.expected
-    )
+    );
+    (reason, Some(keys))
 }
 
 /// Whether `server` is the one this panel hosts at `hosting`: the same port, on this PC. Any
@@ -335,8 +338,10 @@ impl Request {
         let own = self
             .hosting
             .filter(|hosting| is_own_server(server, hosting.address));
-        // This panel's own server is known by its key without an invite.
-        let server_key = key.or(own.as_ref().map(|hosting| hosting.key));
+        // This panel's own server is known by the key the panel runs it with, whatever key
+        // was kept for its address: one kept from before the server was set up anew would
+        // refuse its own owner.
+        let server_key = own.as_ref().map(|hosting| hosting.key).or(key);
         let host_password = own.map(|hosting| hosting.host_password).unwrap_or_default();
         Ok(Options {
             rom,

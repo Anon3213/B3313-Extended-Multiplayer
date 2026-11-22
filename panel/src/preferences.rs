@@ -617,13 +617,19 @@ impl Preferences {
             .find(|kept| matches!(server_parts(kept), (kept_place, Some(_)) if kept_place == place))
     }
 
-    /// Keeps `key` as the key of the server kept as `address`, if it is kept with none: it
-    /// is then written with it, as an invite gives it, and only that server is joined at the
-    /// address from now on. Returns what it is kept as now, if that changed.
+    /// Keeps `key`, which the server kept as `address` had when it was joined just now, as
+    /// that server's key: it is then written with it, as an invite gives it, and only that
+    /// server is joined at the address from now on. Returns what it is kept as now, if that
+    /// changed.
+    ///
+    /// Only for a server that was joined: the bridge refuses one whose key is not the one
+    /// kept, so a key that differs here is the panel's own server's, set up anew, which the
+    /// panel knows without being told.
     pub fn learn_server_key(&mut self, address: &str, key: &PublicKey) -> Option<String> {
-        let (place, None) = server_parts(address) else {
+        let (place, kept) = server_parts(address);
+        if kept.as_ref() == Some(key) {
             return None;
-        };
+        }
         let server = self
             .servers
             .iter_mut()
@@ -938,11 +944,21 @@ mod tests {
             preferences.server_with_its_key("home.example:1"),
             Some(with_key.as_str())
         );
-        // A key once kept is not changed by what answers there later, nor is a key the
-        // player gave themself.
-        assert_eq!(preferences.learn_server_key(&with_key, &other), None);
+        // Joined again with the same key, nothing changes; and an address given with a key
+        // of its own is taken as it is.
+        assert_eq!(preferences.learn_server_key(&with_key, &key), None);
         assert_eq!(preferences.server_with_its_key(&with_key), None);
         assert_eq!(kept(&preferences), std::slice::from_ref(&with_key));
+        // The panel's own server, set up anew and joined: its new key takes the old one's
+        // place, and the old one is put back for what follows.
+        let anew = join_code("home.example:1", &other);
+        let learned = preferences.learn_server_key(&with_key, &other);
+        assert_eq!(learned.as_deref(), Some(anew.as_str()));
+        assert_eq!(kept(&preferences), std::slice::from_ref(&anew));
+        assert_eq!(
+            preferences.learn_server_key(&anew, &key).as_deref(),
+            Some(with_key.as_str())
+        );
 
         // An invite to the same server at a new address takes its place; another server
         // is another entry, though it is at the first one's old address.
