@@ -20,7 +20,7 @@ mod sidebar;
 use crate::alert;
 use crate::dashboard::{Dashboard, Kind, LogColumn, LogEntry, PlayerColumn};
 use crate::format;
-use crate::host::{Host, Notice};
+use crate::host::{self, Host, Notice};
 use crate::icons::IconName;
 use crate::network::{self, Reach};
 use crate::overview_layout::{OverviewLayout, PanelState};
@@ -600,9 +600,20 @@ impl Panel {
         } else {
             config.host_password.clone()
         };
+        // The key players know this server by, the same at every start. Not kept with the
+        // settings shown as running, which are compared with those in the form.
+        let key = match host::server_key(&config, preferences::path().as_deref()) {
+            Ok(key) => key,
+            Err(message) => {
+                self.report_problem(message);
+                cx.notify();
+                return;
+            }
+        };
         let serving = Config {
             bans: self.bans.bans().to_vec(),
             host_password,
+            key,
             ..config.clone()
         };
         let address = self.address.read(cx).text().to_owned();
@@ -730,6 +741,11 @@ impl Panel {
         let Some(config) = self.settings_to_serve(cx) else {
             return;
         };
+        if let Err(message) = host::server_key(&config, preferences::path().as_deref()) {
+            self.report_problem(message);
+            cx.notify();
+            return;
+        }
         if let Some(path) = config.ban_file {
             let usable = match self.bans.path() {
                 Some(_) => read_ban_file(&path).map(|_| ()),
@@ -1356,6 +1372,9 @@ impl Panel {
 
     /// The servers the player has joined, as typed: the recent ones, the one now joined,
     /// and every one joined since the panel opened, which lines still on screen may name.
+    ///
+    /// Each is where the server is, without the key an invite writes after it: the place is
+    /// what must not be seen, with the key or alone.
     fn known_servers(&self) -> impl Iterator<Item = &str> {
         self.preferences
             .servers
@@ -1363,6 +1382,7 @@ impl Panel {
             .map(|server| server.address.as_str())
             .chain(std::iter::once(self.play.server()))
             .chain(self.play.servers_joined())
+            .map(|server| preferences::server_parts(server).0)
     }
 
     /// A log entry as one line on screen, hidden as streamer mode needs.

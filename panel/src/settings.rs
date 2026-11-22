@@ -101,11 +101,18 @@ pub const GROUPS: [Group; 6] = [
     Group {
         title: "Advanced",
         detail: Some(ADVANCED_DETAIL),
-        fields: &[Field {
-            key: "host_password",
-            label: "Host password",
-            kind: FieldKind::Password,
-        }],
+        fields: &[
+            Field {
+                key: "host_password",
+                label: "Host password",
+                kind: FieldKind::Password,
+            },
+            Field {
+                key: "key_file",
+                label: "Key file",
+                kind: FieldKind::Path,
+            },
+        ],
     },
 ];
 

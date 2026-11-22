@@ -14,7 +14,14 @@ const LEFT_OUT_KEYS: [&str; 4] = [
 ];
 /// Settings that hold a path, of which a report gives only the file name: folders can name
 /// the user, as on another drive than their user folder.
-const PATH_KEYS: [&str; 5] = ["ban_file", "rom", "sm64_rom", "b3313_patch", "recent_file"];
+const PATH_KEYS: [&str; 6] = [
+    "ban_file",
+    "key_file",
+    "rom",
+    "sm64_rom",
+    "b3313_patch",
+    "recent_file",
+];
 /// Why a minidump, unlike a report, must not be shared with just anyone.
 pub const DUMP_WARNING: &str = "A minidump is not redacted: it holds the panel's memory as it \
                                 was, which may include IP addresses, server names and \

@@ -1,5 +1,6 @@
 //! Which address to give players, and the invitation that tells them how to join.
 
+use b3313_protocol::secure::{PublicKey, join_code};
 use std::fmt::Write as _;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket};
 
@@ -58,16 +59,18 @@ impl Invite {
     pub const ALL: [Self; 3] = [Self::Address, Self::WithPassword, Self::Full];
 
     /// What goes on the clipboard, or none when there is nothing this adds: the password
-    /// alone with the address, when there is no password.
+    /// alone with the address, when there is no password. `server` is the server's join
+    /// code, its address and its key (`server_to_give`): with the key, a player's panel joins
+    /// this server and nobody else who answers at the address.
     #[must_use]
-    pub fn text(self, address: SocketAddr, password: &str) -> Option<String> {
+    pub fn text(self, server: &str, password: &str) -> Option<String> {
         match self {
-            Self::Address => Some(address.to_string()),
+            Self::Address => Some(server.to_owned()),
             Self::WithPassword if password.is_empty() => None,
             Self::WithPassword => {
-                Some(format!("Server address: {address}\nPassword: {password}\n"))
+                Some(format!("Server address: {server}\nPassword: {password}\n"))
             }
-            Self::Full => Some(full_invitation(address, password)),
+            Self::Full => Some(full_invitation(server, password)),
         }
     }
 
@@ -82,8 +85,14 @@ impl Invite {
 const HOW_TO_JOIN: &str = "To join, copy this message, open Play in the B3313 Extended Multiplayer \
                            control panel, and select Paste invite.\n";
 
-fn full_invitation(address: SocketAddr, password: &str) -> String {
-    let mut text = format!("Join my B3313 multiplayer session.\nServer address: {address}\n");
+/// What an invite gives as the server at `address` whose key is `key`: its join code.
+#[must_use]
+pub fn server_to_give(address: SocketAddr, key: &PublicKey) -> String {
+    join_code(&address.to_string(), key)
+}
+
+fn full_invitation(server: &str, password: &str) -> String {
+    let mut text = format!("Join my B3313 multiplayer session.\nServer address: {server}\n");
     if password.is_empty() {
         text.push_str("No password is needed.\n");
         text.push_str(HOW_TO_JOIN);
@@ -99,7 +108,8 @@ fn full_invitation(address: SocketAddr, password: &str) -> String {
     text
 }
 
-/// What an invite tells a player: the server's address, and its password if it has one.
+/// What an invite tells a player: the server's address, with its key if the invite had it,
+/// and its password if it has one.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Invitation {
     pub address: String,
@@ -131,7 +141,8 @@ pub fn read_invite(text: &str) -> Option<Invitation> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Invitation, Invite, Reach, reach, read_invite};
+    use super::{Invitation, Invite, Reach, reach, read_invite, server_to_give};
+    use b3313_protocol::secure::{SecureError, ServerKey, split_join_code};
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
     #[test]
@@ -152,7 +163,8 @@ mod tests {
     #[test]
     fn each_invite_adds_to_the_one_before() {
         let address: SocketAddr = (Ipv4Addr::new(192, 168, 1, 20), 41313).into();
-        let text = |invite: Invite, password| invite.text(address, password).unwrap_or_default();
+        let address = address.to_string();
+        let text = |invite: Invite, password| invite.text(&address, password).unwrap_or_default();
 
         assert_eq!(text(Invite::Address, "hunter2"), "192.168.1.20:41313");
         assert_eq!(
@@ -165,7 +177,7 @@ mod tests {
         assert!(full.contains("B3313_PASSWORD"));
 
         // Without a password, the middle one adds nothing, and the full one says so.
-        assert_eq!(Invite::WithPassword.text(address, ""), None);
+        assert_eq!(Invite::WithPassword.text(&address, ""), None);
         let open = text(Invite::Full, "");
         assert!(open.contains("No password"));
         assert!(!open.contains("B3313_PASSWORD"));
@@ -173,7 +185,7 @@ mod tests {
 
     #[test]
     fn every_invite_reads_back_as_it_was_written() {
-        let address: SocketAddr = (Ipv4Addr::new(192, 168, 1, 20), 41313).into();
+        let address = "192.168.1.20:41313";
         let read = |invite: Invite, password: &str| {
             invite
                 .text(address, password)
@@ -201,6 +213,22 @@ mod tests {
         );
         assert_eq!(read_invite("hello there"), None);
         assert_eq!(read_invite("   "), None);
+    }
+
+    #[test]
+    fn every_invite_carries_the_servers_key_to_the_player() -> Result<(), SecureError> {
+        let address: SocketAddr = (Ipv4Addr::new(192, 168, 1, 20), 41313).into();
+        let key = ServerKey::generate()?.public();
+        let server = server_to_give(address, &key);
+        for invite in Invite::ALL {
+            let read = invite
+                .text(&server, "hunter2")
+                .and_then(|text| read_invite(&text))
+                .map(|invitation| invitation.address);
+            let read = read.as_deref().map(split_join_code).transpose()?;
+            assert_eq!(read, Some(("192.168.1.20:41313", Some(key))), "{invite:?}");
+        }
+        Ok(())
     }
 
     #[test]

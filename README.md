@@ -182,6 +182,24 @@ The panel asks your router to open the server's port (UPnP) and puts your public
 invite. If the router refuses, forward the server's UDP port to your PC by hand, or run
 `b3313-server` on a machine that players can reach. Players who join see the server's IP address.
 
+### The server's key
+
+Every server has a key of its own, made the first time it runs. An invite carries it, after a
+`#` in the server's address, and a player's panel then joins that server and nobody else who
+answers at the address: the password alone could not tell them apart, as every player has it.
+
+- The key is kept in `server.key`, in the panel's folder
+  (`%APPDATA%\B3313 Extended Multiplayer`), or beside the settings file of a `b3313-server`.
+  Keep the file to stay the same server. To move the server to another PC, copy the file
+  there. Show it to nobody: whoever has it can pose as your server. If it is lost, the server
+  makes a new one, and your players need a new invite.
+- If your address changes, as most home connections' do now and then, send the new invite. Your
+  players' panels know the server by its key, wherever it is.
+- If you have a name that follows your address (dynamic DNS, which many routers can keep up to
+  date), put it in the invite in place of the address before the `#`. The invite then goes on
+  working when your address changes, and players in a session find the server again by
+  themselves.
+
 ## Building
 
 See [BUILDING.md](BUILDING.md). [CHANGELOG.md](CHANGELOG.md) lists what each version changed.

@@ -3,11 +3,14 @@
 //! The panel sends it console commands and reads back what it reports; neither side waits on the
 //! other.
 
+use b3313_protocol::secure::{PublicKey, ServerKey};
+use b3313_server::key_file::load_or_create;
 use b3313_server::{Command, Config, Event, StopOnDrop, serve_with_console};
 use std::collections::hash_map::RandomState;
 use std::hash::{BuildHasher, Hasher};
 use std::io;
 use std::net::{SocketAddr, UdpSocket};
+use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -44,9 +47,36 @@ fn listen_error(address: &str, error: &io::Error) -> String {
     }
 }
 
+/// The name of the file the panel keeps its server's key in, beside its preferences, when
+/// the server's settings name no other.
+const KEY_FILE: &str = "server.key";
+
+/// The key the panel's server is known by: kept in the file its settings name, or else in
+/// the panel's own folder, `beside` its preferences, and made there the first time. None
+/// where there is no such folder: the server then has a key for one run, and its invites
+/// stop working when it stops.
+///
+/// # Errors
+/// Fails, with a message for the user, if the file cannot be read or made, or is not a key.
+pub fn server_key(config: &Config, beside: Option<&Path>) -> Result<Option<ServerKey>, String> {
+    let ours = beside.map(|preferences| preferences.with_file_name(KEY_FILE));
+    let Some(path) = config.key_file.clone().or(ours) else {
+        return Ok(None);
+    };
+    // The panel's folder is made when its preferences are first saved, which may be later.
+    if let Some(folder) = path.parent().filter(|folder| !folder.as_os_str().is_empty()) {
+        std::fs::create_dir_all(folder).map_err(|error| {
+            format!("could not make the folder {}: {error}", folder.display())
+        })?;
+    }
+    load_or_create(&path).map(Some)
+}
+
 #[derive(Debug)]
 pub struct Host {
     address: SocketAddr,
+    /// The server's key, which players' bridges know it by and invites carry.
+    key: PublicKey,
     /// The password that makes a player the host of the session.
     password: String,
     stop: Arc<AtomicBool>,
@@ -57,7 +87,7 @@ pub struct Host {
 
 impl Host {
     /// Listens on `address` and starts serving with `config`, whose `bans` are in force from the
-    /// start.
+    /// start, and whose `key` is the server's: with none, it has one for this run only.
     ///
     /// # Errors
     /// Fails, with a message for the user, if the address cannot be listened on.
@@ -67,6 +97,13 @@ impl Host {
             config.host_password = random_password();
         }
         let password = config.host_password.clone();
+        let key = match config.key.take() {
+            Some(key) => key,
+            None => ServerKey::generate()
+                .map_err(|error| format!("Cannot make a key for the server: {error}"))?,
+        };
+        let public = key.public();
+        config.key = Some(key);
         let address = address.trim();
         let socket = UdpSocket::bind(address).map_err(|error| listen_error(address, &error))?;
         let address = socket
@@ -84,6 +121,7 @@ impl Host {
         };
         Ok(Self {
             address,
+            key: public,
             password,
             stop,
             commands,
@@ -95,6 +133,12 @@ impl Host {
     #[must_use]
     pub fn address(&self) -> SocketAddr {
         self.address
+    }
+
+    /// The server's key, which invites carry and a bridge joining it checks.
+    #[must_use]
+    pub const fn key(&self) -> PublicKey {
+        self.key
     }
 
     /// The password that makes a player the host: the settings', or the one made up at start.
@@ -203,7 +247,7 @@ fn serve(
 
 #[cfg(test)]
 mod tests {
-    use super::{Host, Notice};
+    use super::{Host, Notice, server_key};
     use b3313_bridge::client::Connection;
     use b3313_protocol::{RemoveReason, Role};
     use b3313_server::{Command, Config, Event};
@@ -243,6 +287,34 @@ mod tests {
             Host::start("127.0.0.1:0", config)?.host_password(),
             "my own"
         );
+        Ok(())
+    }
+
+    #[test]
+    fn a_server_started_again_is_the_same_server_to_its_players() -> Result<(), String> {
+        let folder = std::env::temp_dir().join(format!("b3313-host-key-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&folder);
+        // The panel's folder is not there yet, as before its preferences were ever saved.
+        let preferences = folder.join("panel.conf");
+        let key_of_a_run = || {
+            let key = server_key(&Config::default(), Some(&preferences))?;
+            let config = Config {
+                key,
+                ..Config::default()
+            };
+            let host = Host::start("127.0.0.1:0", config)?;
+            // What a player's bridge meets is what the panel puts in its invites.
+            let bridge = Connection::join(host.address(), "", 0).map_err(|e| e.to_string())?;
+            assert_eq!(bridge.server_key(), host.key());
+            Ok::<_, String>(host.key())
+        };
+        let outcome = key_of_a_run().and_then(|first| Ok((first, key_of_a_run()?)));
+        let _ = std::fs::remove_dir_all(&folder);
+        let (first, again) = outcome?;
+        assert_eq!(again, first);
+
+        // With no folder to keep one in, a key for the run, and no file made anywhere.
+        assert_eq!(server_key(&Config::default(), None)?, None);
         Ok(())
     }
 

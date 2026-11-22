@@ -13,6 +13,7 @@ use crate::theme::{Mode, ThemeName};
 use crate::zoom::Zoom;
 use b3313_bridge::typing::{DEFAULT_CHAT_KEY, DEFAULT_CHAT_SECONDS, chat_key, chat_seconds};
 use b3313_protocol::Outfit;
+use b3313_protocol::secure::{PublicKey, join_code, split_join_code};
 use std::fmt::Write as _;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
@@ -247,9 +248,19 @@ impl Default for Preferences {
 /// Servers kept as recent on the Play page.
 pub const RECENT_SERVERS: usize = 5;
 
+/// Where the server kept or typed as `server` is, and its key if that is written after it,
+/// as in an invite. What follows a `#` and is no key is left as part of the place, which
+/// then fails to be looked up, and says so to the player.
+#[must_use]
+pub fn server_parts(server: &str) -> (&str, Option<PublicKey>) {
+    split_join_code(server).unwrap_or((server, None))
+}
+
 /// A server the player joined, and its password if they asked for it to be remembered.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SavedServer {
+    /// As it is joined: the address, and after a `#` the server's key once it is known, from
+    /// an invite or from having joined it.
     pub address: String,
     /// Kept in the preferences file as plain text, so only when the player chooses.
     pub password: Option<String>,
@@ -569,9 +580,15 @@ impl Preferences {
     }
 
     /// Puts `address` first among the recent servers, with its password if the player wants it
-    /// remembered, or forgetting any it had.
+    /// remembered, or forgetting any it had. It takes the place of what was kept of the same
+    /// server: under the same address, or under another with the same key, as a server whose
+    /// address has changed is still that server.
     pub fn remember_server(&mut self, address: &str, password: Option<&str>) {
-        self.servers.retain(|server| server.address != address);
+        let (place, key) = server_parts(address);
+        self.servers.retain(|server| {
+            let (kept_place, kept_key) = server_parts(&server.address);
+            kept_place != place && (key.is_none() || kept_key != key)
+        });
         self.servers.insert(
             0,
             SavedServer {
@@ -584,6 +601,32 @@ impl Preferences {
 
     pub fn forget_server(&mut self, address: &str) {
         self.servers.retain(|server| server.address != address);
+    }
+
+    /// What is kept of the server the player typed as `address`, if that is more than they
+    /// typed: the same address with the key the server had when it was joined, which it
+    /// must still have. An address typed with a key of its own is taken as it is.
+    #[must_use]
+    pub fn server_with_its_key(&self, address: &str) -> Option<&str> {
+        let (place, None) = server_parts(address) else {
+            return None;
+        };
+        self.servers
+            .iter()
+            .map(|server| server.address.as_str())
+            .find(|kept| matches!(server_parts(kept), (kept_place, Some(_)) if kept_place == place))
+    }
+
+    /// Keeps `key` as the key of the server kept as `address`, if it is kept with none: it
+    /// is then written with it, as an invite gives it, and only that server is joined at the
+    /// address from now on. Returns what it is kept as now, if that changed.
+    pub fn learn_server_key(&mut self, address: &str, key: &PublicKey) -> Option<String> {
+        let (place, None) = server_parts(address) else {
+            return None;
+        };
+        let server = self.servers.iter_mut().find(|kept| kept.address == address)?;
+        server.address = join_code(place, key);
+        Some(server.address.clone())
     }
 
     /// Whether times of day use the 24-hour clock: as chosen, or as the user's region does.
@@ -728,6 +771,7 @@ mod tests {
     use crate::overview_layout::{OverviewLayout, PanelKind};
     use crate::page_layout::{ArrangedPage, PageLayouts};
     use crate::sort::{Sort, SortOrder};
+    use b3313_protocol::secure::{SecureError, ServerKey, join_code};
     use crate::theme::{Mode, ThemeName};
     use crate::zoom::Zoom;
     use b3313_protocol::Outfit;
@@ -868,6 +912,48 @@ mod tests {
         assert_eq!(dragged_sidebar(-20.), None);
         assert_eq!(dragged_sidebar(260.), Some(260));
         assert_eq!(dragged_sidebar(9000.), Some(SIDEBAR_WIDTH_MAX));
+    }
+
+    #[test]
+    fn a_server_is_kept_by_its_key_wherever_its_address_goes() -> Result<(), SecureError> {
+        let key = ServerKey::generate()?.public();
+        let other = ServerKey::generate()?.public();
+        let kept = |preferences: &Preferences| -> Vec<String> {
+            let servers = preferences.servers.iter();
+            servers.map(|server| server.address.clone()).collect()
+        };
+        let mut preferences = Preferences::default();
+
+        // Joined by its address alone: the key it then had is kept with it, and goes with
+        // the address the next time the player types it.
+        preferences.remember_server("home.example:1", None);
+        assert_eq!(preferences.server_with_its_key("home.example:1"), None);
+        let with_key = join_code("home.example:1", &key);
+        let learned = preferences.learn_server_key("home.example:1", &key);
+        assert_eq!(learned.as_deref(), Some(with_key.as_str()));
+        assert_eq!(
+            preferences.server_with_its_key("home.example:1"),
+            Some(with_key.as_str())
+        );
+        // A key once kept is not changed by what answers there later, nor is a key the
+        // player gave themself.
+        assert_eq!(preferences.learn_server_key(&with_key, &other), None);
+        assert_eq!(preferences.server_with_its_key(&with_key), None);
+        assert_eq!(kept(&preferences), std::slice::from_ref(&with_key));
+
+        // An invite to the same server at a new address takes its place; another server
+        // is another entry, though it is at the first one's old address.
+        let moved = join_code("203.0.113.5:1", &key);
+        preferences.remember_server(&moved, None);
+        assert_eq!(kept(&preferences), std::slice::from_ref(&moved));
+        let stranger = join_code("home.example:1", &other);
+        preferences.remember_server(&stranger, None);
+        assert_eq!(kept(&preferences), [stranger, moved]);
+
+        // And the keys survive the preferences file.
+        let read = Preferences::parse(&preferences.format());
+        assert_eq!(kept(&read), kept(&preferences));
+        Ok(())
     }
 
     #[test]

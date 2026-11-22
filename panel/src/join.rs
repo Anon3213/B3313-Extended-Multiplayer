@@ -5,9 +5,10 @@
 
 use crate::emulator::Install;
 use crate::game_setup::{self, Built, Game};
-use b3313_bridge::client::resolve;
+use b3313_bridge::client::{WrongServer, resolve, wrong_server};
 use b3313_bridge::session::{self, Event, Input, Options};
 use b3313_protocol::Outfit;
+use b3313_protocol::secure::{PublicKey, split_join_code};
 use std::net::{SocketAddr, UdpSocket};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -152,7 +153,10 @@ fn play(
     let (reason, detail) = match options {
         Ok(options) => match session::run(&options, stop, typed, report) {
             Ok(end) => (end.describe(), end.detail()),
-            Err(error) => (format!("Could not join: {error}."), None),
+            Err(error) => match wrong_server(&error) {
+                Some(wrong) => (wrong_server_reason(&wrong), None),
+                None => (format!("Could not join: {error}."), None),
+            },
         },
         Err(message) => (message, None),
     };
@@ -168,7 +172,8 @@ pub struct Request {
     pub sources: Option<(PathBuf, PathBuf)>,
     /// The emulator already running the game, or none to start it.
     pub pid: Option<u32>,
-    /// As typed: a name or an address, with its port.
+    /// As typed or pasted: a name or an address, with its port, and after a `#` the server's
+    /// key if it came from an invite. With a key, only that server is joined.
     pub server: String,
     pub password: String,
     /// The name the player chose; empty leaves it to the server.
@@ -179,9 +184,30 @@ pub struct Request {
     pub chat_key: Option<char>,
     /// How many seconds the game shows the chat's lines for.
     pub chat_seconds: u8,
-    /// The server this panel is hosting, if it is: where it listens, and its host password,
-    /// which goes to that server alone, so the player hosting is the host.
-    pub hosting: Option<(SocketAddr, String)>,
+    /// The server this panel is hosting, if it is: where it listens, its key, and its host
+    /// password, which goes to that server alone, so the player hosting is the host.
+    pub hosting: Option<Hosting>,
+}
+
+/// The server the panel is hosting, as a session joining it needs to know it.
+#[derive(Clone, Debug)]
+pub struct Hosting {
+    pub address: SocketAddr,
+    pub key: PublicKey,
+    pub host_password: String,
+}
+
+/// What the player is told when the server that answered is not the one whose key they had,
+/// from an invite or from joining it before.
+fn wrong_server_reason(wrong: &WrongServer) -> String {
+    format!(
+        "Did not join: the server that answered is not the one you joined before or were \
+         invited to (its key is {}, not {}). This is usual when its owner set the server up \
+         anew or moved it to another PC: ask them for a new invite. To join what is there now \
+         anyway, forget this server under Recent and type its address without the # and what \
+         follows it.",
+        wrong.met, wrong.expected
+    )
 }
 
 /// Whether `server` is the one this panel hosts at `hosting`: the same port, on this PC. Any
@@ -276,9 +302,16 @@ impl Request {
 
     /// What the session needs, read and looked up; or why that failed, in a sentence.
     fn options(self, stop: &AtomicBool, notify: &Sender<Notice>) -> Result<Options, String> {
-        // Before the emulator is started, which a mistyped name should not do.
-        let server = resolve(&self.server)
-            .map_err(|error| format!("Could not find the server {}: {error}.", self.server))?;
+        // Before the emulator is started, which a mistyped name or key should not do.
+        let (name, key) = split_join_code(&self.server).map_err(|error| {
+            format!(
+                "What follows the # in the server's address is not a server's key ({error}). \
+                 Paste the invite again, or type the address without it."
+            )
+        })?;
+        let server = resolve(name)
+            .map_err(|error| format!("Could not find the server {name}: {error}."))?;
+        let name = name.to_owned();
         let rom = self.current_rom()?;
         // Looking the name up and building the game take a while: a player who left
         // meanwhile is not to have the game start in front of them.
@@ -290,15 +323,20 @@ impl Request {
             let _ = notify.send(Notice::SaveNotCopied);
         }
         let pid = self.emulator()?;
-        let host_password = self
+        let own = self
             .hosting
-            .filter(|&(hosting, _)| is_own_server(server, hosting))
-            .map(|(_, password)| password)
+            .filter(|hosting| is_own_server(server, hosting.address));
+        // This panel's own server is known by its key without an invite.
+        let server_key = key.or(own.as_ref().map(|hosting| hosting.key));
+        let host_password = own
+            .map(|hosting| hosting.host_password)
             .unwrap_or_default();
         Ok(Options {
             rom,
             pid,
             server,
+            server_name: Some(name),
+            server_key,
             password: self.password,
             outfit: self.outfit,
             name: self.name,

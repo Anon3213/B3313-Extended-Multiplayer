@@ -8,10 +8,10 @@ use crate::emulator::{Change, Install};
 use crate::format::{self, byte_rate, clock, millis};
 use crate::game_setup;
 use crate::icons::{IconName, icon};
-use crate::join::{Bridge, Notice, Request};
+use crate::join::{Bridge, Hosting, Notice, Request};
 use crate::network::read_invite;
 use crate::page_layout::ArrangedPage;
-use crate::preferences::SavedServer;
+use crate::preferences::{SavedServer, server_parts};
 use crate::system;
 use crate::text_input::{InputEvent, TextInput};
 use crate::theme::{MONO, Theme, scaled};
@@ -322,8 +322,24 @@ impl Panel {
                     player,
                     since: Instant::now(),
                 };
-                let text = format!("Joined {} as player {}", self.play.server, player.get());
+                let (place, _) = server_parts(&self.play.server);
+                let text = format!("Joined {place} as player {}", player.get());
                 self.play.note(text);
+            }
+            Notice::Event(Event::Server(key)) => {
+                // Joined by its address alone: kept with the key it has, so that the next
+                // join there is to this server or to none.
+                let joined = self.play.server.clone();
+                if let Some(kept) = self.preferences.learn_server_key(&joined, &key) {
+                    self.save_preferences();
+                    self.play.joined.push(kept.clone());
+                    self.play.server = kept;
+                    self.play.note(
+                        "Remembered this server's key: at this address, only this server is \
+                         joined from now on"
+                            .to_owned(),
+                    );
+                }
             }
             Notice::Event(Event::WrongRom(found)) => {
                 let text = b3313_bridge::session::describe_wrong_rom(found);
@@ -427,7 +443,11 @@ impl Panel {
             .sm64_rom
             .clone()
             .zip(self.preferences.b3313_patch.clone());
-        let server = self.play.address.read(cx).text().trim().to_owned();
+        let typed = self.play.address.read(cx).text().trim().to_owned();
+        // An address typed alone, of a server joined before: with the key it had then, so
+        // that it is that server which is joined, and not whatever answers there now.
+        let with_key = self.preferences.server_with_its_key(&typed);
+        let server = with_key.map(str::to_owned).unwrap_or(typed);
         let password = self.play.password.read(cx).text().to_owned();
         let kept = self.play.remember_password.then_some(password.as_str());
         self.preferences.remember_server(&server, kept);
@@ -437,9 +457,10 @@ impl Panel {
         let name = self.play.name.read(cx).text().trim().to_owned();
         self.preferences.player_name.clone_from(&name);
         self.save_preferences();
-        let hosting = self.running.as_ref().map(|running| {
-            let host = &running.host;
-            (host.address(), host.host_password().to_owned())
+        let hosting = self.running.as_ref().map(|running| Hosting {
+            address: running.host.address(),
+            key: running.host.key(),
+            host_password: running.host.host_password().to_owned(),
         });
         let request = Request {
             rom,
@@ -1138,10 +1159,19 @@ impl Panel {
         let accent = theme.accent;
         let fill = saved.clone();
         let forget = saved.address.clone();
-        let tip = if saved.password.is_some() {
-            "Fills in this server and its saved password"
-        } else {
-            "Fills in this server"
+        // The key is long and tells the eye nothing: the chip says only that it is known.
+        let (place, key) = server_parts(&saved.address);
+        let tip = match (saved.password.is_some(), key.is_some()) {
+            (true, true) => {
+                "Fills in this server and its saved password. Its key is known, so only this \
+                 server is joined, wherever its address leads"
+            }
+            (true, false) => "Fills in this server and its saved password",
+            (false, true) => {
+                "Fills in this server. Its key is known, so only this server is joined, \
+                 wherever its address leads"
+            }
+            (false, false) => "Fills in this server",
         };
         let forget_button = div()
             .id(("forget-server", index))
@@ -1185,8 +1215,16 @@ impl Panel {
                 div()
                     .font_family(MONO)
                     .text_size(scaled(13.))
-                    .child(self.shown_text(&saved.address)),
+                    .child(self.shown_text(place)),
             )
+            .when(key.is_some(), |chip| {
+                chip.child(
+                    div()
+                        .text_size(scaled(11.))
+                        .text_color(theme.text_faint)
+                        .child("key known"),
+                )
+            })
             .when(saved.password.is_some(), |chip| {
                 chip.child(
                     div()

@@ -1,8 +1,30 @@
 # Changelog
 
 What each version changed, newest first. Versions of the same protocol play together:
-those from 0.1.0 to 0.1.4 join each other's servers, as do those from 0.2.0 on, and a version
-that does not play with the ones before it says so.
+those from 0.1.0 to 0.1.4 join each other's servers, as do those from 0.2.0 to 0.2.2, and a
+version that does not play with the ones before it says so.
+
+## Not yet released
+
+**This version does not play with 0.2.2 and earlier**: the way a player's program and a
+server greet each other changed, so everyone in a session updates together.
+
+- **A server now has a key, and your program checks it.** Until now the session password was
+  all that stood between you and someone posing as the server, and every player has the
+  password. An invite now carries the server's key, after a `#` in its address, and with it
+  your panel joins that server and nobody else who answers at the address. A server joined
+  by its address alone is remembered with the key it had, and the panel refuses another
+  there afterwards, saying so.
+- **A server whose address changes is still the same server.** Paste a new invite and the
+  panel knows it by its key: it takes the old one's place under **Recent**.
+- **A session survives the server's address changing**, where the server was given by a
+  name: your program looks the name up again each time it joins again, and joins only the
+  server it was in.
+- For whoever runs a server: its key is kept in `server.key`, in the panel's own folder, or
+  beside the settings file of a `b3313-server` (the new `key_file` setting names another
+  place). Keep that file to stay the same server, copy it to move the server to another PC,
+  and show it to nobody. `b3313-server` prints the key to give players as it starts, and
+  `b3313-bridge` takes an invite's address as it is, or the key alone as `B3313_SERVER_KEY`.
 
 ## 0.2.2
 

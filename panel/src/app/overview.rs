@@ -10,7 +10,7 @@ use crate::dashboard::{Kind, LogEntry, Series, SessionTrends};
 use crate::format::{byte_rate, clock, millis, scale_count, scale_millis};
 use crate::health::{self, Health};
 use crate::icons::{IconName, icon};
-use crate::network::{Invite, Reach};
+use crate::network::{Invite, Reach, server_to_give};
 use crate::overview_layout::{PanelKind, PanelState};
 use crate::theme::{MONO, Theme, scaled};
 use crate::widgets::{
@@ -216,11 +216,14 @@ impl Panel {
         } else {
             password.as_str()
         };
+        // With the server's key, so that a player's panel joins this server and no other.
+        let server = copyable.map(|address| server_to_give(address, &running.host.key()));
         let copy_buttons: Vec<AnyElement> = Invite::ALL
             .into_iter()
             .map(|invite| {
-                let preview = copyable
-                    .and_then(|address| invite.text(address, shown_password))
+                let preview = server
+                    .as_deref()
+                    .and_then(|server| invite.text(server, shown_password))
                     .map(|text| self.shown_text(&text));
                 invite_button(invite, copyable, preview, cx)
             })
@@ -276,7 +279,8 @@ impl Panel {
             return;
         };
         let password = &running.config.password;
-        let Some(text) = invite.text(address, password) else {
+        let server = server_to_give(address, &running.host.key());
+        let Some(text) = invite.text(&server, password) else {
             return;
         };
         cx.write_to_clipboard(ClipboardItem::new_string(text));
