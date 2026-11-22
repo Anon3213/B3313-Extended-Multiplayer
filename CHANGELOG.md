@@ -4,7 +4,7 @@ What each version changed, newest first. Versions of the same protocol play toge
 those from 0.1.0 to 0.1.4 join each other's servers, as do those from 0.2.0 to 0.2.2, and a
 version that does not play with the ones before it says so.
 
-## Not yet released
+## 0.3.0
 
 **This version does not play with 0.2.2 and earlier**: the way a player's program and a
 server greet each other changed, so everyone in a session updates together.
@@ -30,6 +30,11 @@ server greet each other changed, so everyone in a session updates together.
   place). Keep that file to stay the same server, copy it to move the server to another PC,
   and show it to nobody. `b3313-server` prints the key to give players as it starts, and
   `b3313-bridge` takes an invite's address as it is, or the key alone as `B3313_SERVER_KEY`.
+- The sidebar's line for your game says what happened in a few words that fit it, as "Did
+  not join", and the Play page says why. A server is remembered once you have joined it, so
+  a mistyped address no longer stays under **Recent**.
+- The README is written anew for players, and what only a server's owner needs is in
+  `HOSTING.md`, which comes in the zip and with the Linux server.
 
 ## 0.2.2
 
