@@ -1,211 +1,222 @@
 # B3313 Extended Multiplayer
 
-Online multiplayer for B3313, the Super Mario 64 ROM hack: up to 16
-players in one world, with shared enemies, coins, stars and chat. It plays the real game in an
-emulator on each player's PC, in any of three versions:
+Online multiplayer for **B3313**, the Super Mario 64 ROM hack. Up to 16 players share one
+world: everyone sees each other's Mario, and enemies, coins, stars and doors are shared. There
+is a chat in the game, too.
 
-- Unabandoned A2 Anniversary Edition
-- 1.0.2 hotfix 3
-- 1.0.2 hotfix 3 with Unabandoned tweaks, which some downloads of "1.0.2 hotfix 3" are
+Each player runs the real game in an emulator on their own Windows PC. A small desktop app, the
+**panel**, sets everything up: it builds the multiplayer version of the game from files you
+already have, starts it, and connects you to a session. It can also host a session for others.
 
-Everyone in a session plays the same version; see "Versions of the game".
+This is an unofficial fan project. It is not affiliated with Nintendo or the B3313 team, and
+it does not contain any ROM.
 
-This is an unofficial project. It is not affiliated with Nintendo or the B3313 team, and it
-contains no ROM.
-
-## As is
-
-This is released as it is, for anyone to try. It comes with no promise of support, fixes,
-maintenance or further development, now or later, and nobody is expected to report anything.
-It is free to use, change and pass on; see "License".
-
-Nobody has played it with other people yet. It has been tested by programs that run two games
-side by side on one PC and check what each shows of the other, and no further. Expect
-problems.
-
-What is known not to have been tried:
-
-- **Joining over the internet through the panel's own port opening.** Only a router that
-  refuses to open the port has been seen. Forwarding the port by hand is the fallback; see
-  "Hosting over the internet".
-- **Most of the game.** In the Unabandoned A2 Anniversary Edition, two linked games have been
-  taken through levels 4 to 6 only. One place there, level 6 area 6, is known to stop the
-  game of whoever hosts.
-- **The two 1.0.2 versions, more than a little.** They were added later, and their engine's
-  source is not public, so the multiplayer code was fitted to the games as built. Each passes
-  the same automatic tests as the Anniversary Edition, and two linked games have been through
-  levels 4 and 5 and part of level 9. In level 4 area 4, a player standing where the area is
-  entered is pushed into a warp by the next player to arrive there.
-- **Keyboards that are not US ones**, and AltGr, for typing the chat in the game.
-- **More than two players at once**, other than with simulated ones.
-
-What to know as you play:
-
-- A session adds stars, keys and doors to your save for good. The panel copies your save
-  aside each time you join, and the multiplayer game has a save of its own; see "Chat".
-- While your game is paused, the others see your Mario stand where he was. Nobody can hit
-  him, and the enemies your game was running are run by another player's until you go on.
-- Every game in a session must be the same version of B3313, built by the same version of
-  this program. The panel builds the game for you and says so if the game running is another
-  one.
+> **Still experimental.** This has only been tested by programs that run two games side by
+> side on one PC. Nobody has played it with other people yet, so expect problems. See
+> [Known limits](#known-limits) before you start.
 
 ## What you need
 
-- Windows 10 or 11. Playing needs Windows; the Linux download holds only the server, for
-  hosting a session on a machine that players can reach.
-- [Parallel Launcher](https://parallel-launcher.ca/), which installs RetroArch, the emulator
-  the game runs in. Start any game in Parallel Launcher once, so it sets RetroArch up; after
-  that the panel starts the game in it for you.
-- Your own Super Mario 64 (USA) ROM.
-- A B3313 patch (`.bps`) of one of the three versions above, the one your session plays. The
-  Unabandoned A2 Anniversary Edition's is on romhacking.com.
+- **Windows 10 or 11.**
+- **[Parallel Launcher](https://parallel-launcher.ca/)**, which installs the RetroArch
+  emulator. Start any game in Parallel Launcher once so that it finishes setting RetroArch up.
+  After that, the panel starts the game for you.
+- **Your own Super Mario 64 (USA) ROM.**
+- **A B3313 patch file (`.bps`)** for one of these versions:
+  - Unabandoned A2 Anniversary Edition (available on romhacking.com)
+  - 1.0.2 hotfix 3
+  - 1.0.2 hotfix 3 with Unabandoned tweaks
+
+  Everyone in a session must play the same version. See
+  [Versions of B3313](#versions-of-b3313).
+
+Download the latest `B3313-Extended-Multiplayer-<version>-windows-x64.zip` from the
+[Releases page](https://github.com/Anon3213/B3313-Extended-Multiplayer/releases) and unzip
+it anywhere.
+
+## Getting started
+
+### 1. Set up the game (once per version)
+
+1. Start **`B3313 Extended Multiplayer.exe`** and open the **Play** page.
+2. Under **Game**, choose your Super Mario 64 ROM and your B3313 patch.
+
+The panel checks both files, builds the multiplayer ROM and keeps it. Then it tells you which
+version of B3313 you have. You only need to do this once for each version.
+
+### 2. Join a session
+
+1. Copy the invite the host sent you.
+2. On **Play**, select **Paste invite**, then **Join**.
+
+The panel starts the game and connects you. If your game is a different version from the
+session's, you won't be let in, and the panel tells you which version the session plays.
+
+### 3. Or host your own
+
+1. If you want a password, set one on the **Server settings** page.
+2. Open the **Overview** page and set **Listen address** to `0.0.0.0:41313`. The default,
+   `127.0.0.1`, only lets in games on your own PC.
+3. Select **Start server**.
+4. Under **Invite players**, copy the **Full invite** and send it to your friends. It includes
+   the address, the password and instructions. Tell them which version of B3313 you're playing,
+   too.
+5. Go to **Play** and join your own server.
+
+The panel asks your router to open the server's port, so that players can join over the
+internet. If your router refuses, see [HOSTING.md](HOSTING.md) for what to do instead. That
+page also covers passwords, your server's key, and running a server without the panel.
 
 ## Playing
 
-1. Start `B3313 Extended Multiplayer.exe` and open **Play**.
-2. Under **Game**, choose your Super Mario 64 ROM and a B3313 patch. The panel checks both,
-   builds the multiplayer ROM and keeps it, and says which version of B3313 it is; this is
-   needed once for each version you play.
-3. To join someone, copy the invite they sent you, select **Paste invite**, then **Join**. The
-   panel starts the game. Your game must be the version theirs is; see "Versions of the game".
-4. To host, open **Overview**, start the server, and send players the invite it shows, and tell
-   them which version of B3313 you play. Then join your own server on **Play**.
+- **See who's playing:** hold **down on the D-pad**.
+- **Change Mario's colors:** pick a swatch on the **Play** page, or type `/color` in the chat
+  to list the colors and `/color green` to wear one.
+- **Chat:** press **T** in the game, type a line, and press **Enter** to send it. Press **/**
+  instead to start typing a command. You can also chat from the **Play** page; both show the
+  same lines.
 
-In the game, hold the D-pad down to see who is in the session.
+While you're typing, the game ignores your controller, so Mario doesn't move. The keyboard is
+only read while the game's window is in front. Chat lines stay on screen for 8 seconds, and
+opening the chat shows the last six again. You can change the chat key, the time lines stay up
+(5 to 60 seconds), or turn typing in the game off, under **Preferences**.
 
-Pick your Mario's colors from the swatches on **Play**, or type `/color` in the chat for the
-list and `/color green` to wear one. Everyone sees you in them, and so do you.
+Your name can be up to 16 plain characters. If someone already has your name, you get a number
+after it. Type `/name` and a new name to change it.
 
-### Versions of the game
+### Your save file
 
-The versions of B3313 have different levels, so players can only share a session if their
-games are the same version. The first player into a session decides which it plays, and
-anyone who then joins with another is not let in and is told which version the session plays.
-Once everyone has left, the session takes whichever version comes next.
+Any stars, keys or doors that anyone collects during a session are added to every player's
+save, permanently. Because of that:
 
-The panel tells which version a patch is by the game it makes, not by the file's name: two
-files both called "1.0.2 hotfix 3" can be different versions. It says which one it built when
-the game is ready, and **Play** shows it under **Game** from then on, so players can compare
-before they join. Each version has a multiplayer ROM and a save of its own, so you can set up
-more than one and change between them by choosing another patch.
+- The multiplayer game keeps its own save, separate from the one you use to play B3313 alone.
+- The panel copies your save aside each time you join, into
+  `%APPDATA%\B3313 Extended Multiplayer\save-backups`, so you can undo a session.
 
-### Who is who
+### If the connection drops
 
-| | Who | Mark | Can |
+If the server goes quiet, or its owner restarts it, your game keeps running on its own and
+reconnects by itself for up to two minutes. The chat tells you when this happens. If the server
+is stopped for good, or the host ends the session, everyone's session ends.
+
+### Pausing
+
+While your game is paused, the other players see your Mario standing still where you left
+him. Nobody can hit him, and another player's game takes over the enemies near you until you
+carry on.
+
+## Versions of B3313
+
+The versions of B3313 have different levels, so players can only share a session if they have
+the same version. The first player to join a session decides its version for as long as anyone
+is in it. When everyone has left, the next player to join decides again.
+
+The panel identifies a patch by the game it produces, not by its file name. This matters
+because two files both called "1.0.2 hotfix 3" can be different versions. Once the game is
+built, **Play** shows its version under **Game**, so players can compare before they join.
+
+You can set up more than one version. Each one gets its own multiplayer ROM and its own save,
+and you switch between them by choosing another patch.
+
+## Roles and chat commands
+
+| Role | Who | Shown as | Can also |
 |---|---|---|---|
-| **Player** | Everyone who joins | None | Play, chat, `/help`, `/list`, `/color`, `/name` |
-| **Moderator** | A player the host appoints with `/mod` | Blue shield | Also `/kick` and `/ban` ordinary players. Lasts until they leave |
-| **Host** | The one player in charge of the session | Gold crown | Also `/mod`, `/unmod`, remove anyone, pass the role on with `/host`, and `/end` the session |
-| **Server owner** | Whoever runs the server, on their PC or elsewhere | Server icon; lines show as `[Server]` | Everything, from outside the game: the panel's **Server chat**, Players and Bans pages, or the server's console |
+| **Player** | Everyone who joins | — | Play and chat |
+| **Moderator** | A player the host appoints | Blue shield | Kick and ban ordinary players |
+| **Host** | The one player in charge of the session | Gold crown | Appoint moderators, remove anyone, pass on the host role, end the session |
+| **Server owner** | Whoever runs the server | `[Server]` in the chat | Everything, from outside the game |
 
-The host and the server owner are usually the same person, and are still two things. The
-server owner is whoever started the server, and need not be playing. The host is a player.
-If you host from the panel and join your own server on **Play**, the panel makes your player
-the host, so you are both: you speak as `[Server]` in the Server chat, and as yourself, with
-the crown, on **Play** and in the game. A server run by itself has a host only if its owner
-names one with `host <player>`, or a player joins with its host password, which takes
-`b3313-bridge` run by hand: **Play** has no field for one.
+When you host from the panel and join your own server, you are both the server owner and the
+host. They are still separate roles. The server owner doesn't have to be playing at all,
+while the host is always one of the players. [HOSTING.md](HOSTING.md) explains how the host
+role is decided.
 
-A session has one host. The first player to join with the host password keeps the role: anyone
-who joins with it later is an ordinary player, and the server owner is told. The host hands
-the role to another player with `/host <player>` and is an ordinary player from then on. If
-the host leaves without doing so, the session has no host until the server owner names one or
-a player joins with the host password. A host who joined with the host password has the role
-again when they are back from a dropped connection; one who was named must be named again.
+Type these in the chat, in the game or on the **Play** page:
 
-### Chat
-
-Press **T** in the game to open the chat, type a line, and press **Enter** to send it. **/**
-opens the chat with a command begun. An empty line closes the chat again, and so does Backspace
-once nothing is left to remove. You can also chat in the panel, on **Play**; both show the same
-lines and take the same commands.
-
-| Command | Who | Does |
+| Command | Who can use it | What it does |
 |---|---|---|
-| `/help`, `/list` | Anyone | Lists the commands, or who is in the session |
-| `/color [name]` | Anyone | Wears the colors named, or lists them |
-| `/name [new name]` | Anyone | Takes the new name, or says the one you have |
-| `/kick <player>`, `/ban <player>` | Host, moderators | Removes a player, by name or by their number in `/list` |
-| `/mod <player>`, `/unmod <player>` | Host | Makes a player a moderator, or an ordinary player again |
-| `/host <player>` | Host | Makes that player the host in the host's place |
-| `/end` | Host | Ends the session for everyone, and stops the server |
+| `/help` | Anyone | Lists the commands |
+| `/list` | Anyone | Lists who is in the session, with their numbers |
+| `/color [name]` | Anyone | Wears the colors you name, or lists them |
+| `/name [new name]` | Anyone | Changes your name, or shows the one you have |
+| `/kick <player>` | Host, moderators | Removes a player from the session |
+| `/ban <player>` | Host, moderators | Removes a player and keeps them out |
+| `/mod <player>` | Host | Makes a player a moderator |
+| `/unmod <player>` | Host | Makes a moderator an ordinary player again |
+| `/host <player>` | Host | Hands the host role to another player |
+| `/end` | Host | Ends the session for everyone and stops the server |
 
-A name is up to 16 plain characters, and no two players in a session have the same one,
-whatever the case of its letters. If the name you join with is taken, you get a number after
-it and the chat says so; `/name` and a name that is free changes it, at most every ten
-seconds. A name is free again as soon as its player has left. If you close the game and come
-straight back, you have your own name again.
-
-While the chat is open, the game ignores the controller and the keys bound to it, so typing
-does not move Mario. The keyboard is read only while the game's window is in front. Choose
-another key, or turn typing in the game off, under **Preferences**.
-
-Lines of chat stay on the game's screen for 8 seconds after the newest arrives; **Preferences**
-has other times, from 5 seconds to a minute. Opening the chat shows the last six again.
-
-The emulator has hotkeys of its own on some keys you type with: with Parallel Launcher's
-settings, P pauses it and ~ resets the game. The panel turns those off in a game it starts,
-and leaves the rest, such as the menu's F1, as they are, but for those in the table under
-"What the panel changes in your emulator". If you start the
-emulator yourself, take its hotkeys off the typing keys first, or chat in the panel.
-
-Stars, keys and doors that anyone gets in a session are added to every player's own save file.
-The panel copies your save aside each time you join, into
-`%APPDATA%\B3313 Extended Multiplayer\save-backups`, so a session can be undone. The multiplayer
-game keeps a save of its own, apart from the one you play B3313 alone with.
-
-If the server goes quiet, or its owner restarts it, your game plays on alone and joins again
-by itself, for up to two minutes; the chat says when. The owner stopping the server, or the
-host's `/end`, ends the session for everyone.
+A `<player>` can be a name or a number from `/list`.
 
 ## What the panel changes in your emulator
 
-When the panel starts the game, it changes a few of RetroArch's settings so that the session
-keeps in step. The changes last for that run only. Your own settings file is never written to,
-and games you start from Parallel Launcher are as they always were. The **Game** panel on
-**Play** lists them for your PC, under **Show what changes**.
+When the panel starts the game, it changes a few RetroArch settings to keep everyone's games
+in step. These changes apply only to that run. Your own settings file is never touched, and
+games you start from Parallel Launcher work as they always have. To see the exact list for
+your PC, open **Show what changes** under **Game** on the **Play** page.
 
 | Change | Why |
 |---|---|
-| Sound is on, and the game keeps time by it | RetroArch paces a game by its sound; with sound off the game runs at over twice its speed. You can still mute it |
-| Run-ahead, preemptive frames and rewind are off, and no saved state loads at the start | Each would put your game at a moment the other players' games are not at |
-| The hotkeys for loading a state, rewinding, stepping a frame, fast forward, slow motion, run-ahead and preemptive frames do nothing | The same: a game that jumps in time or changes speed falls out of step |
-| The key that closes the emulator must be pressed twice | With Parallel Launcher's settings it is Escape, which also closes a line of chat you are typing |
-| Your hotkeys on keys you type with do nothing | You type the chat in the game's window. Only while typing in the game is on, under **Preferences** |
-| RetroArch takes no commands over the network | It would take them from any PC on your network |
+| Sound is on, and the game keeps time by it | RetroArch paces the game by its sound. With sound off, the game runs at over twice its normal speed. You can still turn the volume down or mute it |
+| Run-ahead, preemptive frames and rewind are off, and no saved state loads at startup | Each of these would put your game at a different moment from everyone else's |
+| Hotkeys for loading states, rewinding, frame stepping, fast forward, slow motion, run-ahead and preemptive frames do nothing | A game that jumps in time or changes speed falls out of step with the others |
+| The key that closes the emulator must be pressed twice | In Parallel Launcher's settings, that key is Escape, which also closes the chat line you're typing |
+| Your hotkeys on keys you type with do nothing | Otherwise typing a chat message would trigger them (for example, P pauses and ~ resets). This applies only while typing in the game is on in **Preferences** |
+| RetroArch takes no commands over the network | It would accept them from any PC on your network |
 
-If you start the emulator yourself, none of this is done for you.
+If you start the emulator yourself instead, none of this is done, and you should chat from the
+panel or move the emulator's hotkeys off the typing keys first.
 
-## Hosting over the internet
+## How it works
 
-The panel asks your router to open the server's port (UPnP) and puts your public address in the
-invite. If the router refuses, forward the server's UDP port to your PC by hand, or run
-`b3313-server` on a machine that players can reach. Players who join see the server's IP address.
+B3313 was made for one player, so this project adds three pieces around it:
 
-### The server's key
+- **The multiplayer ROM.** The panel patches your copy of B3313 with extra code that draws the
+  other players' Marios and shares objects such as enemies and coins. The rest of the game is
+  left exactly as it was.
+- **The bridge,** which runs inside the panel. It reads the game's memory in the emulator, sends
+  your Mario's state and what happens around you to the server, and writes back what the other
+  players are doing.
+- **The server,** which passes everything between the players in a session and enforces the
+  roles and rules. The panel can run one, or you can run `b3313-server` on its own.
 
-Every server has a key of its own, made the first time it runs. An invite carries it, after a
-`#` in the server's address, and a player's panel then joins that server and nobody else who
-answers at the address: the password alone could not tell them apart, as every player has it.
+All traffic between players and the server is encrypted. Every server also has its own key,
+which invites carry so that your panel connects to the right server and nobody else's.
 
-- The key is kept in `server.key`, in the panel's folder
-  (`%APPDATA%\B3313 Extended Multiplayer`), or beside the settings file of a `b3313-server`.
-  Keep the file to stay the same server. To move the server to another PC, copy the file
-  there. Show it to nobody: whoever has it can pose as your server. If it is lost, the server
-  makes a new one, and your players need a new invite.
-- If your address changes, as most home connections' do now and then, send the new invite. Your
-  players' panels know the server by its key, wherever it is.
-- If you have a name that follows your address (dynamic DNS, which many routers can keep up to
-  date), type it under **Name for invites** on **Overview**. Invites then give the name in place
-  of the address, with the server's port, and go on working when your address changes; players
-  in a session find the server again by themselves. The name must lead to your public address,
-  and your router must let the server's port in, as for any player over the internet.
+## Known limits
 
-## Building
+This project is offered as it is, for anyone to try. There's no promise of support, fixes or
+further development, and nobody is expected to report problems. You're free to use, change and
+share it (see [License](#license)).
 
-See [BUILDING.md](BUILDING.md). [CHANGELOG.md](CHANGELOG.md) lists what each version changed.
+So far it has only been tested by programs that run two games side by side on one PC and check
+what each one shows of the other. Things that haven't been tried include:
+
+- **Playing with more than two people,** except with simulated players.
+- **Most of the game.** On the Unabandoned A2 Anniversary Edition, two linked games have only
+  been taken through levels 4 to 6. Level 6, area 6 is known to freeze the game of whoever
+  hosts.
+- **The two 1.0.2 versions,** beyond a little. They were added later, and their engine's
+  source code isn't public. They pass the same automatic tests, and two linked games have been
+  through levels 4 and 5 and part of level 9. In level 4, area 4, a player standing where the
+  area is entered gets pushed into a warp when the next player arrives.
+- **Opening the port automatically over the internet.** Only a router that refuses has been
+  tested. Forwarding the port by hand is the fallback (see [HOSTING.md](HOSTING.md)).
+- **Non-US keyboards,** and the AltGr key, for typing in the game's chat.
+
+Every game in a session must be the same version of B3313, built by the same version of this
+program. The panel builds the game for you, and warns you if the game that's running is a
+different one.
+
+## For developers
+
+[BUILDING.md](BUILDING.md) explains how to build the programs and the multiplayer ROMs, run
+the tests, and add support for another version of B3313. [CHANGELOG.md](CHANGELOG.md) lists
+what changed in each release.
 
 ## License
 
-BSD Zero Clause (`LICENSE.txt`): do anything with it, without warranty of any kind. `NOTICE.md`
-lists what it is built from.
+This project's own code is under the BSD Zero Clause License ([LICENSE.txt](LICENSE.txt)): do
+anything you like with it, with no warranty of any kind. [NOTICE.md](NOTICE.md) lists what it
+is built from, including Troll Engine's license, which covers the multiplayer ROM patches.

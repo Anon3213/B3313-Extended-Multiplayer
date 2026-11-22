@@ -48,7 +48,7 @@ jobs:
       - run: |
           name="b3313-server-${{ github.ref_name }}-linux-x64"
           mkdir "$name"
-          cp target/release/b3313-server server/server.example.conf LICENSE.txt NOTICE.md "$name/"
+          cp target/release/b3313-server server/server.example.conf HOSTING.md LICENSE.txt NOTICE.md "$name/"
           python3 scripts/release.py server-licenses "$name/THIRD-PARTY-LICENSES.txt"
           tar -czf "$name.tar.gz" "$name"
           sha256sum "$name.tar.gz" > "$name.tar.gz.sha256"
