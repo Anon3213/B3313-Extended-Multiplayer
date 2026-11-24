@@ -86,7 +86,8 @@ impl Panel {
     }
 
     /// Shows the fields that can hold an address or a path as dots in streamer mode: the
-    /// listen address, the address to ban, and paths among the settings. The password is
+    /// listen address, the name for invites, the address to ban, the Play page's address,
+    /// and paths among the settings. The password is
     /// always dots in streamer mode, and goes back to dots when it ends.
     pub(super) fn mask_fields(&mut self, cx: &mut Context<Self>) {
         let on = self.preferences.streamer_mode;
