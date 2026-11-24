@@ -2,11 +2,10 @@
 //! panels the user arranges (`arrange.rs` frames and moves them; this says what each shows).
 
 use super::arrange::{PanelContent, accept_panel_drops};
+use super::messages::ToastTone;
 use super::players::player_name;
-use super::{
-    NOT_SAVED, Page, Panel, RouterPort, Running, ToastTone, display_name, page_frame,
-    server_buttons,
-};
+use super::server::{RouterPort, Running, server_buttons};
+use super::{NOT_SAVED, Page, Panel, display_name, page_frame};
 use crate::dashboard::{Kind, LogEntry, Series, SessionTrends};
 use crate::format::{byte_rate, clock, millis, scale_count, scale_millis};
 use crate::health::{self, Health};

@@ -1,9 +1,10 @@
 //! Arranging the Overview: each panel's frame, its collapsing, and Customize, where panels are
 //! dragged into place, resized, removed and added. What a panel shows is `overview.rs`'s.
 
+use super::Panel;
+use super::messages::Undo;
 use super::overview::kind_chip;
 use super::preferences_page::choice;
-use super::{Panel, Undo};
 use crate::dashboard::Kind;
 use crate::icons::{IconName, icon};
 use crate::overview_layout::{

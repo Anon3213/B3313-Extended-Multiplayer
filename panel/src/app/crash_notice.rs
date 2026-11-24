@@ -2,7 +2,8 @@
 //! or at once if part of the panel failed while it kept running, and keeping the crash reporter
 //! told of what the panel is doing.
 
-use super::{Panel, ToastTone, display_name, play_page::PlayState};
+use super::messages::ToastTone;
+use super::{Panel, display_name, play_page::PlayState};
 use crate::crash::{self, stem_time};
 use crate::format::{self, clock};
 use crate::icons::IconName;

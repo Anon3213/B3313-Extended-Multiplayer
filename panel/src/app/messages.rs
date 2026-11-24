@@ -1,20 +1,65 @@
 //! Messages about what the user did or what went wrong: the one showing at the corner, and the
 //! recent ones, kept so that one missed while looking away can still be read.
 
-use super::{Panel, Toast, ToastTone};
+use super::Panel;
+use crate::dashboard::{Kind, LogEntry};
 use crate::format;
 use crate::icons::{IconName, icon};
+use crate::overview_layout::{OverviewLayout, PanelState};
+use crate::preferences::Preferences;
+use crate::settings::SettingsForm;
 use crate::system;
 use crate::theme::{Theme, scaled};
 use crate::widgets::{Button, Tone, animate, dismiss_tooltips};
-use gpui::{AnyElement, Context, FontWeight, MouseButton, div, prelude::*};
+use gpui::{AnyElement, Context, FontWeight, MouseButton, Window, div, prelude::*};
 use std::collections::VecDeque;
+use std::net::IpAddr;
 use std::time::{Duration, Instant};
 
 /// How many recent messages are kept.
 const HISTORY: usize = 20;
 /// How long a message takes to appear or go.
 pub(super) const FADE: Duration = Duration::from_millis(150);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum ToastTone {
+    Success,
+    Error,
+}
+
+/// A short message about the last thing done, shown for a few seconds.
+#[derive(Debug)]
+pub(super) struct Toast {
+    tone: ToastTone,
+    text: String,
+    shown: Instant,
+    /// What its Undo button reverses, for an action the user may regret.
+    pub(super) undo: Option<Undo>,
+    /// Tells it from the one before, so that a new message fades in too.
+    serial: u64,
+    /// When it started fading away.
+    leaving: Option<Instant>,
+}
+
+/// Puts back what an action changed, offered in the message that reports the action: quicker
+/// than asking first, and it costs only the one who made the mistake.
+#[derive(Debug)]
+pub(super) enum Undo {
+    /// Lets in an address just banned.
+    Unban(IpAddr),
+    /// Refuses again an address just let in.
+    Reban(IpAddr),
+    /// Puts back a log just cleared.
+    RestoreLog(VecDeque<LogEntry>),
+    /// Puts back an Overview panel just removed, where it was.
+    RestorePanel(usize, PanelState),
+    /// Puts back the Overview's layout from before Reset.
+    RestoreLayout(OverviewLayout),
+    /// Puts back the preferences from before Reset all.
+    RestorePreferences(Box<Preferences>),
+    /// Puts back the settings as they were edited before Revert.
+    RestoreSettings(Box<SettingsForm>),
+}
 
 /// A message as it was shown, and when.
 #[derive(Debug)]
@@ -56,6 +101,93 @@ impl History {
 }
 
 impl Panel {
+    pub(super) fn show_toast(&mut self, tone: ToastTone, text: String) {
+        self.show_message(tone, text, None);
+    }
+
+    /// Reports what someone else did, as a moderator in the game: in the list behind the
+    /// bell at once, and as a message unless one with an Undo is up, which it would take
+    /// away for good. What the user does themself replaces that message, and so retires an
+    /// Undo that no longer fits what they have done since.
+    pub(super) fn report(&mut self, text: String) {
+        let holds_undo = self
+            .toast
+            .as_ref()
+            .is_some_and(|shown| shown.undo.is_some() && shown.leaving.is_none());
+        if holds_undo {
+            self.history.remember(ToastTone::Success, &text);
+        } else {
+            self.show_toast(ToastTone::Success, text);
+        }
+    }
+
+    /// Reports a ban or an unban, with its Undo. One the user asked for from the panel takes
+    /// the place of whatever message is up; one of someone else's doing, as a moderator's in
+    /// the game, does not take away a message whose own Undo the user may still want, and is
+    /// kept in the list behind the bell.
+    pub(super) fn report_ban(&mut self, text: String, undo: Undo) {
+        let is_own = self.pending.bans_asked > 0;
+        self.pending.bans_asked = self.pending.bans_asked.saturating_sub(1);
+        let holds_undo = self
+            .toast
+            .as_ref()
+            .is_some_and(|shown| shown.undo.is_some() && shown.leaving.is_none());
+        if holds_undo && !is_own {
+            self.history.remember(ToastTone::Success, &text);
+        } else {
+            self.show_undoable(text, undo);
+        }
+    }
+
+    /// Reports an action with an Undo button, shown longer so there is time to use it.
+    pub(super) fn show_undoable(&mut self, text: String, undo: Undo) {
+        self.show_message(ToastTone::Success, text, Some(undo));
+    }
+
+    fn show_message(&mut self, tone: ToastTone, text: String, undo: Option<Undo>) {
+        let serial = self.history.remember(tone, &text);
+        self.toast = Some(Toast {
+            tone,
+            text,
+            shown: Instant::now(),
+            undo,
+            serial,
+            leaving: None,
+        });
+    }
+
+    /// Reverses the action the message reports, and closes it.
+    fn undo(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(undo) = self.toast.take().and_then(|toast| toast.undo) else {
+            return;
+        };
+        match undo {
+            Undo::Unban(ip) => self.unban(ip, cx),
+            Undo::Reban(ip) => self.ban_now(ip),
+            Undo::RestoreLog(log) => {
+                self.dashboard.restore_log(log);
+                self.show_toast(ToastTone::Success, "Log restored".to_owned());
+            }
+            Undo::RestorePanel(at, panel) => self.restore_panel(at, panel, cx),
+            Undo::RestoreLayout(layout) => self.restore_layout(layout),
+            Undo::RestorePreferences(preferences) => {
+                self.preferences = *preferences;
+                self.apply_preferences(window, cx);
+                self.save_preferences();
+            }
+            Undo::RestoreSettings(form) => self.show_form(*form, cx),
+        }
+        cx.notify();
+    }
+
+    /// Logs a problem and shows it, alerting the user if the panel is in the background.
+    pub(super) fn report_problem(&mut self, message: String) {
+        self.dashboard
+            .note(Kind::Problem, message.clone(), Instant::now());
+        self.show_toast(ToastTone::Error, message);
+        self.alert_due = true;
+    }
+
     /// Takes the message at the corner away, fading it unless Windows' animations are off.
     pub(super) fn dismiss_toast(&mut self) {
         if !system::animations_on() {

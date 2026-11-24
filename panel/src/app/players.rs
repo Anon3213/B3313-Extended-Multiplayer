@@ -3,9 +3,11 @@
 
 use super::chat::{Chat, ChatBox};
 use super::column_resize::TableColumn;
+use super::messages::ToastTone;
 use super::overview::{activity_row, hint};
 use super::play_page::{role_icon, role_meaning};
-use super::{Panel, Selected, ToastTone, page_frame, server_buttons};
+use super::server::server_buttons;
+use super::{Panel, Selected, page_frame};
 use crate::columns::{self, Widths};
 use crate::dashboard::{Dashboard, Kind, PlayerColumn, PlayerRow};
 use crate::format::{byte_rate, clock, millis, scale_millis, scale_percent};

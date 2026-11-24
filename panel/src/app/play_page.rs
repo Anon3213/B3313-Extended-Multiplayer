@@ -2,8 +2,9 @@
 //! session goes once joined. The bridge runs on a thread of its own (`join.rs`).
 
 use super::chat::{Chat, ChatBox, ChatEntry, ChatLog};
+use super::messages::ToastTone;
 use super::overview::{hint, label};
-use super::{Page, Panel, ToastTone, before_dialog, display_name, page_frame};
+use super::{Page, Panel, before_dialog, display_name, page_frame};
 use crate::emulator::{Change, Install};
 use crate::format::{self, byte_rate, clock, millis};
 use crate::game_setup;

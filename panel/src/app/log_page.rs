@@ -1,8 +1,9 @@
 //! Everything the server reported, filtered by kind, searchable, and sortable by column.
 
 use super::column_resize::TableColumn;
+use super::messages::ToastTone;
 use super::overview::{hint, kind_chip, kind_icon};
-use super::{Panel, Selected, ToastTone, before_dialog, display_name, page_frame};
+use super::{Panel, Selected, before_dialog, display_name, page_frame};
 use crate::columns::{self, Widths};
 use crate::dashboard::{Dashboard, Kind, LogColumn, LogEntry};
 use crate::icons::{IconName, icon};
