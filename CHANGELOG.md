@@ -20,9 +20,9 @@ by itself at the next join, as the game changed too.
 - A bridge closed and started again beside a game still in the session no longer takes
   coins away that nobody collected.
 - Enemies other players run are no longer lost for a moment after your game hitches.
-- **The Play page has a Host password field**, for a server whose owner gave you one: join
-  with it and you are the host. Most players leave it empty. It is kept with the server
-  when the password is, and hidden in streamer mode.
+- **The Play page has a Host password field**, under **Advanced**, for a server whose owner
+  gave you one: join with it and you are the host. Most players never open it. It is kept
+  with the server when the password is, and hidden in streamer mode.
 - The Log and the chats scroll with the keyboard: reach one with Tab, then the arrows, Page
   Up, Page Down, Home and End.
 - The Log page no longer goes through its whole log every time it is drawn.

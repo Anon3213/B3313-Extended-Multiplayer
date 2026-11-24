@@ -86,8 +86,9 @@ default and allowed range. Without `--config`, every setting keeps its default. 
 server starts, it prints a join code (your address, `#`, and the key) to give your players.
 
 A server run this way has no host until you name one with `host <player>`, or a player joins
-with its `host_password`: they type it under **Host password** on the panel's **Play** page,
-or give it to the command-line bridge, `b3313-bridge` (run it without arguments for help).
+with its `host_password`: they open **Advanced** on the panel's **Play** page and type it
+under **Host password**, or give it to the command-line bridge, `b3313-bridge` (run it
+without arguments for help).
 
 ## Moderating a session
 

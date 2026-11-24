@@ -144,6 +144,9 @@ pub(super) struct Play {
     /// players have none. It is the field's for whatever server is joined next, so it is
     /// emptied when another server is filled in, and not sent to a server it was not for.
     host_password: SecretField,
+    /// Whether the player opened "Advanced", where the host password is: see
+    /// `Panel::render_advanced`.
+    advanced_open: bool,
     remember_password: bool,
     /// The emulator's processes, as last looked, and when.
     emulators: Vec<u32>,
@@ -236,6 +239,7 @@ impl Play {
             kept_passwords: None,
             password,
             host_password,
+            advanced_open: last.is_some_and(|server| server.host_password.is_some()),
             remember_password: last.is_some_and(SavedServer::keeps_a_password),
             emulators: Vec::new(),
             looked: None,
@@ -723,6 +727,8 @@ impl Panel {
             cx,
         );
         self.play.remember_password = saved.keeps_a_password();
+        // Left open once the field is emptied by hand, so it does not fold under the cursor.
+        self.play.advanced_open |= saved.host_password.is_some();
         cx.notify();
     }
 
@@ -1279,8 +1285,7 @@ impl Panel {
                                 ))
                             }),
                     )
-                    .child(self.secret_field(theme, Secret::Session, cx))
-                    .child(self.secret_field(theme, Secret::Host, cx)),
+                    .child(self.secret_field(theme, Secret::Session, cx)),
             )
             .child(switch(
                 theme,
@@ -1294,7 +1299,46 @@ impl Panel {
                     cx.notify();
                 }),
             ))
+            .child(self.render_advanced(theme, cx))
             .children(self.render_saved_servers(theme, cx))
+    }
+
+    /// The host password, folded away under "Advanced", as most players have none. It is
+    /// open whenever the field holds something, as after a recent server filled it in: what
+    /// Join would send to a server is never out of sight.
+    fn render_advanced(&self, theme: &Theme, cx: &mut Context<Self>) -> Div {
+        let is_filled = !self.play.host_password.input.read(cx).text().is_empty();
+        let is_open = self.play.advanced_open || is_filled;
+        let toggle = Button::new("play-advanced", "Advanced")
+            .small()
+            .tone(Tone::Quiet)
+            .icon(if is_open {
+                IconName::ChevronDown
+            } else {
+                IconName::ChevronRight
+            })
+            .enabled(!is_filled)
+            .tooltip(if is_filled {
+                "Stays open while a host password is filled in"
+            } else {
+                "The host password, for a server whose owner gave you one"
+            })
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.play.advanced_open = !this.play.advanced_open;
+                cx.notify();
+            }));
+        div()
+            .flex()
+            .flex_col()
+            .gap_3()
+            .child(div().flex().child(toggle))
+            .when(is_open, |advanced| {
+                advanced.child(
+                    div()
+                        .flex()
+                        .child(self.secret_field(theme, Secret::Host, cx)),
+                )
+            })
     }
 
     /// Servers joined before, to fill in with a click, or forget.
