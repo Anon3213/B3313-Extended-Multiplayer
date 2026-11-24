@@ -8,11 +8,12 @@ use crate::format;
 use crate::icons::{IconName, icon};
 use crate::text_input::TextInput;
 use crate::theme::{MONO, Theme, scaled};
+use crate::widgets::{FocusRing as _, SCROLL_LINE, ScrollKey};
 use b3313_protocol::{PlayerId, Role};
 use gpui::{
-    AnyElement, Context, DispatchPhase, Div, Entity, FontWeight, MouseButton, MouseDownEvent,
-    MouseMoveEvent, MouseUpEvent, Pixels, ScrollHandle, ScrollWheelEvent, SharedString, canvas,
-    div, point, prelude::*, px,
+    AnyElement, Context, DispatchPhase, Div, Entity, FontWeight, KeyDownEvent, MouseButton,
+    MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, ScrollHandle, ScrollWheelEvent,
+    SharedString, canvas, div, point, prelude::*, px,
 };
 use std::collections::VecDeque;
 use std::time::Duration;
@@ -237,7 +238,8 @@ impl Panel {
     /// The mouse wheel over the box scrolls only its list, not the page as well, while the
     /// list has lines out of view; with none, the wheel is the page's, so the box is no dead
     /// spot in it. A click in the box selects it, shown by its border, and then it keeps the
-    /// wheel even so. A click or a turn of the wheel anywhere else lets go.
+    /// wheel even so. A click or a turn of the wheel anywhere else lets go. With the focus,
+    /// the list scrolls by the arrow keys, Page Up and Down, Home and End.
     pub(super) fn chat_box(
         &self,
         theme: &Theme,
@@ -248,11 +250,28 @@ impl Panel {
     ) -> AnyElement {
         let log = self.chat_log(chat);
         log.follow_newest();
+        let accent = theme.accent;
         let list = div()
             .id(id)
             .overflow_y_scroll()
             .track_scroll(&log.scroll)
             .h(scaled(LIST_HEIGHT))
+            .rounded_t_md()
+            .border_1()
+            .border_color(gpui::transparent_black())
+            // Reached with Tab or a click, and then scrolled with the keys. Scrolled up, it
+            // stays there, and at its end again it follows the newest line: `follow_newest`
+            // goes by where the list is, however it came there.
+            .tab_index(0)
+            .focus_ring(move |style| style.border_color(accent))
+            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
+                if let Some(key) = ScrollKey::pressed(event) {
+                    cx.stop_propagation();
+                    let line = scaled(SCROLL_LINE).to_pixels(window.rem_size());
+                    key.scroll_list(&this.chat_log(chat).scroll, line);
+                    cx.notify();
+                }
+            }))
             .pl_3()
             // Clear of the scrollbar.
             .pr_4()

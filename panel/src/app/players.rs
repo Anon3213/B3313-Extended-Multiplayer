@@ -7,7 +7,7 @@ use super::overview::{activity_row, hint};
 use super::play_page::{role_icon, role_meaning};
 use super::{Panel, Selected, ToastTone, page_frame, server_buttons};
 use crate::columns::{self, Widths};
-use crate::dashboard::{Kind, PlayerColumn, PlayerRow};
+use crate::dashboard::{Dashboard, Kind, PlayerColumn, PlayerRow};
 use crate::format::{byte_rate, clock, millis, scale_millis, scale_percent};
 use crate::health::{self, Health};
 use crate::icons::{IconName, icon};
@@ -22,6 +22,7 @@ use gpui::{
     AnyElement, App, ClipboardItem, Context, Div, FontWeight, SharedString, Window, div,
     prelude::*, px,
 };
+use std::rc::Rc;
 
 /// The columns' widths are the user's (`columns`), and the address column takes the rest. The
 /// least it has: room for an address cut short, which is whole on hover.
@@ -75,6 +76,19 @@ const FLAGS_MEANING: &str = "Times the server flagged unusual movement or imposs
 const WORLD_MEANING: &str =
     "Their game gave the session its world: the shared state everyone else's games follow.";
 
+/// The newest entries about the player in `dashboard`'s log, newest first, by their places
+/// in it. Their link reports are charted above the list, and left out of it as the Overview
+/// leaves them out too.
+fn pick_activity(dashboard: &Dashboard, selected: Selected) -> Vec<usize> {
+    dashboard
+        .player_log(selected.id, selected.joined_at)
+        .rev()
+        .filter(|(_, entry)| entry.kind != Kind::Report)
+        .take(ACTIVITY)
+        .map(|(place, _)| place)
+        .collect()
+}
+
 impl Panel {
     pub(super) fn render_players(
         &mut self,
@@ -82,7 +96,8 @@ impl Panel {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         if let Some(selected) = self.selected {
-            return self.render_player_detail(selected, cx);
+            let activity = self.player_activity(selected);
+            return self.render_player_detail(selected, &activity, cx);
         }
         let theme = *cx.global::<Theme>();
         let count = self.dashboard.player_count();
@@ -248,7 +263,23 @@ impl Panel {
             .into_any_element()
     }
 
-    fn render_player_detail(&self, selected: Selected, cx: &mut Context<Self>) -> AnyElement {
+    /// What the player whose details are open did, as their details list it, by each
+    /// entry's place in the log: found again only when the log or the player has changed.
+    fn player_activity(&mut self, selected: Selected) -> Rc<[usize]> {
+        let dashboard = &self.dashboard;
+        let generation = dashboard.log_generation();
+        let picked = &mut self.log_list.activity;
+        picked.get(generation, selected, |selected| {
+            pick_activity(dashboard, *selected)
+        })
+    }
+
+    fn render_player_detail(
+        &self,
+        selected: Selected,
+        activity: &[usize],
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let theme = *cx.global::<Theme>();
         let id = selected.id;
         let number = id.get();
@@ -297,24 +328,15 @@ impl Panel {
                 )
             },
         );
-        let activity: Vec<AnyElement> = {
-            // Their link reports are charted above, as the overview leaves them out too.
-            let mut entries: Vec<_> = self
-                .dashboard
-                .player_log(id, selected.joined_at)
-                .filter(|entry| entry.kind != Kind::Report)
-                .collect();
-            entries.reverse();
-            entries
-                .into_iter()
-                .take(ACTIVITY)
-                .enumerate()
-                .map(|(index, entry)| {
-                    let shown = (self.entry_time(entry), self.entry_text(entry));
-                    activity_row(&theme, index, entry, shown, self.preferences.compact)
-                })
-                .collect()
-        };
+        let activity: Vec<AnyElement> = activity
+            .iter()
+            .filter_map(|&place| self.dashboard.log().get(place))
+            .enumerate()
+            .map(|(index, entry)| {
+                let shown = (self.entry_time(entry), self.entry_text(entry));
+                activity_row(&theme, index, entry, shown, self.preferences.compact)
+            })
+            .collect();
         let empty = activity.is_empty();
         let body = div()
             .flex()
@@ -940,4 +962,55 @@ fn header_row(
         .child(traffic)
         .child(flags)
         .into_any_element()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ACTIVITY, Selected, pick_activity};
+    use crate::dashboard::{Dashboard, Kind};
+    use b3313_protocol::metrics::{LinkReport, Losses, Timings, Traffic};
+    use b3313_protocol::{HitKind, PlayerId};
+    use b3313_server::Event;
+    use std::net::{Ipv4Addr, SocketAddr};
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn a_players_details_list_what_they_did_newest_first_without_their_link_reports() {
+        let (Some(luigi), Some(peach)) = (PlayerId::new(2), PlayerId::new(4)) else {
+            unreachable!("the test's player numbers");
+        };
+        let address = SocketAddr::from((Ipv4Addr::LOCALHOST, 9000));
+        let now = Instant::now();
+        let mut dashboard = Dashboard::new(now);
+        let link = LinkReport {
+            elapsed: Duration::from_secs(10),
+            sent: Traffic::default(),
+            received: Traffic::default(),
+            losses: Losses::default(),
+            round_trips: Timings::default(),
+            gaps: Timings::default(),
+        };
+        let hit = Event::Hit {
+            attacker: peach,
+            target: luigi,
+            kind: HitKind::Punch,
+        };
+        dashboard.apply(&Event::Joined(luigi, address), now);
+        dashboard.apply(&Event::Joined(peach, address), now);
+        dashboard.apply(&Event::Link(luigi, Box::new(link)), now);
+        dashboard.note(Kind::Problem, "about nobody".to_owned(), now);
+        dashboard.apply(&hit, now);
+        let selected = Selected {
+            id: luigi,
+            joined_at: Duration::ZERO,
+        };
+        assert_eq!(pick_activity(&dashboard, selected), [4, 0]);
+        // Only the newest, however much there is.
+        for _ in 0..=ACTIVITY {
+            dashboard.apply(&hit, now);
+        }
+        let newest = pick_activity(&dashboard, selected);
+        assert_eq!(newest.len(), ACTIVITY);
+        assert_eq!(newest.first(), Some(&(dashboard.log().len() - 1)));
+    }
 }

@@ -262,7 +262,7 @@ pub fn server_parts(server: &str) -> (&str, Option<PublicKey>) {
     split_join_code(server).unwrap_or((server, None))
 }
 
-/// A server the player joined, and its password if they asked for it to be remembered.
+/// A server the player joined, and its passwords if they asked for them to be remembered.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SavedServer {
     /// As it is joined: the address, and after a `#` the server's key once it is known, from
@@ -270,6 +270,26 @@ pub struct SavedServer {
     pub address: String,
     /// Kept in the preferences file as plain text, so only when the player chooses.
     pub password: Option<String>,
+    /// The server's host password, if its owner gave the player one to join as the host
+    /// with. Kept as the password is, and only when that is.
+    pub host_password: Option<String>,
+}
+
+impl SavedServer {
+    /// Whether either of its passwords is kept with it.
+    #[must_use]
+    pub const fn keeps_a_password(&self) -> bool {
+        self.password.is_some() || self.host_password.is_some()
+    }
+}
+
+/// The passwords a server is joined with, as the player typed them; an empty one is none.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Passwords<'a> {
+    /// What lets a player into the session.
+    pub session: &'a str,
+    /// What makes the player who joins with it the host.
+    pub host: &'a str,
 }
 
 /// The page shown when the panel opens.
@@ -469,12 +489,18 @@ impl Preferences {
                 self.servers.push(SavedServer {
                     address: value.to_owned(),
                     password: None,
+                    host_password: None,
                 });
             }
-            // The password of the server on the line before.
+            // The passwords of the server on the line before them.
             "server_password" if !value.is_empty() => {
                 if let Some(server) = self.servers.last_mut() {
                     server.password = Some(value.to_owned());
+                }
+            }
+            "server_host_password" if !value.is_empty() => {
+                if let Some(server) = self.servers.last_mut() {
+                    server.host_password = Some(value.to_owned());
                 }
             }
             "reopen_settings" => set_flag(&mut self.reopen_settings, value),
@@ -585,15 +611,19 @@ impl Preferences {
             if let Some(password) = &server.password {
                 let _ = writeln!(text, "server_password = {password}");
             }
+            if let Some(password) = &server.host_password {
+                let _ = writeln!(text, "server_host_password = {password}");
+            }
         }
         text
     }
 
-    /// Puts `address` first among the recent servers, with its password if the player wants it
-    /// remembered, or forgetting any it had. It takes the place of what was kept of the same
-    /// server: under the same address, or under another with the same key, as a server whose
-    /// address has changed is still that server.
-    pub fn remember_server(&mut self, address: &str, password: Option<&str>) {
+    /// Puts `address` first among the recent servers, with its passwords if the player wants
+    /// them remembered, or forgetting any it had. It takes the place of what was kept of the
+    /// same server: under the same address, or under another with the same key, as a server
+    /// whose address has changed is still that server.
+    pub fn remember_server(&mut self, address: &str, passwords: Option<Passwords<'_>>) {
+        let kept = |password: &str| (!password.is_empty()).then(|| password.to_owned());
         let (place, key) = server_parts(address);
         self.servers.retain(|server| {
             let (kept_place, kept_key) = server_parts(&server.address);
@@ -603,7 +633,8 @@ impl Preferences {
             0,
             SavedServer {
                 address: address.to_owned(),
-                password: password.filter(|p| !p.is_empty()).map(str::to_owned),
+                password: passwords.and_then(|passwords| kept(passwords.session)),
+                host_password: passwords.and_then(|passwords| kept(passwords.host)),
             },
         );
         self.servers.truncate(RECENT_SERVERS);
@@ -781,9 +812,9 @@ pub fn path() -> Option<PathBuf> {
 mod tests {
     use super::StartPage;
     use super::{
-        Preferences, RECENT_FILES, SIDEBAR_SNAP_WIDTH, SIDEBAR_WIDTH_DEFAULT, SIDEBAR_WIDTH_MAX,
-        SIDEBAR_WIDTH_MIN, TOOLTIP_SECONDS_DEFAULT, WindowPlacement, dragged_sidebar,
-        sidebar_width,
+        Passwords, Preferences, RECENT_FILES, SIDEBAR_SNAP_WIDTH, SIDEBAR_WIDTH_DEFAULT,
+        SIDEBAR_WIDTH_MAX, SIDEBAR_WIDTH_MIN, TOOLTIP_SECONDS_DEFAULT, WindowPlacement,
+        dragged_sidebar, sidebar_width,
     };
     use crate::columns::Widths;
     use crate::dashboard::{Kind, LogColumn, PlayerColumn};
@@ -796,6 +827,10 @@ mod tests {
     use b3313_protocol::Outfit;
     use b3313_protocol::secure::{SecureError, ServerKey, join_code};
     use std::path::{Path, PathBuf};
+
+    fn passwords<'a>(session: &'a str, host: &'a str) -> Passwords<'a> {
+        Passwords { session, host }
+    }
 
     #[test]
     fn preferences_read_back_and_anything_odd_keeps_its_default() {
@@ -864,7 +899,10 @@ mod tests {
             chat_seconds: 30,
             servers: Vec::new(),
         };
-        preferences.remember_server("example.net:41313", Some("a=b c"));
+        preferences.remember_server("example.net:41313", Some(passwords("a=b c", "")));
+        // With a host password too, and with one alone, for a server anyone may join.
+        preferences.remember_server("203.0.113.9:41313", Some(passwords("in", "a = crown")));
+        preferences.remember_server("open.example:41313", Some(passwords("", "crown")));
         preferences.remember_server("192.168.1.20:41313", None);
         preferences.remember_file(Path::new(r"C:\servers\a b.conf"));
         preferences.remember_file(Path::new(r"C:\servers\other.conf"));
@@ -988,18 +1026,33 @@ mod tests {
     }
 
     #[test]
-    fn recent_servers_keep_a_password_only_when_asked() {
+    fn recent_servers_keep_their_passwords_only_when_asked() {
         let mut preferences = Preferences::default();
-        preferences.remember_server("a:1", Some("secret"));
+        preferences.remember_server("a:1", Some(passwords("secret", "crown")));
         preferences.remember_server("b:2", None);
-        // Joining again without remembering the password forgets it.
+        let saved = |preferences: &Preferences| -> Vec<(String, Option<String>, Option<String>)> {
+            let servers = preferences.servers.iter().cloned();
+            servers
+                .map(|server| (server.address, server.password, server.host_password))
+                .collect()
+        };
+        let kept = |password: &str| Some(password.to_owned());
+        assert_eq!(
+            saved(&preferences),
+            [
+                ("b:2".to_owned(), None, None),
+                ("a:1".to_owned(), kept("secret"), kept("crown"))
+            ]
+        );
+        // Joining again without remembering the passwords forgets both.
         preferences.remember_server("a:1", None);
-        let saved: Vec<(&str, Option<&str>)> = preferences
-            .servers
-            .iter()
-            .map(|server| (server.address.as_str(), server.password.as_deref()))
-            .collect();
-        assert_eq!(saved, [("a:1", None), ("b:2", None)]);
+        assert_eq!(
+            saved(&preferences),
+            [
+                ("a:1".to_owned(), None, None),
+                ("b:2".to_owned(), None, None)
+            ]
+        );
         for n in 0..10 {
             preferences.remember_server(&format!("host{n}:1"), None);
         }

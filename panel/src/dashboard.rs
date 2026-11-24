@@ -252,6 +252,9 @@ pub struct Dashboard {
     log: VecDeque<LogEntry>,
     /// How many entries of each kind the log holds, in `Kind::ALL`'s order.
     kind_counts: [usize; Kind::ALL.len()],
+    /// Another number whenever the log changes, so that what was worked out of it, as which
+    /// entries a page shows, can be kept until it does.
+    log_generation: u64,
 }
 
 /// The Players table's columns, by which it can be sorted.
@@ -427,6 +430,7 @@ impl Dashboard {
             trends: SessionTrends::default(),
             log: VecDeque::new(),
             kind_counts: [0; Kind::ALL.len()],
+            log_generation: 0,
         }
     }
 
@@ -545,6 +549,7 @@ impl Dashboard {
         }
         let at = self.since_opened(now);
         self.count_kind(kind, true);
+        self.log_changed();
         self.log.push_back(LogEntry {
             at,
             kind,
@@ -552,6 +557,18 @@ impl Dashboard {
             text,
             players,
         });
+    }
+
+    /// Notes that the log is no longer what it was: every change to it comes through here.
+    const fn log_changed(&mut self) {
+        self.log_generation = self.log_generation.wrapping_add(1);
+    }
+
+    /// A number that is another one after every change to the log: an entry added, which at
+    /// the log's capacity also moves every entry one place, or the log cleared or put back.
+    #[must_use]
+    pub const fn log_generation(&self) -> u64 {
+        self.log_generation
     }
 
     /// Keeps the count of each kind in step with the log, so the filters need not count it.
@@ -622,12 +639,17 @@ impl Dashboard {
         self.players.get(&id.get())
     }
 
-    /// Entries about `id` since `since`, so a player number used again by someone later does
-    /// not mix them up with whoever had it before.
-    pub fn player_log(&self, id: PlayerId, since: Duration) -> impl Iterator<Item = &LogEntry> {
+    /// Entries about `id` since `since`, each with its place in the log, so a player number
+    /// used again by someone later does not mix them up with whoever had it before.
+    pub fn player_log(
+        &self,
+        id: PlayerId,
+        since: Duration,
+    ) -> impl DoubleEndedIterator<Item = (usize, &LogEntry)> {
         self.log
             .iter()
-            .filter(move |entry| entry.at >= since && entry.players.contains(&id))
+            .enumerate()
+            .filter(move |(_, entry)| entry.at >= since && entry.players.contains(&id))
     }
 
     pub fn players(&self) -> impl Iterator<Item = &PlayerRow> {
@@ -666,6 +688,7 @@ impl Dashboard {
     /// Takes the whole log away, to give back with `restore_log` if the user undoes clearing it.
     pub fn take_log(&mut self) -> VecDeque<LogEntry> {
         self.kind_counts = [0; Kind::ALL.len()];
+        self.log_changed();
         std::mem::take(&mut self.log)
     }
 
@@ -677,6 +700,7 @@ impl Dashboard {
         earlier.drain(..excess);
         self.log = earlier;
         self.recount_kinds();
+        self.log_changed();
     }
 
     #[must_use]
@@ -878,11 +902,12 @@ mod tests {
         let since = dashboard
             .player(id(2))
             .map_or(Duration::ZERO, |row| row.joined_at);
-        let texts: Vec<&str> = dashboard
+        // The second joining of number 2 and the hit, by their places in the log.
+        let places: Vec<usize> = dashboard
             .player_log(id(2), since)
-            .map(|entry| entry.text.as_str())
+            .map(|(place, _)| place)
             .collect();
-        assert_eq!(texts.len(), 2, "{texts:?}");
+        assert_eq!(places, [2, 4]);
     }
 
     #[test]
@@ -931,6 +956,31 @@ mod tests {
             .filter(|e| e.kind == Kind::Session)
             .count();
         assert_eq!(dashboard.kind_count(Kind::Session), sessions);
+    }
+
+    #[test]
+    fn every_change_to_the_log_gives_it_another_generation() {
+        let now = Instant::now();
+        let mut dashboard = Dashboard::new(now);
+        let mut seen = vec![dashboard.log_generation()];
+        let mut changed = |dashboard: &Dashboard, what: &str| {
+            let generation = dashboard.log_generation();
+            assert!(!seen.contains(&generation), "{what} left it as it was");
+            seen.push(generation);
+        };
+        dashboard.note(Kind::Session, "noted".to_owned(), now);
+        changed(&dashboard, "a note");
+        dashboard.apply(&Event::Joined(id(1), address(9001)), now);
+        changed(&dashboard, "an event");
+        let taken = dashboard.take_log();
+        changed(&dashboard, "clearing");
+        dashboard.restore_log(taken);
+        changed(&dashboard, "restoring");
+        // Looking at it changes nothing, nor does the session's end, which keeps the log.
+        let before = dashboard.log_generation();
+        let _ = dashboard.log().len();
+        dashboard.server_stopped();
+        assert_eq!(dashboard.log_generation(), before);
     }
 
     #[test]

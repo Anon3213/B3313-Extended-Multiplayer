@@ -11,7 +11,7 @@ use crate::icons::{IconName, icon};
 use crate::join::{Bridge, Hosting, Notice, Request, read_server};
 use crate::network::read_invite;
 use crate::page_layout::ArrangedPage;
-use crate::preferences::{SavedServer, server_parts};
+use crate::preferences::{Passwords, SavedServer, server_parts};
 use crate::system;
 use crate::text_input::{InputEvent, TextInput};
 use crate::theme::{MONO, Theme, scaled};
@@ -45,6 +45,60 @@ enum GameFile {
     B3313Patch,
     /// A multiplayer ROM the player built themself, in place of the one made here.
     OwnRom,
+}
+
+/// One of the two passwords the Server card takes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Secret {
+    /// The session's, which lets a player in.
+    Session,
+    /// The host's, which makes the player who joins with it the host.
+    Host,
+}
+
+impl Secret {
+    /// The field's label, the id of its Show button, and what is said under it, if anything.
+    const fn wording(self) -> (&'static str, &'static str, Option<&'static str>) {
+        match self {
+            Self::Session => ("Password", "show-play-password", None),
+            Self::Host => (
+                "Host password",
+                "show-play-host-password",
+                Some(
+                    "Only if the server's owner gave you one: joining with it puts you in \
+                     charge of the session, as its host. Most players leave this empty.",
+                ),
+            ),
+        }
+    }
+}
+
+/// A password's field, and whether it shows what is typed and not dots.
+struct SecretField {
+    input: Entity<TextInput>,
+    shown: bool,
+}
+
+impl SecretField {
+    /// A field holding `text`, as dots.
+    fn new(text: Option<&str>, placeholder: &'static str, cx: &mut Context<Panel>) -> Self {
+        let input = cx.new(|cx| {
+            let mut input = TextInput::new(cx, text.unwrap_or_default(), placeholder);
+            input.set_masked(true, cx);
+            input
+        });
+        Self {
+            input,
+            shown: false,
+        }
+    }
+
+    /// Shows what is typed, or dots again.
+    fn show(&mut self, shown: bool, cx: &mut Context<Panel>) {
+        self.shown = shown;
+        self.input
+            .update(cx, |input, cx| input.set_masked(!shown, cx));
+    }
 }
 
 /// Where the session is.
@@ -81,11 +135,14 @@ pub(super) struct Play {
     /// The key of the server filled in, from an invite or a recent server, and the address it
     /// came with: it stands for as long as that is the address in the field.
     key: Option<(String, PublicKey)>,
-    /// The password to keep with the server being joined, once it is joined, if the player
-    /// asked for it to be remembered.
-    kept_password: Option<String>,
-    password: Entity<TextInput>,
-    show_password: bool,
+    /// The passwords to keep with the server being joined, once it is joined, if the player
+    /// asked for them to be remembered: the session's, then the host's.
+    kept_passwords: Option<(String, String)>,
+    password: SecretField,
+    /// The server's host password, which its owner gives to whoever is to be the host; most
+    /// players have none. It is the field's for whatever server is joined next, so it is
+    /// emptied when another server is filled in, and not sent to a server it was not for.
+    host_password: SecretField,
     remember_password: bool,
     /// The emulator's processes, as last looked, and when.
     emulators: Vec<u32>,
@@ -136,18 +193,22 @@ impl Play {
     pub(super) fn new(last: Option<&SavedServer>, name: &str, cx: &mut Context<Panel>) -> Self {
         let (place, key) = server_parts(last.map_or("", |server| server.address.as_str()));
         let key = key.map(|key| (place.to_owned(), key));
-        let password = last.and_then(|server| server.password.as_deref());
         let address = cx.new(|cx| TextInput::new(cx, place, "Such as 203.0.113.7:41313"));
-        let password = cx.new(|cx| {
-            let mut input =
-                TextInput::new(cx, password.unwrap_or_default(), "If the server has one");
-            input.set_masked(true, cx);
-            input
-        });
+        let password = SecretField::new(
+            last.and_then(|server| server.password.as_deref()),
+            "If the server has one",
+            cx,
+        );
+        let host_password = SecretField::new(
+            last.and_then(|server| server.host_password.as_deref()),
+            "Most players have none",
+            cx,
+        );
         let name = cx.new(|cx| TextInput::new(cx, name, "Up to 16 letters; others see it"));
         let say = cx.new(|cx| TextInput::new(cx, "", "Say something, or /help"));
         // Enter in the server's and the name's fields joins, and in the chat's sends.
-        let mut subscriptions: Vec<Subscription> = [&address, &password, &name]
+        let joining = [&address, &password.input, &host_password.input, &name];
+        let mut subscriptions: Vec<Subscription> = joining
             .into_iter()
             .map(|input| {
                 cx.subscribe(input, |this: &mut Panel, _, event, cx| {
@@ -171,10 +232,10 @@ impl Play {
         Self {
             address,
             key,
-            kept_password: None,
+            kept_passwords: None,
             password,
-            show_password: false,
-            remember_password: last.is_some_and(|server| server.password.is_some()),
+            host_password,
+            remember_password: last.is_some_and(SavedServer::keeps_a_password),
             emulators: Vec::new(),
             looked: None,
             chosen: None,
@@ -256,11 +317,26 @@ impl Play {
         &self.address
     }
 
-    /// Shows the password as dots again, as streamer mode keeps it.
+    /// Shows the passwords as dots again, as streamer mode keeps them.
     pub(super) fn hide_password(&mut self, cx: &mut Context<Panel>) {
-        self.show_password = false;
-        self.password
-            .update(cx, |input, cx| input.set_masked(true, cx));
+        for secret in [Secret::Session, Secret::Host] {
+            self.secret_mut(secret).show(false, cx);
+        }
+    }
+
+    /// The field `secret` is typed in.
+    const fn secret(&self, secret: Secret) -> &SecretField {
+        match secret {
+            Secret::Session => &self.password,
+            Secret::Host => &self.host_password,
+        }
+    }
+
+    const fn secret_mut(&mut self, secret: Secret) -> &mut SecretField {
+        match secret {
+            Secret::Session => &mut self.password,
+            Secret::Host => &mut self.host_password,
+        }
     }
 
     fn note(&mut self, text: String) {
@@ -438,9 +514,12 @@ impl Panel {
             since: Instant::now(),
         };
         let server = self.play.server.clone();
-        let password = self.play.kept_password.clone();
-        self.preferences
-            .remember_server(&server, password.as_deref());
+        let passwords = self
+            .play
+            .kept_passwords
+            .as_ref()
+            .map(|(session, host)| Passwords { session, host });
+        self.preferences.remember_server(&server, passwords);
         self.save_preferences();
         let (place, _) = server_parts(&self.play.server);
         let text = format!("Joined {place} as player {}", player.get());
@@ -496,8 +575,12 @@ impl Panel {
             .sm64_rom
             .clone()
             .zip(self.preferences.b3313_patch.clone());
-        let password = self.play.password.read(cx).text().to_owned();
-        self.play.kept_password = self.play.remember_password.then(|| password.clone());
+        let typed = |secret| self.play.secret(secret).input.read(cx).text().to_owned();
+        let (password, host_password) = (typed(Secret::Session), typed(Secret::Host));
+        self.play.kept_passwords = self
+            .play
+            .remember_password
+            .then(|| (password.clone(), host_password.clone()));
         // Known to streamer mode from now, though it is not yet among the recent ones.
         if !self.play.joined.contains(&server) {
             self.play.joined.push(server.clone());
@@ -519,6 +602,7 @@ impl Panel {
             chat_seconds: self.preferences.chat_seconds,
             server: server.clone(),
             password,
+            host_password,
             name,
             hosting,
         };
@@ -582,9 +666,9 @@ impl Panel {
         };
         let password = invite.password.unwrap_or_default();
         self.fill_server(&invite.address, cx);
-        self.play
-            .password
-            .update(cx, |input, cx| input.set_text(&password, cx));
+        // An invite carries no host password, and one typed for another server is not this
+        // server's to be sent.
+        self.fill_passwords(&password, "", cx);
         let message = match (self.play.key.is_some(), password.is_empty()) {
             (true, true) => "Invite pasted, with the server's key",
             (true, false) => "Invite pasted, with the server's key and its password",
@@ -621,14 +705,23 @@ impl Panel {
         }
     }
 
+    /// Puts the session's password and the host's in their fields, in place of what they held.
+    fn fill_passwords(&self, session: &str, host: &str, cx: &mut Context<Self>) {
+        for (secret, text) in [(Secret::Session, session), (Secret::Host, host)] {
+            let input = &self.play.secret(secret).input;
+            input.update(cx, |input, cx| input.set_text(text, cx));
+        }
+    }
+
     /// Fills the fields from a recent server.
     fn use_saved_server(&mut self, saved: &SavedServer, cx: &mut Context<Self>) {
-        let password = saved.password.clone().unwrap_or_default();
         self.fill_server(&saved.address, cx);
-        self.play
-            .password
-            .update(cx, |input, cx| input.set_text(&password, cx));
-        self.play.remember_password = saved.password.is_some();
+        self.fill_passwords(
+            saved.password.as_deref().unwrap_or_default(),
+            saved.host_password.as_deref().unwrap_or_default(),
+            cx,
+        );
+        self.play.remember_password = saved.keeps_a_password();
         cx.notify();
     }
 
@@ -1119,32 +1212,45 @@ impl Panel {
         if small { button.small() } else { button }.into_any_element()
     }
 
-    /// The server's address and password, whether the password is kept, and recent servers.
-    pub(super) fn server_fields(&self, theme: &Theme, cx: &mut Context<Self>) -> Div {
-        let show = Button::new(
-            "show-play-password",
-            if self.play.show_password {
-                "Hide"
+    /// One of the server's two passwords: its label, its field with the button that shows
+    /// what is typed, and what is said under it.
+    fn secret_field(&self, theme: &Theme, secret: Secret, cx: &mut Context<Self>) -> Div {
+        let (title, show_id, about) = secret.wording();
+        let field = self.play.secret(secret);
+        let show = Button::new(show_id, if field.shown { "Hide" } else { "Show" })
+            .tone(Tone::Quiet)
+            .small()
+            .enabled(!self.preferences.streamer_mode)
+            .tooltip(if self.preferences.streamer_mode {
+                "Streamer mode keeps the password hidden"
             } else {
-                "Show"
-            },
-        )
-        .tone(Tone::Quiet)
-        .small()
-        .enabled(!self.preferences.streamer_mode)
-        .tooltip(if self.preferences.streamer_mode {
-            "Streamer mode keeps the password hidden"
-        } else {
-            "Shows or hides the password"
-        })
-        .on_click(cx.listener(|this, _, _, cx| {
-            this.play.show_password = !this.play.show_password;
-            let masked = !this.play.show_password;
-            this.play
-                .password
-                .update(cx, |input, cx| input.set_masked(masked, cx));
-            cx.notify();
-        }));
+                "Shows or hides the password"
+            })
+            .on_click(cx.listener(move |this, _, _, cx| {
+                let field = this.play.secret_mut(secret);
+                field.show(!field.shown, cx);
+                cx.notify();
+            }));
+        div()
+            .flex()
+            .flex_col()
+            .gap_1p5()
+            .flex_1()
+            .min_w(scaled(240.))
+            .child(label(theme, title))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .child(div().flex_1().child(field.input.clone()))
+                    .child(show),
+            )
+            .children(about.map(|about| hint(theme, about)))
+    }
+
+    /// The server's address and passwords, whether the passwords are kept, and recent servers.
+    pub(super) fn server_fields(&self, theme: &Theme, cx: &mut Context<Self>) -> Div {
         let key_known = server_parts(&self.server_to_join(cx)).1.is_some();
         div()
             .flex()
@@ -1172,30 +1278,15 @@ impl Panel {
                                 ))
                             }),
                     )
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .gap_1p5()
-                            .flex_1()
-                            .min_w(scaled(240.))
-                            .child(label(theme, "Password"))
-                            .child(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .gap_2()
-                                    .child(div().flex_1().child(self.play.password.clone()))
-                                    .child(show),
-                            ),
-                    ),
+                    .child(self.secret_field(theme, Secret::Session, cx))
+                    .child(self.secret_field(theme, Secret::Host, cx)),
             )
             .child(switch(
                 theme,
                 "remember-password",
                 "Remember the password for this server",
-                "Saved with your preferences in plain text, so only on a PC you trust. Off, you \
-                 paste it each time.",
+                "Saved with your preferences in plain text, and the host password with it if \
+                 you gave one, so only on a PC you trust. Off, you paste it each time.",
                 self.play.remember_password,
                 cx.listener(|this, _, _, cx| {
                     this.play.remember_password = !this.play.remember_password;
@@ -1242,21 +1333,10 @@ impl Panel {
         let fill = saved.clone();
         let forget = saved.address.clone();
         let (place, key) = server_parts(&saved.address);
-        let tip = match (saved.password.is_some(), key.is_some()) {
-            (true, true) => {
-                "Fills in this server and its saved password. Its key is known, so only this \
-                 server is joined, wherever its address leads"
-            }
-            (true, false) => "Fills in this server and its saved password",
-            (false, true) => {
-                "Fills in this server. Its key is known, so only this server is joined, \
-                 wherever its address leads"
-            }
-            (false, false) => "Fills in this server",
-        };
+        let tip = saved_server_tip(saved, key.is_some());
         let forget_button = div()
             .id(("forget-server", index))
-            .tip("Forgets this server, and its password", cx)
+            .tip("Forgets this server, and what is saved with it", cx)
             .flex()
             .items_center()
             .justify_center()
@@ -1310,7 +1390,7 @@ impl Panel {
                     .child(self.shown_text(place)),
             )
             // The size and color of the chip's other mark, the X that forgets it.
-            .when(saved.password.is_some(), |chip| {
+            .when(saved.keeps_a_password(), |chip| {
                 chip.child(icon(IconName::Lock, 12., theme.text_muted))
             })
             .child(forget_button)
@@ -1668,6 +1748,25 @@ impl Play {
     /// The name the session lists `player` under, if it has listed them.
     pub(super) fn name_of(&self, player: PlayerId) -> Option<&str> {
         Some(self.listed(player)?.name.as_str())
+    }
+}
+
+/// What selecting a recent server does, for whoever points at it: which of its passwords come
+/// with it, and, if its key is known, what that means.
+fn saved_server_tip(saved: &SavedServer, key_known: bool) -> String {
+    let fills = match (saved.password.is_some(), saved.host_password.is_some()) {
+        (true, true) => "Fills in this server, its saved password and its saved host password",
+        (true, false) => "Fills in this server and its saved password",
+        (false, true) => "Fills in this server and its saved host password",
+        (false, false) => "Fills in this server",
+    };
+    if key_known {
+        format!(
+            "{fills}. Its key is known, so only this server is joined, wherever its address \
+             leads"
+        )
+    } else {
+        fills.to_owned()
     }
 }
 

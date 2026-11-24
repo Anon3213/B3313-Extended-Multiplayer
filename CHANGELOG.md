@@ -2,7 +2,30 @@
 
 What each version changed, newest first. Versions of the same protocol play together:
 those from 0.1.0 to 0.1.4 join each other's servers, as do those from 0.2.0 to 0.2.2, and a
-version that does not play with the ones before it says so.
+version that does not play with the ones before it says so, as 0.3.0 does.
+
+## Not yet released
+
+**This version does not play with 0.3.0 and earlier**: what a player's program tells the
+server changed, so everyone in a session updates together. The panel builds the game again
+by itself at the next join, as the game changed too.
+
+- **A player with no Mario is no longer shown standing.** One at the title screen or a
+  menu, or whose game crashed, stood where they last were in everyone else's game for as
+  long as their emulator stayed open. They now go from the others' games, at once for a
+  menu and after ten seconds for a game that has stopped, and are back when they are in a
+  level again. A paused game's Mario still stands where he was.
+- **Coins collected before you arrived stay gone** in a ring or a line you had not yet come
+  near: they appeared when you did, and counted for everyone a second time.
+- A bridge closed and started again beside a game still in the session no longer takes
+  coins away that nobody collected.
+- Enemies other players run are no longer lost for a moment after your game hitches.
+- **The Play page has a Host password field**, for a server whose owner gave you one: join
+  with it and you are the host. Most players leave it empty. It is kept with the server
+  when the password is, and hidden in streamer mode.
+- The Log and the chats scroll with the keyboard: reach one with Tab, then the arrows, Page
+  Up, Page Down, Home and End.
+- The Log page no longer goes through its whole log every time it is drawn.
 
 ## 0.3.0
 

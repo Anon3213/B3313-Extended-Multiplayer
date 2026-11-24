@@ -229,6 +229,10 @@ pub struct Request {
     /// key if it came from an invite. With a key, only that server is joined.
     pub server: String,
     pub password: String,
+    /// The server's host password, if its owner gave the player one: whoever joins with it
+    /// is the host. Empty for most players. It goes to a server that is not this panel's
+    /// own; see `host_password_for`.
+    pub host_password: String,
     /// The name the player chose; empty leaves it to the server.
     pub name: String,
     /// The outfit the player chose, if they have.
@@ -288,6 +292,13 @@ fn is_own_server(server: SocketAddr, hosting: SocketAddr) -> bool {
         || server.ip() == hosting.ip()
         || UdpSocket::bind((server.ip(), 0)).is_ok();
     server.port() == hosting.port() && is_this_pc
+}
+
+/// The host password to join with: the one this panel's own server was started with, if that
+/// is the server joined, `own`, so that the player hosting is its host whatever is in the
+/// field; for any other server, what the player `typed` for it.
+fn host_password_for(own: Option<Hosting>, typed: String) -> String {
+    own.map_or(typed, |hosting| hosting.host_password)
 }
 
 /// The bytes of the ROM at `rom`, to join with. One the panel built, as the game `built_here`,
@@ -409,7 +420,7 @@ impl Request {
         // was kept for its address: one kept from before the server was set up anew would
         // refuse its own owner.
         let server_key = own.as_ref().map(|hosting| hosting.key).or(key);
-        let host_password = own.map(|hosting| hosting.host_password).unwrap_or_default();
+        let host_password = host_password_for(own, self.host_password);
         Ok(Options {
             rom,
             pid,
@@ -428,9 +439,10 @@ impl Request {
 
 #[cfg(test)]
 mod tests {
-    use super::{current_rom, headline, is_own_server, not_joined};
+    use super::{Hosting, current_rom, headline, host_password_for, is_own_server, not_joined};
     use crate::game_setup::{Built, GAMES, Game};
     use b3313_bridge::session::HEADLINE_MOST;
+    use b3313_protocol::secure::{SecureError, ServerKey};
     use std::io;
     use std::net::SocketAddr;
     use std::path::{Path, PathBuf};
@@ -554,5 +566,24 @@ mod tests {
         // kept for documentation, so it is no address of this PC.
         assert!(!is_own_server(address("127.0.0.1:41314"), hosting));
         assert!(!is_own_server(address("203.0.113.7:41313"), hosting));
+    }
+
+    #[test]
+    fn the_host_password_typed_goes_to_any_server_but_this_panels_own() -> Result<(), SecureError> {
+        let typed = || "given by its owner".to_owned();
+        // Someone else's server: what the player typed, or nothing if they typed nothing.
+        assert_eq!(host_password_for(None, typed()), "given by its owner");
+        assert_eq!(host_password_for(None, String::new()), "");
+        // This panel's own: the password it was started with, whatever is in the field.
+        let own = Hosting {
+            address: address("127.0.0.1:41313"),
+            key: ServerKey::generate()?.public(),
+            host_password: "made up by the panel".to_owned(),
+        };
+        assert_eq!(
+            host_password_for(Some(own), typed()),
+            "made up by the panel"
+        );
+        Ok(())
     }
 }

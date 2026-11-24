@@ -43,8 +43,8 @@ use b3313_server::{Command, Config, Event};
 use gpui::{
     AnyElement, App, Context, CursorStyle, DispatchPhase, Entity, FocusHandle, Focusable,
     FontWeight, KeyBinding, MouseMoveEvent, MouseUpEvent, PathPromptOptions, PromptLevel,
-    ScrollDelta, ScrollHandle, ScrollWheelEvent, SharedString, Subscription, Task,
-    UniformListScrollHandle, Window, WindowBounds, actions, canvas, div, prelude::*, px,
+    ScrollDelta, ScrollHandle, ScrollWheelEvent, SharedString, Subscription, Task, Window,
+    WindowBounds, actions, canvas, div, prelude::*, px,
 };
 use std::collections::{BTreeMap, VecDeque};
 use std::net::{IpAddr, SocketAddr};
@@ -234,6 +234,10 @@ struct Selected {
 struct Running {
     host: Host,
     config: Config,
+    /// Whether the settings being edited differ from `config`, so that a restart is needed
+    /// to use them: worked out as either changes (`Panel::note_restart_needed`), not as each
+    /// page asks, which reads every setting in the form again.
+    restart_needed: bool,
     started: Instant,
     /// Who can join, and the address to give them; found once, as the server starts.
     reach: Reach,
@@ -339,7 +343,7 @@ pub struct Panel {
     /// Which kinds of log entry are shown.
     log_kinds: Vec<Kind>,
     follow_log: bool,
-    log_scroll: UniformListScrollHandle,
+    log_list: log_page::LogList,
     /// How far sideways the Players page's table is scrolled.
     players_scroll: ScrollHandle,
     toast: Option<Toast>,
@@ -480,7 +484,7 @@ impl Panel {
             field_errors: BTreeMap::new(),
             log_kinds: preferences.log_kinds.clone(),
             follow_log: true,
-            log_scroll: UniformListScrollHandle::new(),
+            log_list: log_page::LogList::default(),
             players_scroll: ScrollHandle::new(),
             toast: None,
             shown_uptime: 0,
@@ -662,6 +666,8 @@ impl Panel {
                 self.running = Some(Running {
                     host,
                     config,
+                    // It was started with the form's settings, a moment ago.
+                    restart_needed: false,
                     started,
                     reach,
                     port: RouterPort::NotAsked,
@@ -997,7 +1003,15 @@ impl Panel {
     fn needs_restart(&self) -> bool {
         self.running
             .as_ref()
-            .is_some_and(|running| self.form.config().ok().as_ref() != Some(&running.config))
+            .is_some_and(|running| running.restart_needed)
+    }
+
+    /// Works out again whether the running server needs a restart to use the settings being
+    /// edited. Called wherever the form changes; a server just started needs none.
+    fn note_restart_needed(&mut self) {
+        if let Some(running) = &mut self.running {
+            running.restart_needed = differs_from(&self.form, &running.config);
+        }
     }
 
     // --- Moderation ---
@@ -1216,8 +1230,11 @@ impl Panel {
 
     // --- Settings ---
 
+    /// Marks the fields whose settings cannot be used. Everything that changes the form's
+    /// settings ends here, so what follows from them is worked out here too.
     fn refresh_validation(&mut self, cx: &mut Context<Self>) {
         self.field_errors = self.form.errors();
+        self.note_restart_needed();
         for (key, input) in &self.fields {
             let invalid = self.field_errors.contains_key(key);
             input.update(cx, |input, cx| input.set_invalid(invalid, cx));
@@ -1649,7 +1666,7 @@ impl Panel {
                 self.dashboard.restore_log(log);
                 self.show_toast(ToastTone::Success, "Log restored".to_owned());
             }
-            Undo::RestorePanel(at, panel) => self.restore_panel(at, panel),
+            Undo::RestorePanel(at, panel) => self.restore_panel(at, panel, cx),
             Undo::RestoreLayout(layout) => self.restore_layout(layout),
             Undo::RestorePreferences(preferences) => {
                 self.preferences = *preferences;
@@ -2046,6 +2063,12 @@ fn by_number<'a>(
         .ok_or_else(|| format!("Nobody playing is called {who}."))
 }
 
+/// Whether the settings in `form` are other than `served`, those a server runs with. Settings
+/// that cannot be used are other than any a server runs with.
+fn differs_from(form: &SettingsForm, served: &Config) -> bool {
+    form.config().ok().as_ref() != Some(served)
+}
+
 /// The window's title: the server's state first, as the taskbar cuts titles short. `state` is
 /// the players in the session and whether a restart is waiting, while it runs; `playing`, who
 /// this PC joined another's server as, said when it hosts nothing.
@@ -2171,8 +2194,26 @@ fn server_buttons(panel: &Panel, cx: &mut Context<Panel>) -> Vec<AnyElement> {
 
 #[cfg(test)]
 mod tests {
-    use super::{by_number, window_title};
+    use super::{by_number, differs_from, window_title};
+    use crate::settings::SettingsForm;
     use b3313_protocol::PlayerId;
+    use b3313_server::Config;
+
+    #[test]
+    fn a_restart_is_needed_once_the_settings_are_other_than_the_servers() {
+        let served = Config::default();
+        let mut form = SettingsForm::new(&served);
+        assert!(!differs_from(&form, &served));
+        form.set("max_players", "6");
+        assert!(differs_from(&form, &served));
+        // Typed back to what the server has, none is needed after all.
+        let as_served = SettingsForm::new(&served);
+        form.set("max_players", as_served.value("max_players"));
+        assert!(!differs_from(&form, &served));
+        // Settings that cannot be used are not the server's either.
+        form.set("max_players", "many");
+        assert!(differs_from(&form, &served));
+    }
 
     #[test]
     fn the_server_chat_takes_a_player_by_name_as_the_players_chat_does() {

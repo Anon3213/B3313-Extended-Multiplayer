@@ -430,6 +430,70 @@ pub fn column_handle(
         .into_any_element()
 }
 
+/// A key that scrolls a list while the list has the focus.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ScrollKey {
+    Up,
+    Down,
+    PageUp,
+    PageDown,
+    Home,
+    End,
+}
+
+/// How far the Up and Down keys scroll a list, at 100%: a row of the Log.
+pub const SCROLL_LINE: f32 = 30.;
+
+impl ScrollKey {
+    /// The scrolling `event` asks for, if its key is one of these, pressed by itself: with
+    /// Ctrl, Shift or Alt it is some other command's.
+    #[must_use]
+    pub fn pressed(event: &KeyDownEvent) -> Option<Self> {
+        if event.keystroke.modifiers.modified() {
+            return None;
+        }
+        match event.keystroke.key.as_str() {
+            "up" => Some(Self::Up),
+            "down" => Some(Self::Down),
+            "pageup" => Some(Self::PageUp),
+            "pagedown" => Some(Self::PageDown),
+            "home" => Some(Self::Home),
+            "end" => Some(Self::End),
+            _ => None,
+        }
+    }
+
+    /// Where the key leaves a list that was at `offset`, as GPUI counts it: zero at the
+    /// list's start, down to `-hidden` at its end, `hidden` being how much of it is out of a
+    /// view `view` tall. A page is the view less a `line`, so the eye keeps its place.
+    #[must_use]
+    pub fn scroll(self, offset: Pixels, hidden: Pixels, view: Pixels, line: Pixels) -> Pixels {
+        let end = -hidden.max(px(0.));
+        let page = (view - line).max(line);
+        let offset = match self {
+            Self::Up => offset + line,
+            Self::Down => offset - line,
+            Self::PageUp => offset + page,
+            Self::PageDown => offset - page,
+            Self::Home => px(0.),
+            Self::End => end,
+        };
+        offset.clamp(end, px(0.))
+    }
+
+    /// Scrolls the list `handle` tracks, as it was last drawn. `line` is how far Up and Down
+    /// go.
+    pub fn scroll_list(self, handle: &gpui::ScrollHandle, line: Pixels) {
+        let offset = handle.offset();
+        let hidden = handle.max_offset().height;
+        let view = handle.bounds().size.height;
+        handle.set_offset(gpui::point(
+            offset.x,
+            self.scroll(offset.y, hidden, view, line),
+        ));
+    }
+}
+
 /// An on/off switch with its label and an explanation, the whole row pressable.
 pub fn switch(
     theme: &Theme,
@@ -897,4 +961,63 @@ pub fn banner(color: Hsla, background: Hsla, glyph: IconName, text: String) -> D
         .child(icon(glyph, 16., color))
         // Wraps rather than pushing buttons beside it out of the banner.
         .child(div().flex_1().min_w_0().child(text))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ScrollKey;
+    use gpui::{KeyDownEvent, Keystroke, px};
+
+    fn pressed(keys: &str) -> Option<ScrollKey> {
+        let keystroke =
+            Keystroke::parse(keys).unwrap_or_else(|_| unreachable!("the test's own keys"));
+        ScrollKey::pressed(&KeyDownEvent {
+            keystroke,
+            is_held: false,
+        })
+    }
+
+    #[test]
+    fn only_the_scrolling_keys_pressed_by_themselves_scroll() {
+        assert_eq!(pressed("up"), Some(ScrollKey::Up));
+        assert_eq!(pressed("down"), Some(ScrollKey::Down));
+        assert_eq!(pressed("pageup"), Some(ScrollKey::PageUp));
+        assert_eq!(pressed("pagedown"), Some(ScrollKey::PageDown));
+        assert_eq!(pressed("home"), Some(ScrollKey::Home));
+        assert_eq!(pressed("end"), Some(ScrollKey::End));
+        // Tab moves on, letters are nothing here, and a held Ctrl makes another command.
+        for other in ["tab", "a", "ctrl-end", "shift-up", "alt-down"] {
+            assert_eq!(pressed(other), None, "{other}");
+        }
+    }
+
+    #[test]
+    fn keys_scroll_a_list_by_lines_and_pages_and_stop_at_its_ends() {
+        // A list 100 tall with 400 more out of view, so from 0 at its start to -400 at its
+        // end, and lines of 30.
+        let after = |key: ScrollKey, offset: f32| {
+            f32::from(key.scroll(px(offset), px(400.), px(100.), px(30.)))
+        };
+        let near = |found: f32, expected: f32| (found - expected).abs() < 0.01;
+        assert!(near(after(ScrollKey::Down, 0.), -30.));
+        assert!(near(after(ScrollKey::Up, -90.), -60.));
+        // A page is the view less a line.
+        assert!(near(after(ScrollKey::PageDown, 0.), -70.));
+        assert!(near(after(ScrollKey::PageUp, -200.), -130.));
+        assert!(near(after(ScrollKey::Home, -250.), 0.));
+        assert!(near(after(ScrollKey::End, -10.), -400.));
+        // Never past either end.
+        assert!(near(after(ScrollKey::Up, -10.), 0.));
+        assert!(near(after(ScrollKey::PageUp, -10.), 0.));
+        assert!(near(after(ScrollKey::Down, -390.), -400.));
+        assert!(near(after(ScrollKey::PageDown, -390.), -400.));
+        // A list with nothing out of view stays where it is, whatever GPUI last measured.
+        for key in [ScrollKey::Down, ScrollKey::PageDown, ScrollKey::End] {
+            let offset = f32::from(key.scroll(px(0.), px(-4.), px(100.), px(30.)));
+            assert!(near(offset, 0.), "{key:?}");
+        }
+        // A view shorter than a line still moves a line a page.
+        let short = f32::from(ScrollKey::PageDown.scroll(px(0.), px(400.), px(20.), px(30.)));
+        assert!(near(short, -30.));
+    }
 }

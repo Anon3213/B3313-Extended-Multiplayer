@@ -5,12 +5,13 @@ use std::fmt::Write as _;
 use std::time::Duration;
 
 /// Settings whose values a report leaves out: the session's and the host's passwords in server
-/// settings, and in the panel's preferences remembered server passwords, the player's name,
+/// settings, and in the panel's preferences remembered servers' passwords, the player's name,
 /// and the name invites give for the server, which leads to its owner's home.
-const LEFT_OUT_KEYS: [&str; 5] = [
+const LEFT_OUT_KEYS: [&str; 6] = [
     "password",
     "host_password",
     "server_password",
+    "server_host_password",
     "player_name",
     "invite_name",
 ];
@@ -447,7 +448,7 @@ mod tests {
         DUMP_WARNING, Report, State, What, activity_line, another, describe_exception, file_stem,
         for_sharing, stem_time, trim_backtrace, unread,
     };
-    use crate::preferences::Preferences;
+    use crate::preferences::{Passwords, Preferences};
     use crate::system::{LocalTime, Memory};
     use std::path::PathBuf;
     use std::time::Duration;
@@ -646,13 +647,18 @@ mod tests {
             player_name: "Weegee".to_owned(),
             ..Preferences::default()
         };
-        preferences.remember_server("myserver.duckdns.org:41313", Some("hunter2"));
+        let passwords = Passwords {
+            session: "hunter2",
+            host: "paper crown",
+        };
+        preferences.remember_server("myserver.duckdns.org:41313", Some(passwords));
         for written in [settings.format(), preferences.format()] {
             let shared = for_sharing(&written);
             for private in [
                 "open sesame",
                 "crown jewels",
                 "hunter2",
+                "paper crown",
                 "Private",
                 "Weegee",
                 "duckdns",

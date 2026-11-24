@@ -62,6 +62,25 @@ impl Arranging {
         self.changes += 1;
         self.changes
     }
+
+    /// Has `kind` fade in, as a panel just added; returns the change's number, by which
+    /// `appeared` knows it.
+    fn appear(&mut self, kind: PanelKind) -> u64 {
+        let change = self.next_change();
+        self.appearing = Some((kind, change));
+        change
+    }
+
+    /// Notes that the fading in begun as `change` is over. A panel added since is fading in
+    /// still, and stays so.
+    fn appeared(&mut self, change: u64) {
+        if self
+            .appearing
+            .is_some_and(|(_, appearing)| appearing == change)
+        {
+            self.appearing = None;
+        }
+    }
 }
 
 /// A panel being dragged, and where the room for it is: `target` among the other panels.
@@ -203,20 +222,35 @@ impl Panel {
         self.save_preferences();
     }
 
-    pub(super) fn restore_panel(&mut self, at: usize, panel: PanelState) {
+    pub(super) fn restore_panel(&mut self, at: usize, panel: PanelState, cx: &mut Context<Self>) {
         let kind = panel.kind;
         self.layout_mut().restore(at, panel);
-        let change = self.arranging.next_change();
-        self.arranging.appearing = Some((kind, change));
+        self.fade_in(kind, cx);
         self.save_preferences();
     }
 
     fn add_panel(&mut self, kind: PanelKind, cx: &mut Context<Self>) {
         self.layout_mut().add(kind);
-        let change = self.arranging.next_change();
-        self.arranging.appearing = Some((kind, change));
+        self.fade_in(kind, cx);
         self.save_preferences();
         cx.notify();
+    }
+
+    /// Has `kind`'s panel fade in, once: the fading is forgotten when it is over, or the
+    /// panel would fade in again whenever the Overview is next shown, as GPUI starts an
+    /// animation anew for an element it has not drawn of late.
+    fn fade_in(&mut self, kind: PanelKind, cx: &mut Context<Self>) {
+        let change = self.arranging.appear(kind);
+        cx.spawn(async move |this, cx| {
+            // Twice as long as it takes: it starts when the panel is first drawn, a little
+            // after this, and a panel that has faded in looks the same either way.
+            cx.background_executor().timer(MOTION * 2).await;
+            let _ = this.update(cx, |this, cx| {
+                this.arranging.appeared(change);
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     /// Fades `kind` away, then removes it, offering Undo.
@@ -1012,4 +1046,28 @@ pub(super) fn icon_button(
         .hover(|style| style.bg(theme.hover))
         .focus_ring(move |style| style.border_color(accent))
         .child(icon(glyph, 16., theme.text_muted))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Arranging;
+    use crate::overview_layout::PanelKind;
+
+    #[test]
+    fn a_panel_added_stops_fading_in_once_and_only_its_own_fading_is_ended() {
+        let mut arranging = Arranging::default();
+        let first = arranging.appear(PanelKind::Log);
+        assert_eq!(arranging.appearing, Some((PanelKind::Log, first)));
+        arranging.appeared(first);
+        assert_eq!(arranging.appearing, None);
+
+        // Another panel added before the first has faded in: the first's end leaves the
+        // second fading in, until its own.
+        let first = arranging.appear(PanelKind::Log);
+        let second = arranging.appear(PanelKind::Chat);
+        arranging.appeared(first);
+        assert_eq!(arranging.appearing, Some((PanelKind::Chat, second)));
+        arranging.appeared(second);
+        assert_eq!(arranging.appearing, None);
+    }
 }
