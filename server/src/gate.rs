@@ -593,7 +593,7 @@ mod tests {
         let mut session = Session::new();
         let mut answer = |data: &[u8]| decode(gate.receive(&mut session, client(0), data, now));
         assert_eq!(answer(b"hello?"), None);
-        assert_eq!(answer(b"B3NP\x1B\x04\0"), None);
+        assert_eq!(answer(b"B3NP\x1C\x04\0"), None);
         assert_eq!(
             answer(b"B3NP\x00\x01"),
             Some(Packet::Rejected(RejectReason::WrongVersion))

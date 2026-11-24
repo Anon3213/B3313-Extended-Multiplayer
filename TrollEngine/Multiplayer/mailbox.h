@@ -14,10 +14,11 @@
 // GhostPeach.asm reads a flag at 0x807D0000, between the mailbox and the game's private data.
 #define MP_MAILBOX_ADDR 0x807C0200
 // The multiplayer code segment; Multiplayer/segment.asm and boot.c must agree. It began at
-// 0x807C8000, and has three times been brought down into the mailbox's spare room when it
-// filled; the mailbox now ends 4 bytes short of it, so the next time it fills, or the mailbox
-// grows, something must move or shrink.
-#define MP_CODE_ADDR 0x807C5AE0
+// 0x807C8000, and has four times been brought down toward the mailbox when it filled: three
+// times into room the mailbox had spare, and then by closing every gap between the
+// mailbox's records. The mailbox ends 8 bytes short of it, so the next time it fills, or the
+// mailbox grows, something must move or shrink: see the second segment below.
+#define MP_CODE_ADDR 0x807C56C0
 #define MP_CODE_END 0x807CC000
 // After the code, private object sync data (Multiplayer/objects.c); never loaded from the ROM.
 #define MP_COPIES_ADDR 0x807CC000
@@ -40,7 +41,7 @@
 #define MP_ANIM_CACHE_END 0x807E0000
 
 #define MP_MAILBOX_MAGIC 0x42334D50 // "B3MP"
-#define MP_MAILBOX_VERSION 22
+#define MP_MAILBOX_VERSION 23
 #define MP_PLAYER_SLOTS 16
 // Every other player in a full session. Slot 15 stays unused.
 #define MP_PUPPETS 15
@@ -349,47 +350,45 @@ struct MpMailbox {
     // Which version of B3313 this is, by its number in scripts/game_versions.py: players can
     // share a session only if their games are the same. Set at boot, with the magic.
     /*0x000C*/ u32 game;
+    // The records follow one another with no room kept between them: the room there was is
+    // the code segment's now, which starts where the mailbox ends. Every place below is
+    // written out for the bridge by scripts/make_layout.py, so nothing else needs to know one.
     /*0x0010*/ struct MpHitRing hitsOut; // Written by the game.
-    /*0x0034*/ u8 reserved1[0x040 - 0x034];
-    /*0x0040*/ struct MpHitRing hitsIn; // Written by the bridge.
-    /*0x0064*/ u8 reserved3[0x100 - 0x064];
-    /*0x0100*/ struct MpPlayerSlot local;
-    /*0x0180*/ u8 reserved2[0x200 - 0x180];
-    /*0x0200*/ struct MpPlayerSlot players[MP_PLAYER_SLOTS];
-    /*0x0A00*/ struct MpWorld localWorld;
-    /*0x0B40*/ struct MpWorld sessionWorld;
-    /*0x0C80*/ struct MpObjectsOwned objectsOwned; // Written by the bridge.
-    /*0x0CD0*/ u8 reserved4[0xD00 - 0xCD0];
-    /*0x0D00*/ struct MpObjectsIn objectsIn; // Written by the bridge.
-    /*0x1B04*/ u8 reserved5[0x1B80 - 0x1B04];
-    /*0x1B80*/ struct MpInteractionRing interactionsOut; // Written by the game.
-    /*0x1C44*/ u8 reserved6[0x1C80 - 0x1C44];
-    /*0x1C80*/ struct MpNameRing childrenGoneOut; // Written by the game.
-    /*0x1CC4*/ u8 reserved8[0x1D00 - 0x1CC4];
-    /*0x1D00*/ struct MpLiveChildren liveChildren; // Written by the bridge.
-    /*0x1D68*/ u8 reserved9[0x1D80 - 0x1D68];
-    /*0x1D80*/ struct MpObjectsOut objectsOut; // Written by the game.
-    /*0x522C*/ u8 reserved10[0x5280 - 0x522C];
-    /*0x5280*/ struct MpProgress progressOut; // Written by the game.
-    /*0x52C8*/ u8 reserved11[0x5300 - 0x52C8];
-    /*0x5300*/ struct MpProgress progressIn; // Written by the bridge.
-    /*0x5348*/ u8 reserved12[0x5380 - 0x5348];
-    /*0x5380*/ struct MpCoinRing coinsOut; // Written by the game.
-    /*0x5404*/ u8 reserved13[0x5480 - 0x5404];
-    /*0x5480*/ struct MpCoinRing coinsIn; // Written by the bridge.
+    /*0x0034*/ struct MpHitRing hitsIn; // Written by the bridge.
+    /*0x0058*/ struct MpPlayerSlot local;
+    /*0x00D8*/ struct MpPlayerSlot players[MP_PLAYER_SLOTS];
+    /*0x08D8*/ struct MpWorld localWorld;
+    /*0x0A18*/ struct MpWorld sessionWorld;
+    /*0x0B58*/ struct MpObjectsOwned objectsOwned; // Written by the bridge.
+    /*0x0BA8*/ struct MpObjectsIn objectsIn; // Written by the bridge.
+    /*0x19AC*/ struct MpInteractionRing interactionsOut; // Written by the game.
+    /*0x1A70*/ struct MpNameRing childrenGoneOut; // Written by the game.
+    /*0x1AB4*/ struct MpLiveChildren liveChildren; // Written by the bridge.
+    /*0x1B1C*/ struct MpObjectsOut objectsOut; // Written by the game.
+    /*0x4FC8*/ struct MpProgress progressOut; // Written by the game.
+    /*0x5010*/ struct MpProgress progressIn; // Written by the bridge.
+    /*0x5058*/ struct MpCoinRing coinsOut; // Written by the game.
+    /*0x50DC*/ struct MpCoinRing coinsIn; // Written by the bridge.
     // How many entries of `coinsIn` the game has taken, which it writes each frame it runs:
     // the bridge adds no more than the ring holds beyond it, so a level's worth of coins sent
     // at once, to a game that has just come there, is not lost.
-    /*0x5504*/ u32 coinsInTaken;
+    /*0x5160*/ u32 coinsInTaken;
     // How many times the game has loaded an area, which puts every coin of it back. The
     // server tells a game which coins of an area were collected before it came; the bridge
     // passes that on only when the area was loaded since it last did, as the server tells it
     // again after a pause too, and a coin's name is not always one coin's alone.
-    /*0x5508*/ u32 areaLoads;
-    /*0x550C*/ u8 reserved14[0x5580 - 0x550C];
-    /*0x5580*/ struct MpPeople people; // Written by the bridge.
-    /*0x56EC*/ u8 reserved15[0x5700 - 0x56EC];
-    /*0x5700*/ struct MpChat chat; // Written by the bridge.
+    /*0x5164*/ u32 areaLoads;
+    // How many entries of `objectsIn` the game has taken, as `coinsInTaken` is of `coinsIn`:
+    // the bridge gives no more than the ring holds beyond it, so that a game held up for a
+    // few frames is not written over before it has read.
+    /*0x5168*/ u32 objectsInTaken;
+    // Written by the bridge: `areaLoads` as it was when the bridge passed on the server's
+    // word on the area's earlier coins, plus one, or 0 for never. A bridge started beside a
+    // game that is already in a session reads from it that the game has had that word for
+    // the area as it is loaded now, which nothing else of the game says.
+    /*0x516C*/ u32 earlierCoinsTold;
+    /*0x5170*/ struct MpPeople people; // Written by the bridge.
+    /*0x52DC*/ struct MpChat chat; // Written by the bridge.
 };
 
 // Compile-time size checks: a negative array size fails the build.
@@ -410,7 +409,29 @@ typedef char MpProgressSizeCheck[sizeof(struct MpProgress) == 0x48 ? 1 : -1];
 typedef char MpCoinRingSizeCheck[sizeof(struct MpCoinRing) == 0x84 ? 1 : -1];
 typedef char MpPeopleSizeCheck[sizeof(struct MpPeople) == 0x16C ? 1 : -1];
 typedef char MpChatSizeCheck[sizeof(struct MpChat) == 0x1DC ? 1 : -1];
-typedef char MpMailboxSizeCheck[sizeof(struct MpMailbox) == 0x58DC ? 1 : -1];
+typedef char MpMailboxSizeCheck[sizeof(struct MpMailbox) == 0x54B8 ? 1 : -1];
+// A place written beside a member is what the bridge reads and writes at: one that is wrong
+// would have the two sides of the mailbox disagree, in silence.
+#define MP_PLACE_OF(member) ((u32) & (((struct MpMailbox *) 0)->member))
+typedef char MpMailboxPlacesCheck[MP_PLACE_OF(hitsIn) == 0x0034 && MP_PLACE_OF(local) == 0x0058
+                                          && MP_PLACE_OF(players) == 0x00D8
+                                          && MP_PLACE_OF(localWorld) == 0x08D8
+                                          && MP_PLACE_OF(sessionWorld) == 0x0A18
+                                          && MP_PLACE_OF(objectsOwned) == 0x0B58
+                                          && MP_PLACE_OF(objectsIn) == 0x0BA8
+                                          && MP_PLACE_OF(interactionsOut) == 0x19AC
+                                          && MP_PLACE_OF(childrenGoneOut) == 0x1A70
+                                          && MP_PLACE_OF(liveChildren) == 0x1AB4
+                                          && MP_PLACE_OF(objectsOut) == 0x1B1C
+                                          && MP_PLACE_OF(progressOut) == 0x4FC8
+                                          && MP_PLACE_OF(progressIn) == 0x5010
+                                          && MP_PLACE_OF(coinsOut) == 0x5058
+                                          && MP_PLACE_OF(coinsIn) == 0x50DC
+                                          && MP_PLACE_OF(coinsInTaken) == 0x5160
+                                          && MP_PLACE_OF(people) == 0x5170
+                                          && MP_PLACE_OF(chat) == 0x52DC
+                                      ? 1
+                                      : -1];
 // The mailbox must end before the multiplayer code, which ends before GhostPeach.asm's flag at
 // 0x807D0000.
 typedef char MpMailboxEndCheck[MP_MAILBOX_ADDR + sizeof(struct MpMailbox) <= MP_CODE_ADDR ? 1 : -1];

@@ -13,7 +13,9 @@ const KSEG0_BASE: u32 = 0x8000_0000;
 /// The game's own code: ROM offset `0x1000` is loaded here at boot.
 const CODE_SIGNATURE_ADDRESS: u32 = 0x8024_6000;
 const CODE_SIGNATURE_ROM_RANGE: std::ops::Range<usize> = 0x1000..0x1040;
-const GLOBAL_TIMER_ADDRESS: u32 = 0x8032_D5D4;
+/// The game's count of the frames it has run, in every version: it stands still only while
+/// the game does not run at all.
+pub(crate) const GLOBAL_TIMER_ADDRESS: u32 = 0x8032_D5D4;
 const WORD_SIZE: usize = 4;
 const LIVE_CHECK_DELAY: Duration = Duration::from_millis(500);
 /// How much of a region is read at a time while looking for the game's code: whole words, and

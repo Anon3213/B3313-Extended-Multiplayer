@@ -28,7 +28,7 @@ pub use reliable::{Ack, Inbox, OUTBOX_MOST, Outbox, Stream};
 /// snapshots in time by their tick, so both ends must agree on this.
 pub const TICK_INTERVAL: Duration = Duration::from_millis(33);
 
-pub const PROTOCOL_VERSION: u8 = 27;
+pub const PROTOCOL_VERSION: u8 = 28;
 const MAGIC: [u8; 4] = *b"B3NP";
 const HEADER_SIZE: usize = MAGIC.len() + 2;
 
@@ -455,10 +455,15 @@ pub enum Packet {
         players: Vec<PlayerUpdate>,
     },
     Bye,
-    /// Client has no state to send in this send slot, as in menus, but is still playing. It uses
-    /// up a `sequence` number like a `State`, so the numbers keep counting send slots.
+    /// Client has no state to send in this send slot, but is still in the session. It uses up
+    /// a `sequence` number like a `State`, so the numbers keep counting send slots.
     Alive {
         sequence: u32,
+        /// Whether the game has no Mario to show at all: it is at a menu or the title
+        /// screen, or has stopped running, as one that crashed has. The others then stop
+        /// showing this player. Not so for a game that is only paused, whose Mario stands
+        /// where he was.
+        away: bool,
     },
     /// Client's world, offered until the session has one; only the session owner's is taken.
     OfferWorld(Box<WorldInputs>),
@@ -603,9 +608,10 @@ impl Packet {
                 players,
             } => encode_snapshot(&mut out, *tick, *present, players),
             Self::Bye => out.push(KIND_BYE),
-            Self::Alive { sequence } => {
+            Self::Alive { sequence, away } => {
                 out.push(KIND_ALIVE);
                 out.extend_from_slice(&sequence.to_be_bytes());
+                out.push(u8::from(*away));
             }
             Self::OfferWorld(world) => {
                 out.push(KIND_OFFER_WORLD);
@@ -745,6 +751,11 @@ impl Packet {
             KIND_BYE => Self::Bye,
             KIND_ALIVE => Self::Alive {
                 sequence: u32::from_be_bytes(reader.array()?),
+                away: match reader.byte()? {
+                    0 => false,
+                    1 => true,
+                    _ => return Err(DecodeError::Malformed),
+                },
             },
             KIND_OFFER_WORLD => Self::OfferWorld(Box::new(reader.array()?)),
             KIND_WORLD => Self::World(Box::new(reader.array()?)),
@@ -1442,7 +1453,14 @@ mod tests {
                 players: vec![],
             },
             Packet::Bye,
-            Packet::Alive { sequence: 9 },
+            Packet::Alive {
+                sequence: 9,
+                away: false,
+            },
+            Packet::Alive {
+                sequence: u32::MAX,
+                away: true,
+            },
             Packet::OfferWorld(Box::new(world(4))),
             Packet::World(Box::new(world(5))),
             Packet::Ping { id: 0x0102_0304 },
@@ -1647,7 +1665,7 @@ mod tests {
         let encoded = hello.encode();
         assert_eq!(
             encoded.get(..16),
-            Some(&b"B3NP\x1B\x01\x01\x02\x03\x04\x05\x06\x07\x08\x03\x30"[..])
+            Some(&b"B3NP\x1C\x01\x01\x02\x03\x04\x05\x06\x07\x08\x03\x30"[..])
         );
         // Longer than the padding reaches, so every byte of it is needed.
         for length in 5..encoded.len() {
@@ -1675,7 +1693,7 @@ mod tests {
         .encode();
         assert_eq!(
             encoded.get(..10),
-            Some(&b"B3NP\x1B\x04\x01\x02\x03\x04"[..])
+            Some(&b"B3NP\x1C\x04\x01\x02\x03\x04"[..])
         );
         assert_eq!(encoded.len(), 10 + PLAYER_STATE_SIZE);
     }
@@ -1701,7 +1719,10 @@ mod tests {
             full_snapshot(),
             Packet::World(Box::new(world(1))),
             Packet::Pong { id: 1 },
-            Packet::Alive { sequence: 1 },
+            Packet::Alive {
+                sequence: 1,
+                away: false,
+            },
             Packet::Hurts(vec![Hurt {
                 attacker: id(2),
                 kind: HitKind::Punch,
@@ -1726,32 +1747,32 @@ mod tests {
     #[test]
     fn out_of_range_values_are_rejected() {
         assert_eq!(
-            Packet::decode(b"B3NP\x1B\x02\x10"),
+            Packet::decode(b"B3NP\x1C\x02\x10"),
             Err(DecodeError::Malformed)
         );
         assert_eq!(
-            Packet::decode(b"B3NP\x1B\x03\x05"),
+            Packet::decode(b"B3NP\x1C\x03\x05"),
             Err(DecodeError::Malformed)
         );
-        assert_eq!(Packet::decode(b"B3NP\x1B\x63"), Err(DecodeError::Malformed));
+        assert_eq!(Packet::decode(b"B3NP\x1C\x63"), Err(DecodeError::Malformed));
         // Hits beyond the per-packet limit, an unknown kind, and a target outside the session.
-        let mut nine_hits = b"B3NP\x1B\x0C\x09".to_vec();
+        let mut nine_hits = b"B3NP\x1C\x0C\x09".to_vec();
         nine_hits.extend(std::iter::repeat_n([1, 1, 0, 1], 9).flatten());
         assert_eq!(Packet::decode(&nine_hits), Err(DecodeError::Malformed));
         assert_eq!(
-            Packet::decode(b"B3NP\x1B\x0C\x01\x01\x04\0\x01"),
+            Packet::decode(b"B3NP\x1C\x0C\x01\x01\x04\0\x01"),
             Err(DecodeError::Malformed)
         );
         assert_eq!(
-            Packet::decode(b"B3NP\x1B\x0D\x01\x10\x01\0\x01"),
+            Packet::decode(b"B3NP\x1C\x0D\x01\x10\x01\0\x01"),
             Err(DecodeError::Malformed)
         );
         // A snapshot can never list sixteen others.
-        let mut too_many = b"B3NP\x1B\x05\0\0\0\0\xFF\xFF\x10".to_vec();
+        let mut too_many = b"B3NP\x1C\x05\0\0\0\0\xFF\xFF\x10".to_vec();
         too_many.extend(std::iter::repeat_n(0, 16 * (1 + 4 + PLAYER_STATE_SIZE)));
         assert_eq!(Packet::decode(&too_many), Err(DecodeError::Malformed));
         // A state for player 1, who the present mask says is not there.
-        let mut absent = b"B3NP\x1B\x05\0\0\0\0\0\x01\x01\x01".to_vec();
+        let mut absent = b"B3NP\x1C\x05\0\0\0\0\0\x01\x01\x01".to_vec();
         absent.extend(std::iter::repeat_n(0, 4 + PLAYER_STATE_SIZE));
         assert_eq!(Packet::decode(&absent), Err(DecodeError::Malformed));
     }
@@ -1760,7 +1781,7 @@ mod tests {
     fn object_states_must_name_objects_and_fit_the_limit() {
         let objects = |gone_children: &[u16], states: Vec<ObjectState>| {
             // Objects, level 16, area 1, send slot 5, no numbered object gone.
-            let mut encoded = b"B3NP\x1B\x12\0\x10\x01\0\0\0\x05".to_vec();
+            let mut encoded = b"B3NP\x1C\x12\0\x10\x01\0\0\0\x05".to_vec();
             encoded.extend([0; 32]);
             encoded.push(u8::try_from(gone_children.len()).unwrap_or(0));
             for name in gone_children {
@@ -1830,7 +1851,7 @@ mod tests {
             object.copy_from_slice(&241_u16.to_be_bytes());
         }
         assert_eq!(Packet::decode(&wrong), Err(DecodeError::Malformed));
-        let mut too_many = b"B3NP\x1B\x14\x09".to_vec();
+        let mut too_many = b"B3NP\x1C\x14\x09".to_vec();
         too_many.extend(std::iter::repeat_n([0, 9, 1, 0, 1, 0, 0, 0xC0, 1, 0, 0], 9).flatten());
         assert_eq!(Packet::decode(&too_many), Err(DecodeError::Malformed));
     }

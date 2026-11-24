@@ -8,7 +8,7 @@
 ; Keep these in step with MP_CODE_ADDR, MP_CODE_END, MP_CODE2_ADDR and MP_CODE2_END in
 ; Multiplayer/mailbox.h.
 
-.definelabel mpseg_start, 0x807C5AE0
+.definelabel mpseg_start, 0x807C56C0
 .definelabel mpseg_end, 0x807CC000
 .definelabel mpseg2_start, 0x807D1600
 .definelabel mpseg2_end, 0x807D2700

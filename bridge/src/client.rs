@@ -600,10 +600,11 @@ impl Connection {
     ///
     /// # Errors
     /// Fails if the socket fails.
-    pub fn keep_alive(&mut self) -> io::Result<()> {
+    pub fn keep_alive(&mut self, away: bool) -> io::Result<()> {
         self.sequence = self.sequence.wrapping_add(1);
         self.send(&Packet::Alive {
             sequence: self.sequence,
+            away,
         })
     }
 

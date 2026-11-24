@@ -47,7 +47,7 @@ const OBJECTS_OWNED_SIZE: usize = len::OBJECTS_OWNED_SEQUENCE_OFFSET;
 const OBJECTS_OWNED_SEQUENCE_OFFSET: u32 = layout::OBJECTS_OWNED_SEQUENCE_OFFSET;
 /// `objectsIn`: a ring of states from other owners, written by the bridge.
 const OBJECTS_IN_ADDRESS: u32 = MAILBOX_ADDRESS + layout::MAILBOX_OBJECTS_IN_OFFSET;
-const OBJECTS_IN_ENTRIES: u32 = layout::OBJECTS_IN_ENTRIES;
+pub const OBJECTS_IN_ENTRIES: u32 = layout::OBJECTS_IN_ENTRIES;
 /// `objectsOut`: the sequence, level, area, count and gone set, then the game's owned states.
 const OBJECTS_OUT_ADDRESS: u32 = MAILBOX_ADDRESS + layout::MAILBOX_OBJECTS_OUT_OFFSET;
 const OBJECTS_OUT_HEADER_SIZE: usize = len::OBJECTS_OUT_STATES_OFFSET;
@@ -125,6 +125,8 @@ const COIN_RING_ENTRIES: u32 = layout::COIN_RING_ENTRIES_OFFSET;
 /// `coinsInTaken`, written by the game: how many entries of `coinsIn` it has taken.
 const COINS_IN_TAKEN_ADDRESS: u32 = MAILBOX_ADDRESS + layout::MAILBOX_COINS_IN_TAKEN_OFFSET;
 const AREA_LOADS_ADDRESS: u32 = MAILBOX_ADDRESS + layout::MAILBOX_AREA_LOADS_OFFSET;
+const OBJECTS_IN_TAKEN_ADDRESS: u32 = MAILBOX_ADDRESS + layout::MAILBOX_OBJECTS_IN_TAKEN_OFFSET;
+const EARLIER_COINS_TOLD_ADDRESS: u32 = MAILBOX_ADDRESS + layout::MAILBOX_EARLIER_COINS_TOLD_OFFSET;
 /// `people`, written by the bridge: the local player's role, each remote slot's role, three
 /// spare bytes, the local player's name and each remote slot's, then the sequence.
 const PEOPLE_ADDRESS: u32 = MAILBOX_ADDRESS + layout::MAILBOX_PEOPLE_OFFSET;
@@ -359,6 +361,16 @@ impl<'a, M: ProcessMemory> Mailbox<'a, M> {
         self.ram.read_u32(LOCAL_PLAYER_ADDRESS + SEQUENCE_OFFSET)
     }
 
+    /// The game's count of the frames it has run, which goes on while it is paused and
+    /// stands still only when the game does not run at all: it crashed, or its emulator is
+    /// held. Not of the mailbox: the game's own, at one place in every version.
+    ///
+    /// # Errors
+    /// Fails if the game's memory cannot be read.
+    pub fn frames_run(&self) -> io::Result<u32> {
+        self.ram.read_u32(crate::ram::GLOBAL_TIMER_ADDRESS)
+    }
+
     /// Shows another player in this game.
     ///
     /// # Errors
@@ -548,6 +560,38 @@ impl<'a, M: ProcessMemory> Mailbox<'a, M> {
     /// Fails if the game's memory cannot be read.
     pub fn area_loads(&self) -> io::Result<u32> {
         self.ram.read_u32(AREA_LOADS_ADDRESS)
+    }
+
+    /// How many entries of `objectsIn` the game has taken so far.
+    ///
+    /// # Errors
+    /// Fails if the game's memory cannot be read.
+    pub fn objects_in_taken(&self) -> io::Result<u32> {
+        self.ram.read_u32(OBJECTS_IN_TAKEN_ADDRESS)
+    }
+
+    /// The game's count of area loads at which a bridge last passed on the server's word on
+    /// the area's earlier coins, if one has: this bridge or one before it.
+    ///
+    /// # Errors
+    /// Fails if the game's memory cannot be read.
+    pub fn earlier_coins_told(&self) -> io::Result<Option<u32>> {
+        // Kept as one more than the count, so that the nothing a game starts with is none.
+        Ok(self
+            .ram
+            .read_u32(EARLIER_COINS_TOLD_ADDRESS)?
+            .checked_sub(1))
+    }
+
+    /// Notes in the game that the server's word on earlier coins was passed on at its
+    /// `area_loads`th area load, for a bridge started later to read.
+    ///
+    /// # Errors
+    /// Fails if the game's memory cannot be written.
+    pub fn write_earlier_coins_told(&self, area_loads: u32) -> io::Result<()> {
+        let told = area_loads.wrapping_add(1);
+        self.ram
+            .write(EARLIER_COINS_TOLD_ADDRESS, &told.to_be_bytes())
     }
 
     /// Adds a coin another player collected, after the `count` written so far, and returns the
@@ -1138,13 +1182,13 @@ mod tests {
 
         mailbox(&process).write_remote_player(RemoteSlot(1), &[7; PLAYER_STATE_SIZE])?;
 
-        // struct MpMailbox puts players at 0x200, and each slot is 0x80 bytes.
-        assert_eq!(raw(&process, 0x27C, 4)?, [0; 4]);
+        // struct MpMailbox puts players at 0xD8, and each slot is 0x80 bytes.
+        assert_eq!(raw(&process, 0x154, 4)?, [0; 4]);
         assert_eq!(
-            raw(&process, 0x280, PLAYER_STATE_SIZE)?,
+            raw(&process, 0x158, PLAYER_STATE_SIZE)?,
             [7; PLAYER_STATE_SIZE]
         );
-        assert_eq!(raw(&process, 0x280 + PLAYER_STATE_SIZE, 4)?, [0; 4]);
+        assert_eq!(raw(&process, 0x158 + PLAYER_STATE_SIZE, 4)?, [0; 4]);
         Ok(())
     }
 
@@ -1157,12 +1201,12 @@ mod tests {
         target.write_remote_player(RemoteSlot(0), &[1; PLAYER_STATE_SIZE])?;
         // The sequence first, made odd, then the record, then the sequence again: the game,
         // which may read at any moment between, takes nothing while the sequence is odd.
-        assert_eq!(written(&process), [0x27C, 0x200, 0x27C]);
-        assert_eq!(raw(&process, 0x27C, 4)?, 2_u32.to_be_bytes());
+        assert_eq!(written(&process), [0x154, 0xD8, 0x154]);
+        assert_eq!(raw(&process, 0x154, 4)?, 2_u32.to_be_bytes());
         target.clear_remote_player(RemoteSlot(0))?;
-        assert_eq!(raw(&process, 0x27C, 4)?, 4_u32.to_be_bytes());
+        assert_eq!(raw(&process, 0x154, 4)?, 4_u32.to_be_bytes());
         assert_eq!(
-            raw(&process, 0x200, PLAYER_STATE_SIZE)?,
+            raw(&process, 0xD8, PLAYER_STATE_SIZE)?,
             [0; PLAYER_STATE_SIZE]
         );
         Ok(())
@@ -1174,13 +1218,13 @@ mod tests {
 
         mailbox(&process).write_session_world(&[3; WORLD_INPUTS_SIZE])?;
 
-        // struct MpMailbox puts sessionWorld at 0xB40, with its sequence 0x13C into it.
-        assert_eq!(raw(&process, 0xB3C, 4)?, [0; 4]);
+        // struct MpMailbox puts sessionWorld at 0xA18, with its sequence 0x13C into it.
+        assert_eq!(raw(&process, 0xA14, 4)?, [0; 4]);
         assert_eq!(
-            raw(&process, 0xB40, WORLD_INPUTS_SIZE)?,
+            raw(&process, 0xA18, WORLD_INPUTS_SIZE)?,
             [3; WORLD_INPUTS_SIZE]
         );
-        assert_eq!(raw(&process, 0xB40 + 0x13C, 4)?, 2_u32.to_be_bytes());
+        assert_eq!(raw(&process, 0xA18 + 0x13C, 4)?, 2_u32.to_be_bytes());
         Ok(())
     }
 
@@ -1190,14 +1234,14 @@ mod tests {
         let ram = N64Ram::new(&process, 0);
         assert_eq!(mailbox(&process).read_local_world()?, None);
 
-        // `valid` set, sequence even: struct MpMailbox puts localWorld at 0xA00.
-        ram.write(0x807C_0C00, &[1; WORLD_INPUTS_SIZE])?;
+        // `valid` set, sequence even: struct MpMailbox puts localWorld at 0x8D8.
+        ram.write(0x807C_0AD8, &[1; WORLD_INPUTS_SIZE])?;
         assert_eq!(
             mailbox(&process).read_local_world()?,
             Some([1; WORLD_INPUTS_SIZE])
         );
 
-        ram.write(0x807C_0C00 + 0x13C, &1_u32.to_be_bytes())?;
+        ram.write(0x807C_0AD8 + 0x13C, &1_u32.to_be_bytes())?;
         assert_eq!(mailbox(&process).read_local_world()?, None);
         Ok(())
     }
@@ -1279,14 +1323,14 @@ mod tests {
             written(&process);
             count = target.write_hit_in(count, RemoteSlot(slot), 2)?;
             // The count last: the game takes every entry the count covers.
-            assert_eq!(written(&process).last(), Some(&0x40), "hit {slot}");
+            assert_eq!(written(&process).last(), Some(&0x34), "hit {slot}");
         }
 
-        // struct MpMailbox puts hitsIn at 0x40: the count, then 4-byte entries.
-        assert_eq!(raw(&process, 0x40, 4)?, 9_u32.to_be_bytes());
+        // struct MpMailbox puts hitsIn at 0x34: the count, then 4-byte entries.
+        assert_eq!(raw(&process, 0x34, 4)?, 9_u32.to_be_bytes());
         // The ninth wrapped round to the first entry.
-        assert_eq!(raw(&process, 0x44, 4)?, [8, 2, 0, 0]);
-        assert_eq!(raw(&process, 0x48, 4)?, [1, 2, 0, 0]);
+        assert_eq!(raw(&process, 0x38, 4)?, [8, 2, 0, 0]);
+        assert_eq!(raw(&process, 0x3C, 4)?, [1, 2, 0, 0]);
         assert_eq!(target.hits_in_count()?, 9);
         Ok(())
     }
@@ -1306,16 +1350,16 @@ mod tests {
 
         mailbox(&process).write_objects_owned((-2, 3), &owned, &gone)?;
 
-        // struct MpMailbox puts objectsOwned at 0xC80: level, area, pad, owned, gone, and the
+        // struct MpMailbox puts objectsOwned at 0xB58: level, area, pad, owned, gone, and the
         // sequence at 0x4C into it.
-        assert_eq!(raw(&process, 0xC80, 4)?, [0xFF, 0xFE, 3, 0]);
-        assert_eq!(raw(&process, 0xC84, 4)?, [0, 0b10, 0, 0]);
-        assert_eq!(raw(&process, 0xCA4, 4)?, [0, 0, 1, 0]);
-        assert_eq!(raw(&process, 0xCCC, 4)?, 2_u32.to_be_bytes());
+        assert_eq!(raw(&process, 0xB58, 4)?, [0xFF, 0xFE, 3, 0]);
+        assert_eq!(raw(&process, 0xB5C, 4)?, [0, 0b10, 0, 0]);
+        assert_eq!(raw(&process, 0xB7C, 4)?, [0, 0, 1, 0]);
+        assert_eq!(raw(&process, 0xBA4, 4)?, 2_u32.to_be_bytes());
         Ok(())
     }
 
-    /// Writes `objectsOut` as the game does, at 0x1D80, under `sequence`.
+    /// Writes `objectsOut` as the game does, at 0x1B1C, under `sequence`.
     fn game_publishes_objects(
         process: &FakeProcess,
         sequence: u32,
@@ -1328,11 +1372,11 @@ mod tests {
         let count = u16::try_from(states.len()).unwrap_or(0);
         header[8..10].copy_from_slice(&count.to_be_bytes());
         header[0xC] = 0b100; // Object 2 is gone.
-        ram.write(0x807C_1F80, &header)?;
+        ram.write(0x807C_1D1C, &header)?;
         for (index, state) in (0_u32..).zip(states) {
             let mut entry = vec![0, 16, 1, 0];
             entry.extend(state);
-            ram.write(0x807C_1FAC + index * 0x38, &entry)?;
+            ram.write(0x807C_1D48 + index * 0x38, &entry)?;
         }
         Ok(())
     }
@@ -1367,15 +1411,15 @@ mod tests {
             written(&process);
             count = target.write_objects_in(count, (16, 1), &[object(id, 3)])?;
             // The count last: the game takes every entry the count covers.
-            assert_eq!(written(&process).last(), Some(&0xD00), "object {id}");
+            assert_eq!(written(&process).last(), Some(&0xBA8), "object {id}");
         }
 
-        // struct MpMailbox puts objectsIn at 0xD00: the count, then 0x38-byte entries, each the
+        // struct MpMailbox puts objectsIn at 0xBA8: the count, then 0x38-byte entries, each the
         // level, area and a spare byte before the network part.
-        assert_eq!(raw(&process, 0xD00, 4)?, 65_u32.to_be_bytes());
+        assert_eq!(raw(&process, 0xBA8, 4)?, 65_u32.to_be_bytes());
         // The 65th wrapped round to the first entry.
-        assert_eq!(raw(&process, 0xD04, 8)?, [0, 16, 1, 0, 0, 65, 3, 3]);
-        assert_eq!(raw(&process, 0xD04 + 0x38, 8)?, [0, 16, 1, 0, 0, 2, 3, 3]);
+        assert_eq!(raw(&process, 0xBAC, 8)?, [0, 16, 1, 0, 0, 65, 3, 3]);
+        assert_eq!(raw(&process, 0xBAC + 0x38, 8)?, [0, 16, 1, 0, 0, 2, 3, 3]);
         assert_eq!(target.objects_in_count()?, 65);
         Ok(())
     }
@@ -1398,19 +1442,19 @@ mod tests {
         };
         target.write_people(&al, &[(third, bo)])?;
 
-        // struct MpMailbox puts people at 0x5580: the local player's byte, sixteen slots'
+        // struct MpMailbox puts people at 0x5170: the local player's byte, sixteen slots'
         // bytes, three spare bytes, the local name at 0x14, the slots' names from 0x28, 20
         // bytes each, and the sequence at 0x168. A player's byte is their role, 8 to say they
         // are dressed, and their outfit in the high four bits: green is 1 and gray 15. Names
         // are plain characters, and a zero ends each.
-        assert_eq!(raw(&process, 0x5580, 4)?, [0x1A, 0, 0, 0xF9]);
-        assert_eq!(raw(&process, 0x5580 + 0x14, 4)?, [b'A', b'l', 0, 0]);
-        assert_eq!(raw(&process, 0x5580 + 0x28, 4)?, [0; 4]);
-        let third_name = raw(&process, 0x5580 + 0x28 + 2 * 20, 4)?;
+        assert_eq!(raw(&process, 0x5170, 4)?, [0x1A, 0, 0, 0xF9]);
+        assert_eq!(raw(&process, 0x5170 + 0x14, 4)?, [b'A', b'l', 0, 0]);
+        assert_eq!(raw(&process, 0x5170 + 0x28, 4)?, [0; 4]);
+        let third_name = raw(&process, 0x5170 + 0x28 + 2 * 20, 4)?;
         assert_eq!(third_name, [b'B', b'o', 0, 0]);
-        assert_eq!(raw(&process, 0x5580 + 0x168, 4)?, 2_u32.to_be_bytes());
+        assert_eq!(raw(&process, 0x5170 + 0x168, 4)?, 2_u32.to_be_bytes());
 
-        // chat at 0x5700: the count, how many rows to show, the frames a line is typed for,
+        // chat at 0x52DC: the count, how many rows to show, the frames a line is typed for,
         // two spare bytes, then eight 52-byte rows, the ninth written over the first, and
         // after them, at 0x1A8, the line being typed.
         let mut count = target.chat_count()?;
@@ -1418,16 +1462,16 @@ mod tests {
             count = target.write_chat_row(count, &[row; 52])?;
         }
         target.show_chat(9, false)?;
-        assert_eq!(raw(&process, 0x5700, 8)?, [0, 0, 0, 9, 6, 0, 0, 0]);
-        assert_eq!(raw(&process, 0x5708, 4)?, [8; 4]);
-        assert_eq!(raw(&process, 0x5708 + 52, 4)?, [1; 4]);
+        assert_eq!(raw(&process, 0x52DC, 8)?, [0, 0, 0, 9, 6, 0, 0, 0]);
+        assert_eq!(raw(&process, 0x52E4, 4)?, [8; 4]);
+        assert_eq!(raw(&process, 0x52E4 + 52, 4)?, [1; 4]);
 
         target.show_chat(2, true)?;
         target.write_chat_draft(&[b'>'; 52])?;
-        assert_eq!(raw(&process, 0x5704, 4)?, [2, 30, 0, 0]);
-        assert_eq!(raw(&process, 0x5700 + 0x1A8, 52)?, [b'>'; 52]);
+        assert_eq!(raw(&process, 0x52E0, 4)?, [2, 30, 0, 0]);
+        assert_eq!(raw(&process, 0x52DC + 0x1A8, 52)?, [b'>'; 52]);
         // The mailbox ends with it.
-        assert_eq!(raw(&process, 0x5700 + 0x1A8 + 52, 4)?, [0; 4]);
+        assert_eq!(raw(&process, 0x52DC + 0x1A8 + 52, 4)?, [0; 4]);
         Ok(())
     }
 
@@ -1436,9 +1480,9 @@ mod tests {
         let process = game();
         let ram = N64Ram::new(&process, 0);
         let target = mailbox(&process);
-        // The game wrote one coin to coinsOut at 0x5380: level 9, area 1, worth 2, named 0x8185.
-        ram.write(0x807C_5584, &[0, 9, 1, 2, 0x81, 0x85, 0, 0])?;
-        ram.write(0x807C_5580, &1_u32.to_be_bytes())?;
+        // The game wrote one coin to coinsOut at 0x5058: level 9, area 1, worth 2, named 0x8185.
+        ram.write(0x807C_525C, &[0, 9, 1, 2, 0x81, 0x85, 0, 0])?;
+        ram.write(0x807C_5258, &1_u32.to_be_bytes())?;
         let coin = super::RingCoin {
             place: (9, 1),
             name: 0x8185,
@@ -1446,10 +1490,10 @@ mod tests {
         };
         assert_eq!(target.read_coins_out(0)?, (vec![coin], 1));
 
-        // coinsIn at 0x5480: the count, then the entry.
+        // coinsIn at 0x50DC: the count, then the entry.
         let count = target.write_coin_in(0, &coin)?;
-        assert_eq!(raw(&process, 0x5480, 4)?, count.to_be_bytes());
-        assert_eq!(raw(&process, 0x5484, 8)?, [0, 9, 1, 2, 0x81, 0x85, 0, 0]);
+        assert_eq!(raw(&process, 0x50DC, 4)?, count.to_be_bytes());
+        assert_eq!(raw(&process, 0x50E0, 8)?, [0, 9, 1, 2, 0x81, 0x85, 0, 0]);
         Ok(())
     }
 
@@ -1458,21 +1502,21 @@ mod tests {
         let process = game();
         let ram = N64Ram::new(&process, 0);
         let target = mailbox(&process);
-        // progressOut at 0x5280: no file played yet, so nothing to read.
+        // progressOut at 0x4FC8: no file played yet, so nothing to read.
         assert_eq!(target.read_progress_out()?, None);
         // The wing cap and one star, in file 2, sequence even.
         let mut record = [0; 0x48];
         record[..4].copy_from_slice(&2_u32.to_be_bytes());
         record[4] = 1;
         record[0x42] = 2;
-        ram.write(0x807C_5480, &record)?;
+        ram.write(0x807C_51C8, &record)?;
         let (file, progress) = target.read_progress_out()?.unwrap_or_default();
         assert_eq!((file, progress.count()), (2, 2));
 
-        // progressIn at 0x5300, with its sequence at 0x44 into it.
+        // progressIn at 0x5010, with its sequence at 0x44 into it.
         target.write_session_progress(&progress)?;
-        assert_eq!(raw(&process, 0x5300, 8)?, [0, 0, 0, 2, 1, 0, 0, 0]);
-        assert_eq!(raw(&process, 0x5344, 4)?, 2_u32.to_be_bytes());
+        assert_eq!(raw(&process, 0x5010, 8)?, [0, 0, 0, 2, 1, 0, 0, 0]);
+        assert_eq!(raw(&process, 0x5054, 4)?, 2_u32.to_be_bytes());
         Ok(())
     }
 
@@ -1480,28 +1524,28 @@ mod tests {
     fn spawned_enemies_gone_and_alive_are_where_the_game_writes_and_reads_them() -> io::Result<()> {
         let process = game();
         let ram = N64Ram::new(&process, 0);
-        // The game wrote three names to childrenGoneOut at 0x1C80: entries 0 to 2.
-        ram.write(0x807C_1E84, &[0x81, 0x91, 0x81, 0x92, 0x81, 0x93, 0, 0])?;
-        ram.write(0x807C_1E80, &3_u32.to_be_bytes())?;
+        // The game wrote three names to childrenGoneOut at 0x1A70: entries 0 to 2.
+        ram.write(0x807C_1C74, &[0x81, 0x91, 0x81, 0x92, 0x81, 0x93, 0, 0])?;
+        ram.write(0x807C_1C70, &3_u32.to_be_bytes())?;
         let target = mailbox(&process);
         assert_eq!(target.read_children_gone_out(1)?, (vec![0x8192, 0x8193], 3));
 
-        // liveChildren at 0x1D00: level, area and the count, the names, and the sequence at
+        // liveChildren at 0x1AB4: level, area and the count, the names, and the sequence at
         // 0x64 into it.
         target.write_live_children((-2, 3), Some(&[0x8201, 0x8202, 0x8203]))?;
-        assert_eq!(raw(&process, 0x1D00, 4)?, [0xFF, 0xFE, 3, 3]);
+        assert_eq!(raw(&process, 0x1AB4, 4)?, [0xFF, 0xFE, 3, 3]);
         assert_eq!(
-            raw(&process, 0x1D04, 8)?,
+            raw(&process, 0x1AB8, 8)?,
             [0x82, 0x01, 0x82, 0x02, 0x82, 0x03, 0, 0]
         );
-        assert_eq!(raw(&process, 0x1D64, 4)?, 2_u32.to_be_bytes());
+        assert_eq!(raw(&process, 0x1B18, 4)?, 2_u32.to_be_bytes());
         // No list, and one longer than the game has room for, are both written as not known.
         target.write_live_children((16, 1), None)?;
-        assert_eq!(raw(&process, 0x1D00, 4)?, [0, 16, 1, 0xFF]);
+        assert_eq!(raw(&process, 0x1AB4, 4)?, [0, 16, 1, 0xFF]);
         target.write_live_children((16, 1), Some(&[]))?;
-        assert_eq!(raw(&process, 0x1D00, 4)?, [0, 16, 1, 0]);
+        assert_eq!(raw(&process, 0x1AB4, 4)?, [0, 16, 1, 0]);
         target.write_live_children((16, 1), Some(&[0x8201; 49]))?;
-        assert_eq!(raw(&process, 0x1D00, 4)?, [0, 16, 1, 0xFF]);
+        assert_eq!(raw(&process, 0x1AB4, 4)?, [0, 16, 1, 0xFF]);
         Ok(())
     }
 
@@ -1509,10 +1553,10 @@ mod tests {
     fn interactions_are_read_from_the_ring_the_game_writes() -> io::Result<()> {
         let process = game();
         let ram = N64Ram::new(&process, 0);
-        // The game wrote two to interactionsOut at 0x1B80: object 7 punched, object 9 kicked.
-        ram.write(0x807C_1D84, &[0, 9, 1, 0, 0, 7, 0, 0, 0, 0, 0xC0, 1])?;
-        ram.write(0x807C_1D90, &[0, 9, 1, 0, 0, 9, 0, 0, 0, 0, 0xC0, 2])?;
-        ram.write(0x807C_1D80, &2_u32.to_be_bytes())?;
+        // The game wrote two to interactionsOut at 0x19AC: object 7 punched, object 9 kicked.
+        ram.write(0x807C_1BB0, &[0, 9, 1, 0, 0, 7, 0, 0, 0, 0, 0xC0, 1])?;
+        ram.write(0x807C_1BBC, &[0, 9, 1, 0, 0, 9, 0, 0, 0, 0, 0xC0, 2])?;
+        ram.write(0x807C_1BAC, &2_u32.to_be_bytes())?;
         let (read, count) = mailbox(&process).read_interactions_out(0)?;
         let objects: Vec<(u16, u32)> = read.iter().map(|i| (i.object, i.status)).collect();
         assert_eq!((objects, count), (vec![(7, 0xC001), (9, 0xC002)], 2));

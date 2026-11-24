@@ -4,7 +4,7 @@
 use crate::client::{Connection, Received};
 use crate::interpolation::Interpolator;
 use crate::layout::len;
-use crate::mailbox::{COIN_ENTRIES, Mailbox, ObjectsOut, Place, RingCoin};
+use crate::mailbox::{COIN_ENTRIES, Mailbox, OBJECTS_IN_ENTRIES, ObjectsOut, Place, RingCoin};
 use crate::object_motion::ObjectMotion;
 use crate::ram::ProcessMemory;
 use b3313_protocol::objects::object_id;
@@ -117,11 +117,22 @@ fn deliver<M: ProcessMemory>(
     if states.is_empty() {
         return Ok(());
     }
-    let count = match *in_count {
+    let mut count = match *in_count {
         Some(count) => count,
         None => mailbox.objects_in_count()?,
     };
-    *in_count = Some(mailbox.write_objects_in(count, place, states)?);
+    let taken = mailbox.objects_in_taken()?;
+    // A game started again counts from nothing: the ring would look full for good.
+    if count.wrapping_sub(taken) > OBJECTS_IN_ENTRIES {
+        count = taken;
+    }
+    // No more than the ring holds beyond what the game has taken. What does not fit is left
+    // out: these are where the objects are now, and a game held up for some frames is
+    // better given where they are when it goes on than what it missed.
+    let room = OBJECTS_IN_ENTRIES - count.wrapping_sub(taken);
+    let fitting = states.len().min(usize::try_from(room).unwrap_or(0));
+    let given = states.get(..fitting).unwrap_or_default();
+    *in_count = Some(mailbox.write_objects_in(count, place, given)?);
     Ok(())
 }
 
@@ -183,6 +194,12 @@ struct EarlierCoins {
     sending: bool,
     /// Send slots still to go without a state, for the break the server is to see.
     withheld: u8,
+    /// A state has gone that the server answers with its word, and the game has yet to be
+    /// marked as having had it.
+    asked: bool,
+    /// The game had the server's word for this load from a bridge before this one, which
+    /// kept the counts and is gone: nothing worth nothing is given again until the next load.
+    had_word: bool,
 }
 
 /// How many send slots go without a state for the server to see a break in them: each is a
@@ -198,6 +215,7 @@ impl EarlierCoins {
             self.loads = Some(area_loads);
             self.taken.clear();
             self.in_word.clear();
+            self.had_word = false;
             if self.sending {
                 self.sending = false;
                 self.withheld = BREAK_SLOTS;
@@ -211,6 +229,7 @@ impl EarlierCoins {
             // The server's word follows this state, and begins anew.
             self.in_word.clear();
             self.sending = true;
+            self.asked = true;
         }
         true
     }
@@ -230,6 +249,9 @@ impl EarlierCoins {
         if coin.value != 0 || coin.name == 0 {
             self.note_taken(coin);
             return true;
+        }
+        if self.had_word {
+            return false;
         }
         let key = (coin.place, coin.name);
         let named = self.in_word.entry(key).or_default();
@@ -278,7 +300,18 @@ impl ObjectSync {
     /// # Errors
     /// Fails if the game's memory cannot be read.
     pub fn state_may_go<M: ProcessMemory>(&mut self, mailbox: &Mailbox<M>) -> io::Result<bool> {
-        Ok(self.earlier_coins.state_may_go(mailbox.area_loads()?))
+        let area_loads = mailbox.area_loads()?;
+        let is_new_here = self.earlier_coins.loads.is_none();
+        let may_go = self.earlier_coins.state_may_go(area_loads);
+        // A bridge started beside a game already in a session: what a bridge before it gave
+        // the game is in the game alone.
+        if is_new_here && mailbox.earlier_coins_told()? == Some(area_loads) {
+            self.earlier_coins.had_word = true;
+        }
+        if std::mem::take(&mut self.earlier_coins.asked) {
+            mailbox.write_earlier_coins_told(area_loads)?;
+        }
+        Ok(may_go)
     }
 
     /// Object sync for a server joined again, with the same game: nothing kept of the server
@@ -611,6 +644,64 @@ mod tests {
         N64Ram::new(&process, 0).write(taken, &COIN_ENTRIES.to_be_bytes())?;
         sync.deliver_coins(&mailbox)?;
         assert_eq!(mailbox.coins_in_count()?, 20);
+        Ok(())
+    }
+
+    /// A game held up for some frames has not read what the ring holds: it is not written
+    /// over, and gets what fits.
+    #[test]
+    fn object_states_are_given_only_as_the_game_has_room_for_them() -> io::Result<()> {
+        let process = game();
+        let mailbox = Mailbox::new(N64Ram::new(&process, 0));
+        let ring = super::OBJECTS_IN_ENTRIES;
+        let states: Vec<ObjectState> = (1..=40).map(|id| object(id, 0)).collect();
+        let mut in_count = None;
+
+        super::deliver(&mailbox, (16, 1), &states, &mut in_count)?;
+        super::deliver(&mailbox, (16, 1), &states, &mut in_count)?;
+        assert_eq!(
+            mailbox.objects_in_count()?,
+            ring,
+            "no more than the ring holds"
+        );
+
+        // The game reads them, and says so.
+        let taken = layout::MAILBOX_ADDR + layout::MAILBOX_OBJECTS_IN_TAKEN_OFFSET;
+        N64Ram::new(&process, 0).write(taken, &ring.to_be_bytes())?;
+        super::deliver(&mailbox, (16, 1), &states, &mut in_count)?;
+        assert_eq!(mailbox.objects_in_count()?, ring + 40);
+        Ok(())
+    }
+
+    /// A bridge closed and started again beside a game that plays on, in the same session:
+    /// the bridge before it gave the game the server's word, and kept the counts it took
+    /// with it. The word the server gives the new one would be taken away a second time.
+    #[test]
+    fn a_new_bridge_does_not_give_a_game_the_word_a_bridge_before_it_gave() -> io::Result<()> {
+        let process = game();
+        let mailbox = Mailbox::new(N64Ram::new(&process, 0));
+        let loads = layout::MAILBOX_ADDR + layout::MAILBOX_AREA_LOADS_OFFSET;
+        let load_area = |count: u32| N64Ram::new(&process, 0).write(loads, &count.to_be_bytes());
+        let earlier = [coin(1, 7, 0), coin(1, 7, 0)];
+        load_area(3)?;
+        let mut first = ObjectSync::default();
+        assert!(first.state_may_go(&mailbox)?);
+        first.queue_coins(&earlier);
+        assert_eq!(first.coins_waiting.len(), 2);
+
+        let mut second = ObjectSync::default();
+        assert!(second.state_may_go(&mailbox)?);
+        second.queue_coins(&earlier);
+        assert_eq!(second.coins_waiting.len(), 0, "given by the bridge before");
+        second.queue_coins(&[coin(1, 7, 1)]);
+        assert_eq!(second.coins_waiting.len(), 1, "one collected now is given");
+
+        // Once the area is loaded again the game has every coin back, and is told anew.
+        load_area(4)?;
+        second.coins_waiting.clear();
+        while !second.state_may_go(&mailbox)? {}
+        second.queue_coins(&earlier);
+        assert_eq!(second.coins_waiting.len(), 2);
         Ok(())
     }
 

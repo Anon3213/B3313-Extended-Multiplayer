@@ -46,6 +46,10 @@ const REJOIN_ATTEMPT: Duration = Duration::from_secs(1);
 /// stopped running its objects. It publishes once a frame, about once a slot, so a slot or
 /// two without is nothing.
 const STALLED_AFTER: u32 = 15;
+/// A game that has not run a frame for this long is taken for stopped, and its player for
+/// away. Long enough for the emulator's menu to be opened and closed, or a hitch as a level
+/// loads, without the player's Mario going from the others' games and coming back.
+const STOPPED_AFTER: Duration = Duration::from_secs(10);
 /// A game that has not marked its mailbox for this long is not about to: it starts within a
 /// few seconds, and one being started again is back sooner.
 const WRONG_ROM_AFTER: Duration = Duration::from_secs(10);
@@ -888,6 +892,9 @@ struct Session {
     /// slots it has stood still: see `is_game_running`.
     published: Option<u32>,
     slots_unpublished: u32,
+    /// The game's count of frames run as last read, and since when it has been that: see
+    /// `is_game_stopped`.
+    frames_run: Option<(u32, Instant)>,
     /// Since when the game has not been one to write into, and whether the player has been
     /// told that it is the wrong game.
     unready_since: Option<Instant>,
@@ -901,6 +908,7 @@ impl Session {
             playing: false,
             published: None,
             slots_unpublished: 0,
+            frames_run: None,
             unready_since: None,
             said_wrong_rom: false,
             shown: ShownPlayers::default(),
@@ -932,6 +940,23 @@ impl Session {
             progress,
             ..Self::new(now)
         };
+    }
+
+    /// Whether the game has not run a frame for `STOPPED_AFTER`: it crashed, or its emulator
+    /// is held. A paused game runs on, and is not this. Call it in send slots that carry no
+    /// state; one that does shows the game runs, and is noted by `is_game_running`.
+    fn is_game_stopped<M: ProcessMemory>(
+        &mut self,
+        mailbox: &Mailbox<M>,
+        now: Instant,
+    ) -> io::Result<bool> {
+        let frames = mailbox.frames_run()?;
+        if self.frames_run.is_none_or(|(seen, _)| seen != frames) {
+            self.frames_run = Some((frames, now));
+        }
+        Ok(self
+            .frames_run
+            .is_some_and(|(_, since)| now.saturating_duration_since(since) >= STOPPED_AFTER))
     }
 
     /// Whether the game has published its Mario again within the last `STALLED_AFTER` send
@@ -1001,9 +1026,13 @@ impl Session {
             if let Some(state) = state {
                 connection.send_state(state)?;
             } else {
-                // In menus there is nothing to show, but the player must stay in the session.
+                // The player stays in the session all the same. A game that is only paused
+                // has its Mario stand where he was for the others; one with no Mario to
+                // show, at a menu or stopped for good, is said to be away, and they stop
+                // showing him.
                 self.objects.no_state_went();
-                connection.keep_alive()?;
+                let away = !playing || self.is_game_stopped(mailbox, now)?;
+                connection.keep_alive(away)?;
             }
             if ready {
                 collect_hits(mailbox, connection, &mut self.rings, events)?;

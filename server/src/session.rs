@@ -241,14 +241,20 @@ impl Session {
                 self.take_state(index, sequence, state, now);
                 None
             }
-            // It keeps the last state shown, and counts toward the player's loss report.
-            (Packet::Alive { sequence }, Some(index)) => {
+            // It counts toward the player's loss report, and keeps the last state shown: that
+            // of a game that is only paused, whose Mario the others see stand where he was.
+            (Packet::Alive { sequence, away }, Some(index)) => {
                 let player = self.players.get_mut(index)?.as_mut()?;
                 // Out of the level: its coins are back in this player's game when they return.
                 // Not for one that comes late, after a state sent since: the break it marks
                 // is over, and the coins would be named a second time.
                 if player.meter.arrived(sequence, now) {
                     player.coins_told_of = None;
+                    // A game with no Mario to show, at a menu or stopped for good, is
+                    // nowhere: nobody is shown its player, and it holds no area open.
+                    if away {
+                        player.latest = None;
+                    }
                 }
                 None
             }
@@ -1167,12 +1173,14 @@ impl Session {
     }
 }
 
-/// The bit of every player in the session.
+/// The bit of every player in the session who is somewhere: whose game has said where its
+/// Mario is, and not since that it has none to show. A bridge stops showing a player whose
+/// bit is not set, and who else is in the session it knows from the roster.
 fn states_present(players: &[Option<Player>]) -> u16 {
     players
         .iter()
         .enumerate()
-        .filter(|(_, slot)| slot.is_some())
+        .filter(|(_, slot)| slot.as_ref().is_some_and(|player| player.latest.is_some()))
         .filter_map(|(index, _)| Session::id(index))
         .fold(0, |mask, id| mask | id.bit())
 }
@@ -1646,7 +1654,10 @@ mod tests {
             sequence: 1,
             state: state(1),
         };
-        let between = Packet::Alive { sequence: 2 };
+        let between = Packet::Alive {
+            sequence: 2,
+            away: false,
+        };
         send(&mut session, client(1), &first, start);
         send(&mut session, client(1), &between, start);
         let third = Packet::State {
@@ -1666,13 +1677,61 @@ mod tests {
         );
         session.take_events();
         let end = start + REPORT_INTERVAL;
-        send(&mut session, client(1), &Packet::Alive { sequence: 4 }, end);
+        let paused = Packet::Alive {
+            sequence: 4,
+            away: false,
+        };
+        send(&mut session, client(1), &paused, end);
         session.tick(end);
         let missing = session.take_events().iter().find_map(|event| match event {
             Event::Link(player, report) if *player == id(1) => Some(report.losses.missing),
             _ => None,
         });
         assert_eq!(missing, Some(0));
+    }
+
+    /// A paused game's Mario stands where he was for the others. One whose game is at a
+    /// menu, or has stopped for good, as after a crash, is shown to nobody: he stood in the
+    /// others' games for as long as that game stayed open.
+    #[test]
+    fn a_player_whose_game_has_no_mario_to_show_is_shown_to_nobody() {
+        let mut session = Session::new();
+        let now = Instant::now();
+        for port in 0..2 {
+            send(&mut session, client(port), &hello(), now);
+            let here = Packet::State {
+                sequence: 1,
+                state: state(1),
+            };
+            send(&mut session, client(port), &here, now);
+        }
+        let shown_to_0 = |session: &mut Session| match snapshot_for(session, client(0), now) {
+            Some(Packet::Snapshot { present, .. }) => present,
+            _ => 0,
+        };
+
+        let paused = Packet::Alive {
+            sequence: 2,
+            away: false,
+        };
+        send(&mut session, client(1), &paused, now);
+        assert_eq!(shown_to_0(&mut session), 0b10, "paused: still shown");
+
+        let away = Packet::Alive {
+            sequence: 3,
+            away: true,
+        };
+        send(&mut session, client(1), &away, now);
+        assert_eq!(shown_to_0(&mut session), 0, "away: shown to nobody");
+        assert!(session.is_player(client(1)), "and still in the session");
+
+        // Back in a level, he is shown again.
+        let back = Packet::State {
+            sequence: 4,
+            state: state(1),
+        };
+        send(&mut session, client(1), &back, now);
+        assert_eq!(shown_to_0(&mut session), 0b10);
     }
 
     #[test]
@@ -1767,7 +1826,11 @@ mod tests {
         session.take_events();
 
         let end = start + REPORT_INTERVAL;
-        send(&mut session, client(0), &Packet::Alive { sequence: 5 }, end);
+        let paused = Packet::Alive {
+            sequence: 5,
+            away: false,
+        };
+        send(&mut session, client(0), &paused, end);
         session.tick(end);
         let events = session.take_events();
 

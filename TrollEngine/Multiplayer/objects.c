@@ -111,6 +111,10 @@ struct MpObjectId {
     const BehaviorScript *behavior;
 };
 
+// How many coins this game may owe at once: more than a ring's or a line's, and the rest, if
+// an area ever had more, are not taken.
+#define OWED_COINS 32
+
 struct MpObjectIds {
     s16 levelNum;
     u8 areaIndex;
@@ -126,6 +130,10 @@ struct MpObjectIds {
     // For the coin in each slot that a defeated enemy dropped, the number of the object behind
     // that enemy, itself or its spawner; 0 for anything else. See note_loot.
     u8 lootSpawner[OBJECT_POOL_CAPACITY];
+    // Names of coins collected in this area before this game came that it had no coin for
+    // when it was told, each once for each such coin, and 0 for a place not in use: a ring of
+    // coins has none until a player comes near it. See take_owed_coins.
+    u16 owedCoins[OWED_COINS];
 };
 
 // In the zeroed RAM before the second segment, where tools that test a running game read it.
@@ -265,6 +273,10 @@ void mp_number_area_objects(void) {
     sIds->areaIndex = gCurrAreaIndex;
     sIds->count = next;
     sIds->goneUnchecked = TRUE;
+    // What was owed is among the coins the game is told of again, below.
+    for (i = 0; i < OWED_COINS; i++) {
+        sIds->owedCoins[i] = 0;
+    }
     // The area's coins are all back, the ones others collected among them: the bridge has the
     // game told again which those are.
     gMpMailbox->areaLoads++;
@@ -1015,6 +1027,8 @@ static void take_object_states(void) {
         copy->id = state->id;
         copy->framesSinceState = 0;
     }
+    // The bridge gives no more than the ring holds beyond what has been taken.
+    gMpMailbox->objectsInTaken = sIds->objectsInTaken;
 }
 
 // The bridge's last consistent copy of the server's list of spawned enemies alive in this area.
@@ -1244,8 +1258,16 @@ static struct Object *uncollected_coin(u16 name) {
     return NULL;
 }
 
-// Counts the coins other players in this level collected, and collects the same coin here, so its
-// own behavior removes it with its sparkle, and a red coin still counts toward its star.
+// Collects `coin` here as another player collected it there, so its own behavior removes it
+// with its sparkle, and a red coin still counts toward its star.
+static void take_coin(struct Object *coin) {
+    // Taken here, not collected by this game's Mario, so it is not reported back.
+    sCopies->slotFlags[slot_of(coin)] |= SLOT_COIN_TOLD;
+    coin->oInteractStatus |= INT_STATUS_INTERACTED;
+}
+
+// Counts the coins other players in this level collected, and collects the same coin here; and
+// then any owed from before that have appeared since.
 static void take_coins(void) {
     volatile struct MpCoinRing *in = &gMpMailbox->coinsIn;
     volatile struct MpCoin *entry;
@@ -1253,6 +1275,7 @@ static void take_coins(void) {
     u32 count = in->count;
     u32 behind = count - sCopies->coinsInTaken;
     u32 value;
+    s32 i;
 
     if (behind > MP_COIN_ENTRIES) {
         sCopies->coinsInTaken = behind < 0x80000000 ? count - MP_COIN_ENTRIES : count;
@@ -1269,15 +1292,30 @@ static void take_coins(void) {
         if (gMarioState->numCoins > MAX_COINS) {
             gMarioState->numCoins = MAX_COINS;
         }
-        if (entry->areaIndex == gCurrAreaIndex && entry->name != 0
-            && (coin = uncollected_coin(entry->name)) != NULL) {
-            // Taken here, not collected by this game's Mario, so it is not reported back.
-            sCopies->slotFlags[slot_of(coin)] |= SLOT_COIN_TOLD;
-            coin->oInteractStatus |= INT_STATUS_INTERACTED;
+        if (entry->areaIndex != gCurrAreaIndex || entry->name == 0) {
+            continue;
+        }
+        if ((coin = uncollected_coin(entry->name)) != NULL) {
+            take_coin(coin);
+        } else if (value == 0) {
+            // One collected before this game came, of a ring or a line that has no coins
+            // here yet: owed until it has. Only of those: a coin another player collects now
+            // and that is not here was this game's Mario's too, and is gone.
+            for (i = 0; i < OWED_COINS && sIds->owedCoins[i] != 0; i++) {
+            }
+            if (i < OWED_COINS) {
+                sIds->owedCoins[i] = entry->name;
+            }
         }
     }
     // The bridge holds back what would not fit the ring until these have been taken.
     gMpMailbox->coinsInTaken = sCopies->coinsInTaken;
+    for (i = 0; i < OWED_COINS; i++) {
+        if (sIds->owedCoins[i] != 0 && (coin = uncollected_coin(sIds->owedCoins[i])) != NULL) {
+            take_coin(coin);
+            sIds->owedCoins[i] = 0;
+        }
+    }
 }
 
 void mp_claim_touched_objects(void) {

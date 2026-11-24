@@ -106,6 +106,12 @@ While your game is paused, the other players see your Mario standing still where
 him. Nobody can hit him, and another player's game takes over the enemies near you until you
 carry on.
 
+At the title screen or a menu you have no Mario, and the others see none. The same goes if
+your game stops altogether, as when it crashes or you hold the emulator in its own menu:
+after ten seconds your Mario goes from their games. You stay in the session either way, and
+he is back when you are in a level again. After a crash, close the emulator and join again,
+or reset the game.
+
 ## Versions of B3313
 
 The versions of B3313 have different levels, so players can only share a session if they have

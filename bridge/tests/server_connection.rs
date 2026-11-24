@@ -499,7 +499,7 @@ fn a_bridge_with_nothing_to_send_stays_in_the_session() -> io::Result<()> {
         let timeout = Config::default().player_timeout;
         let deadline = Instant::now() + timeout + Duration::from_secs(1);
         while Instant::now() < deadline {
-            idle.keep_alive()?;
+            idle.keep_alive(true)?;
             idle.poll(Instant::now())?;
             thread::sleep(Duration::from_millis(100));
         }
@@ -511,13 +511,14 @@ fn a_bridge_with_nothing_to_send_stays_in_the_session() -> io::Result<()> {
             "the idle player's number was reused"
         );
         let deadline = Instant::now() + Duration::from_secs(2);
-        let mut present = 0;
-        while present == 0 && Instant::now() < deadline {
+        let mut shown = None;
+        while shown.is_none() && Instant::now() < deadline {
             let received = newcomer.poll(Instant::now() + Duration::from_millis(33))?;
-            present = received.snapshot.map_or(0, |snapshot| snapshot.present);
+            shown = received.snapshot.map(|snapshot| snapshot.present);
         }
-        // The idle player, and nobody else.
-        assert_eq!(present, idle.player().bit());
+        // Still in the session, as their number shows, and not shown to anyone: a game at a
+        // menu has no Mario.
+        assert_eq!(shown, Some(0));
         assert!(idle.is_server_alive(Instant::now()));
         Ok(())
     })
