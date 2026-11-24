@@ -9,6 +9,8 @@ pub mod object_motion;
 pub mod objects;
 pub mod pacing;
 #[cfg(windows)]
+mod people;
+#[cfg(windows)]
 pub mod process;
 pub mod progress;
 pub mod ram;
