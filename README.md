@@ -16,8 +16,8 @@ unzip it anywhere, and start **`B3313 Extended Multiplayer.exe`**. You'll also n
 listed under [What you need](#what-you-need).
 
 > [!WARNING]
-> **Still experimental.** This has only been tested by programs that run two games side by
-> side on one PC. Nobody has played it with other people yet, so expect problems. See
+> **Still experimental.** It has been tested mostly by programs that run two games side by
+> side on one PC, and played with other people only a little, so expect problems. See
 > [Known limits](#known-limits) before you start.
 
 ## What you need
@@ -198,8 +198,9 @@ This project is offered as it is, for anyone to try. There's no promise of suppo
 further development, and nobody is expected to report problems. You're free to use, change and
 share it (see [License](#license)).
 
-So far it has only been tested by programs that run two games side by side on one PC and check
-what each one shows of the other. Things that haven't been tried include:
+So far it has been tested mostly by programs that run two games side by side on one PC and
+check what each one shows of the other, and played with other people only a little. Things that
+haven't been tried include:
 
 - **Playing with more than two people,** except with simulated players.
 - **Most of the game.** On the Unabandoned A2 Anniversary Edition, two linked games have only
