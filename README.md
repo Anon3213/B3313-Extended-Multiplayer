@@ -171,6 +171,7 @@ your PC, open **Show what changes** under **Game** on the **Play** page.
 | The key that closes the emulator must be pressed twice | In Parallel Launcher's settings, that key is Escape, which also closes the chat line you're typing |
 | Your hotkeys on keys you type with do nothing | Otherwise typing a chat message would trigger them (for example, P pauses and ~ resets). This applies only while typing in the game is on in **Preferences** |
 | RetroArch takes no commands over the network | It would accept them from any PC on your network |
+| RetroArch doesn't save its settings when it closes | So none of these changes reaches your own settings |
 
 If you start the emulator yourself instead, none of this is done, and you should chat from the
 panel or move the emulator's hotkeys off the typing keys first.

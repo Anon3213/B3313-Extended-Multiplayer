@@ -131,9 +131,10 @@ The players' own chat commands are listed in the
 A session has one host at a time.
 
 - The first player to join with the server's host password becomes the host and keeps the
-  role. Anyone who joins with the same password later is an ordinary player, and the server
-  owner is told about it. (When you host from the panel, it makes up a host password for you
-  and uses it when you join, so you don't need to set one.)
+  role. Anyone who joins with the same password later is an ordinary player, and both they and
+  the server owner are told about it, unless nothing has come from the host's game for two
+  seconds: then the newcomer takes the role. (When you host from the panel, it makes up a host
+  password for you and uses it when you join, so you don't need to set one.)
 - The host can hand the role to another player with `/host <player>`, and is then an ordinary
   player.
 - If the host leaves without handing the role on, the session has no host until the server
