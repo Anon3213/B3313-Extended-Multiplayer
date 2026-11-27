@@ -123,8 +123,8 @@ const FIXED_CHANGES: [FixedChange; 6] = [
 
 /// The keys a line of chat is typed with, as `RetroArch`'s settings name them, besides the
 /// letters, which are their own names: the marks and the space of a keyboard's main part, its
-/// digits, and the number pad.
-const TYPING_KEYS: [&str; 24] = [
+/// digits, and the number pad, and the keys that scroll the chat and bring back lines sent.
+const TYPING_KEYS: [&str; 28] = [
     "space",
     "backspace",
     "enter",
@@ -149,6 +149,10 @@ const TYPING_KEYS: [&str; 24] = [
     "kp_period",
     "kp_enter",
     "kp_equals",
+    "pageup",
+    "pagedown",
+    "up",
+    "down",
 ];
 
 /// Whether `key`, as `RetroArch`'s settings name one, is a key a line of chat is typed with.

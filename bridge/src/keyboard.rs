@@ -26,21 +26,29 @@ pub const BACKSPACE: u16 = 0x08;
 pub const ENTER: u16 = 0x0D;
 pub const ESCAPE: u16 = 0x1B;
 const SPACE: u16 = 0x20;
+/// The keys that scroll the open chat, and bring back the lines sent before.
+pub const PAGE_UP: u16 = 0x21;
+pub const PAGE_DOWN: u16 = 0x22;
+pub const ARROW_UP: u16 = 0x26;
+pub const ARROW_DOWN: u16 = 0x28;
 /// One more than the highest key code.
 const KEY_CODES: usize = 256;
 
-/// The keys watched while a line is open: those that edit it, and every key that types a
-/// character on one keyboard layout or another. By Windows' codes, these are the space, the
-/// digits, the letters, the number pad, and the keys for marks, which differ by layout.
+/// The keys watched while a line is open: those that edit it or scroll the chat, and every
+/// key that types a character on one keyboard layout or another. By Windows' codes, these are
+/// the space, the digits, the letters, the number pad, and the keys for marks, which differ by
+/// layout.
 fn typing_keys() -> impl Iterator<Item = u16> {
-    [BACKSPACE, ENTER, ESCAPE, SPACE]
-        .into_iter()
-        .chain(0x30..=0x39)
-        .chain(0x41..=0x5A)
-        .chain(0x60..=0x6F)
-        .chain(0xBA..=0xC0)
-        .chain(0xDB..=0xDF)
-        .chain([0xE2])
+    [
+        BACKSPACE, ENTER, ESCAPE, SPACE, PAGE_UP, PAGE_DOWN, ARROW_UP, ARROW_DOWN,
+    ]
+    .into_iter()
+    .chain(0x30..=0x39)
+    .chain(0x41..=0x5A)
+    .chain(0x60..=0x6F)
+    .chain(0xBA..=0xC0)
+    .chain(0xDB..=0xDF)
+    .chain([0xE2])
 }
 
 /// The keyboard as the system reports it. Apart from tests, this is `WindowsKeys`.
@@ -207,7 +215,9 @@ pub use system::WindowsKeys;
 
 #[cfg(windows)]
 mod system {
-    use super::{BACKSPACE, ENTER, ESCAPE, KEY_CODES, Keys};
+    use super::{
+        ARROW_DOWN, ARROW_UP, BACKSPACE, ENTER, ESCAPE, KEY_CODES, Keys, PAGE_DOWN, PAGE_UP,
+    };
     use crate::typing::Key;
     use std::mem::MaybeUninit;
     use std::ptr;
@@ -340,6 +350,10 @@ mod system {
                 BACKSPACE => Some(Key::Backspace),
                 ENTER => Some(Key::Enter),
                 ESCAPE => Some(Key::Escape),
+                PAGE_UP => Some(Key::PageUp),
+                PAGE_DOWN => Some(Key::PageDown),
+                ARROW_UP => Some(Key::Up),
+                ARROW_DOWN => Some(Key::Down),
                 _ => self.character(key).map(Key::Character),
             }
         }

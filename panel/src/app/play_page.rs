@@ -19,6 +19,7 @@ use crate::theme::{MONO, Theme, scaled};
 use crate::widgets::{
     Button, FocusRing as _, OneLine as _, Tip, Tone, card, card_header, dot, switch,
 };
+use b3313_bridge::assist::BotNotice;
 use b3313_bridge::process::{EMULATOR, find_processes};
 use b3313_bridge::session::{Event, HEADLINE_MOST};
 use b3313_protocol::metrics::LinkReport;
@@ -469,6 +470,13 @@ impl Panel {
                 }
             }
             Notice::Event(Event::Said { from, name, text }) => self.play.hear(from, name, text),
+            Notice::Event(Event::Bot(notice)) => {
+                let text = notice.describe().trim_end_matches('.').to_owned();
+                if matches!(notice, BotNotice::Unavailable(_)) {
+                    self.report_problem(text.clone());
+                }
+                self.play.note(text);
+            }
             Notice::Ended {
                 headline,
                 reason,
@@ -605,6 +613,8 @@ impl Panel {
             outfit: self.preferences.player_outfit,
             chat_key: self.preferences.chat_key,
             chat_seconds: self.preferences.chat_seconds,
+            chat_size: self.preferences.chat_size,
+            bot_port: self.preferences.bot_port,
             server: server.clone(),
             password,
             host_password,

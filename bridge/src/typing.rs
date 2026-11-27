@@ -5,7 +5,7 @@
 //! line as it stands, with a prompt and a cursor, to draw under its chat
 //! (`TrollEngine/Multiplayer/people.c`).
 
-use crate::text::{self, ROW_BYTES};
+use crate::text::{self, ChatSize, ROW_BYTES};
 use b3313_protocol::{MAX_MESSAGE_LENGTH, Message};
 use std::time::{Duration, Instant};
 
@@ -57,7 +57,17 @@ pub enum Key {
     Backspace,
     Enter,
     Escape,
+    /// Page Up and Page Down in the open chat: they scroll it back through earlier lines and
+    /// forward again (`People`).
+    PageUp,
+    PageDown,
+    /// The up and down arrows in the open chat: they bring back the lines sent before.
+    Up,
+    Down,
 }
+
+/// How many of the lines a player sent the arrow keys can bring back.
+const SENT_KEPT: usize = 20;
 
 /// The line being typed, if one is.
 #[derive(Debug, Default)]
@@ -65,6 +75,9 @@ pub struct Draft {
     line: Option<String>,
     /// When a key last changed it, which the cursor's blinking starts over from.
     touched: Option<Instant>,
+    /// The lines sent, oldest first, and which of them the up arrow last brought back.
+    sent: Vec<String>,
+    recalled: Option<usize>,
 }
 
 impl Draft {
@@ -77,14 +90,17 @@ impl Draft {
     /// Takes a key pressed at `now`, and returns the line to send if the key finished one.
     ///
     /// Enter sends the line and closes the chat; an empty line just closes it, as do Escape
-    /// and a Backspace with nothing left to remove.
+    /// and a Backspace with nothing left to remove. The up arrow puts the line sent before the
+    /// one shown in its place, and the down arrow the one after, or an empty line after the
+    /// last.
     pub fn press(&mut self, key: Key, now: Instant) -> Option<Message> {
         let Some(line) = &mut self.line else {
             match key {
                 Key::Chat => self.line = Some(String::new()),
                 Key::Command => self.line = Some("/".to_owned()),
-                Key::Character(_) | Key::Backspace | Key::Enter | Key::Escape => return None,
+                _ => return None,
             }
+            self.recalled = None;
             self.touched = Some(now);
             return None;
         };
@@ -105,14 +121,56 @@ impl Draft {
                 }
                 None
             }
-            Key::Enter => self.line.take().as_deref().and_then(Message::new),
+            Key::Enter => {
+                let sent = self.line.take().as_deref().and_then(Message::new)?;
+                self.remember(sent.as_str());
+                Some(sent)
+            }
             Key::Escape => {
                 self.line = None;
                 None
             }
-            // Only pressed while the chat is closed.
-            Key::Chat | Key::Command => None,
+            Key::Up => {
+                let before = match self.recalled {
+                    Some(shown) => shown.checked_sub(1),
+                    None => self.sent.len().checked_sub(1),
+                };
+                if let Some(index) = before
+                    && let Some(earlier) = self.sent.get(index)
+                {
+                    line.clone_from(earlier);
+                    self.recalled = Some(index);
+                }
+                None
+            }
+            Key::Down => {
+                if let Some(shown) = self.recalled {
+                    let after = shown + 1;
+                    if let Some(later) = self.sent.get(after) {
+                        line.clone_from(later);
+                        self.recalled = Some(after);
+                    } else {
+                        line.clear();
+                        self.recalled = None;
+                    }
+                }
+                None
+            }
+            // Only pressed while the chat is closed, or for the chat's rows and not the line.
+            Key::Chat | Key::Command | Key::PageUp | Key::PageDown => None,
         }
+    }
+
+    /// Keeps a line sent for the arrow keys, unless it is the one sent just before.
+    fn remember(&mut self, sent: &str) {
+        self.recalled = None;
+        if self.sent.last().is_some_and(|last| last == sent) {
+            return;
+        }
+        if self.sent.len() == SENT_KEPT {
+            self.sent.remove(0);
+        }
+        self.sent.push(sent.to_owned());
     }
 
     /// Closes the chat and forgets the line, as when the player turns to another window.
@@ -120,13 +178,14 @@ impl Draft {
         self.line = None;
     }
 
-    /// The row the game draws for the line at `now`, if one is being typed: the prompt, the
-    /// line, or its end if it is too long for a row, and the cursor, which blinks.
+    /// The row the game draws for the line at `now` in chat text of `size`, if one is being
+    /// typed: the prompt, the line, or its end if it is too long for a row, and the cursor,
+    /// which blinks.
     #[must_use]
-    pub fn row(&self, now: Instant) -> Option<[u8; ROW_BYTES]> {
+    pub fn row(&self, now: Instant, size: ChatSize) -> Option<[u8; ROW_BYTES]> {
         let line = self.line.as_deref()?;
         // The cursor's room is kept while it is hidden, so a long line does not shift.
-        let shown = text::ending(line, PROMPT, CURSOR);
+        let shown = text::ending(line, PROMPT, CURSOR, size);
         let since = self
             .touched
             .map_or(Duration::ZERO, |at| now.saturating_duration_since(at));
@@ -141,8 +200,8 @@ impl Draft {
 
 #[cfg(test)]
 mod tests {
-    use super::{BLINK, Draft, Key, chat_key, chat_seconds};
-    use crate::text::{ROW_BYTES, TEXT_END};
+    use super::{BLINK, Draft, Key, SENT_KEPT, chat_key, chat_seconds};
+    use crate::text::{ChatSize, ROW_BYTES, TEXT_END};
     use b3313_protocol::MAX_MESSAGE_LENGTH;
     use std::time::Instant;
 
@@ -154,7 +213,7 @@ mod tests {
 
     /// The row as text, up to its end code.
     fn shown(draft: &Draft, now: Instant) -> Option<String> {
-        let row: [u8; ROW_BYTES] = draft.row(now)?;
+        let row: [u8; ROW_BYTES] = draft.row(now, ChatSize::Normal)?;
         let end = row.iter().position(|&byte| byte == TEXT_END)?;
         Some(String::from_utf8_lossy(row.get(..end)?).into_owned())
     }
@@ -184,6 +243,51 @@ mod tests {
             Some("hello there")
         );
         assert!(!draft.is_open());
+    }
+
+    #[test]
+    fn the_arrows_bring_back_the_lines_sent_before() {
+        let now = Instant::now();
+        let mut draft = Draft::default();
+        for line in ["first", "second", "second", "third"] {
+            draft.press(Key::Chat, now);
+            typed(&mut draft, line, now);
+            assert!(draft.press(Key::Enter, now).is_some());
+        }
+        draft.press(Key::Chat, now);
+        typed(&mut draft, "half", now);
+        // Newest first, the same line sent twice in a row once, and no further than the first.
+        draft.press(Key::Up, now);
+        assert_eq!(shown(&draft, now).as_deref(), Some("> third_"));
+        draft.press(Key::Up, now);
+        assert_eq!(shown(&draft, now).as_deref(), Some("> second_"));
+        draft.press(Key::Up, now);
+        draft.press(Key::Up, now);
+        assert_eq!(shown(&draft, now).as_deref(), Some("> first_"));
+        draft.press(Key::Down, now);
+        assert_eq!(shown(&draft, now).as_deref(), Some("> second_"));
+        // Past the newest, an empty line, and a recalled line is sent as typed anew.
+        draft.press(Key::Down, now);
+        draft.press(Key::Down, now);
+        assert_eq!(shown(&draft, now).as_deref(), Some("> _"));
+        draft.press(Key::Up, now);
+        typed(&mut draft, "!", now);
+        let sent = draft.press(Key::Enter, now);
+        assert_eq!(
+            sent.as_ref().map(b3313_protocol::Message::as_str),
+            Some("third!")
+        );
+        // Only so many are kept: the oldest go first.
+        for number in 0..SENT_KEPT {
+            draft.press(Key::Chat, now);
+            typed(&mut draft, &number.to_string(), now);
+            draft.press(Key::Enter, now);
+        }
+        draft.press(Key::Chat, now);
+        for _ in 0..=SENT_KEPT {
+            draft.press(Key::Up, now);
+        }
+        assert_eq!(shown(&draft, now).as_deref(), Some("> 0_"));
     }
 
     #[test]

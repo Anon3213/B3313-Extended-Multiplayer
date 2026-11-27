@@ -15,7 +15,7 @@ pub const CODE2_ADDR: u32 = 0x807D_1600;
 pub const CODE2_END: u32 = 0x807D_2700;
 pub const ANIM_CACHE_END: u32 = 0x807E_0000;
 pub const MAILBOX_MAGIC: u32 = 0x4233_4D50;
-pub const MAILBOX_VERSION: u32 = 0x17;
+pub const MAILBOX_VERSION: u32 = 0x18;
 pub const PLAYER_SLOTS: u32 = 0x10;
 pub const PUPPETS: u32 = 0xF;
 pub const HIT_PUNCH: u32 = 1;
@@ -45,6 +45,7 @@ pub const PERSON_OUTFIT_SHIFT: u32 = 4;
 pub const CHAT_ROWS: u32 = 8;
 pub const CHAT_ROW_BYTES: u32 = 0x34;
 pub const CHAT_ROW_PIXELS: u32 = 0xC8;
+pub const CHAT_ROW_PIXELS_LARGE: u32 = 0x7C;
 pub const CHAT_SHOWN_MOST: u32 = 6;
 pub const TYPING_LEASE: u32 = 0x1E;
 pub const BRIDGE_LEASE: u32 = 0x96;
@@ -140,8 +141,13 @@ pub const PEOPLE_SEQUENCE_OFFSET: u32 = 0x168;
 pub const CHAT_COUNT_OFFSET: u32 = 0;
 pub const CHAT_SHOWN_OFFSET: u32 = 4;
 pub const CHAT_TYPING_OFFSET: u32 = 5;
+pub const CHAT_LARGE_OFFSET: u32 = 6;
 pub const CHAT_ROWS_OFFSET: u32 = 8;
 pub const CHAT_DRAFT_OFFSET: u32 = 0x1A8;
+pub const PAD_IN_BUTTONS_OFFSET: u32 = 0;
+pub const PAD_IN_STICK_X_OFFSET: u32 = 2;
+pub const PAD_IN_STICK_Y_OFFSET: u32 = 3;
+pub const PAD_IN_FRAMES_OFFSET: u32 = 4;
 pub const MAILBOX_MAGIC_OFFSET: u32 = 0;
 pub const MAILBOX_VERSION_OFFSET: u32 = 4;
 pub const MAILBOX_BRIDGE_LEASE_OFFSET: u32 = 8;
@@ -168,6 +174,7 @@ pub const MAILBOX_OBJECTS_IN_TAKEN_OFFSET: u32 = 0x5168;
 pub const MAILBOX_EARLIER_COINS_TOLD_OFFSET: u32 = 0x516C;
 pub const MAILBOX_PEOPLE_OFFSET: u32 = 0x5170;
 pub const MAILBOX_CHAT_OFFSET: u32 = 0x52DC;
+pub const MAILBOX_PAD_IN_OFFSET: u32 = 0x54B8;
 pub const PLAYER_SLOT_SIZE: u32 = 0x80;
 pub const WORLD_SIZE: u32 = 0x140;
 pub const HIT_SIZE: u32 = 4;
@@ -185,7 +192,8 @@ pub const PROGRESS_SIZE: u32 = 0x48;
 pub const COIN_RING_SIZE: u32 = 0x84;
 pub const PEOPLE_SIZE: u32 = 0x16C;
 pub const CHAT_SIZE: u32 = 0x1DC;
-pub const MAILBOX_SIZE: u32 = 0x54B8;
+pub const PAD_IN_SIZE: u32 = 8;
+pub const MAILBOX_SIZE: u32 = 0x54C0;
 pub const NO_LEVEL: i16 = -1;
 
 /// The same numbers as lengths.
@@ -202,7 +210,7 @@ pub mod len {
     pub const CODE2_END: usize = 0x807D_2700;
     pub const ANIM_CACHE_END: usize = 0x807E_0000;
     pub const MAILBOX_MAGIC: usize = 0x4233_4D50;
-    pub const MAILBOX_VERSION: usize = 0x17;
+    pub const MAILBOX_VERSION: usize = 0x18;
     pub const PLAYER_SLOTS: usize = 0x10;
     pub const PUPPETS: usize = 0xF;
     pub const HIT_PUNCH: usize = 1;
@@ -232,6 +240,7 @@ pub mod len {
     pub const CHAT_ROWS: usize = 8;
     pub const CHAT_ROW_BYTES: usize = 0x34;
     pub const CHAT_ROW_PIXELS: usize = 0xC8;
+    pub const CHAT_ROW_PIXELS_LARGE: usize = 0x7C;
     pub const CHAT_SHOWN_MOST: usize = 6;
     pub const TYPING_LEASE: usize = 0x1E;
     pub const BRIDGE_LEASE: usize = 0x96;
@@ -327,8 +336,13 @@ pub mod len {
     pub const CHAT_COUNT_OFFSET: usize = 0;
     pub const CHAT_SHOWN_OFFSET: usize = 4;
     pub const CHAT_TYPING_OFFSET: usize = 5;
+    pub const CHAT_LARGE_OFFSET: usize = 6;
     pub const CHAT_ROWS_OFFSET: usize = 8;
     pub const CHAT_DRAFT_OFFSET: usize = 0x1A8;
+    pub const PAD_IN_BUTTONS_OFFSET: usize = 0;
+    pub const PAD_IN_STICK_X_OFFSET: usize = 2;
+    pub const PAD_IN_STICK_Y_OFFSET: usize = 3;
+    pub const PAD_IN_FRAMES_OFFSET: usize = 4;
     pub const MAILBOX_MAGIC_OFFSET: usize = 0;
     pub const MAILBOX_VERSION_OFFSET: usize = 4;
     pub const MAILBOX_BRIDGE_LEASE_OFFSET: usize = 8;
@@ -355,6 +369,7 @@ pub mod len {
     pub const MAILBOX_EARLIER_COINS_TOLD_OFFSET: usize = 0x516C;
     pub const MAILBOX_PEOPLE_OFFSET: usize = 0x5170;
     pub const MAILBOX_CHAT_OFFSET: usize = 0x52DC;
+    pub const MAILBOX_PAD_IN_OFFSET: usize = 0x54B8;
     pub const PLAYER_SLOT_SIZE: usize = 0x80;
     pub const WORLD_SIZE: usize = 0x140;
     pub const HIT_SIZE: usize = 4;
@@ -372,12 +387,13 @@ pub mod len {
     pub const COIN_RING_SIZE: usize = 0x84;
     pub const PEOPLE_SIZE: usize = 0x16C;
     pub const CHAT_SIZE: usize = 0x1DC;
-    pub const MAILBOX_SIZE: usize = 0x54B8;
+    pub const PAD_IN_SIZE: usize = 8;
+    pub const MAILBOX_SIZE: usize = 0x54C0;
 }
 
 /// Those of the numbers that are a byte's worth, as bytes.
 pub mod byte {
-    pub const MAILBOX_VERSION: u8 = 0x17;
+    pub const MAILBOX_VERSION: u8 = 0x18;
     pub const PLAYER_SLOTS: u8 = 0x10;
     pub const PUPPETS: u8 = 0xF;
     pub const HIT_PUNCH: u8 = 1;
@@ -407,6 +423,7 @@ pub mod byte {
     pub const CHAT_ROWS: u8 = 8;
     pub const CHAT_ROW_BYTES: u8 = 0x34;
     pub const CHAT_ROW_PIXELS: u8 = 0xC8;
+    pub const CHAT_ROW_PIXELS_LARGE: u8 = 0x7C;
     pub const CHAT_SHOWN_MOST: u8 = 6;
     pub const TYPING_LEASE: u8 = 0x1E;
     pub const BRIDGE_LEASE: u8 = 0x96;
@@ -500,7 +517,12 @@ pub mod byte {
     pub const CHAT_COUNT_OFFSET: u8 = 0;
     pub const CHAT_SHOWN_OFFSET: u8 = 4;
     pub const CHAT_TYPING_OFFSET: u8 = 5;
+    pub const CHAT_LARGE_OFFSET: u8 = 6;
     pub const CHAT_ROWS_OFFSET: u8 = 8;
+    pub const PAD_IN_BUTTONS_OFFSET: u8 = 0;
+    pub const PAD_IN_STICK_X_OFFSET: u8 = 2;
+    pub const PAD_IN_STICK_Y_OFFSET: u8 = 3;
+    pub const PAD_IN_FRAMES_OFFSET: u8 = 4;
     pub const MAILBOX_MAGIC_OFFSET: u8 = 0;
     pub const MAILBOX_VERSION_OFFSET: u8 = 4;
     pub const MAILBOX_BRIDGE_LEASE_OFFSET: u8 = 8;
@@ -521,4 +543,5 @@ pub mod byte {
     pub const NAME_RING_SIZE: u8 = 0x44;
     pub const PROGRESS_SIZE: u8 = 0x48;
     pub const COIN_RING_SIZE: u8 = 0x84;
+    pub const PAD_IN_SIZE: u8 = 8;
 }

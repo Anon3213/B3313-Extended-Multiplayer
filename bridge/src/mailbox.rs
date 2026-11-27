@@ -5,7 +5,7 @@
 
 use crate::layout::{self, byte, len};
 use crate::ram::{N64Ram, ProcessMemory};
-use crate::text::{self, NAME_BYTES, ROW_BYTES, TEXT_END};
+use crate::text::{self, ChatSize, NAME_BYTES, ROW_BYTES, TEXT_END};
 use b3313_protocol::objects::{OBJECT_SET_SIZE, is_object_id, object_id};
 use b3313_protocol::{
     MAX_LIVE_CHILDREN, MAX_OBJECT_ID, OBJECT_STATE_SIZE, ObjectSet, ObjectState, Outfit,
@@ -149,11 +149,27 @@ const PEOPLE_NAMES_OFFSET: usize = len::PEOPLE_NAMES_OFFSET;
 const PEOPLE_SLOTS: usize = len::PLAYER_SLOTS;
 const _: () = assert!(PEOPLE_NAMES_OFFSET + PEOPLE_SLOTS * NAME_BYTES == PEOPLE_RECORD_SIZE);
 /// `chat`, written by the bridge: a count, how many of the newest rows to show, how many more
-/// frames a line is being typed for, two spare bytes, a ring of rows, then the line being typed.
+/// frames a line is being typed for, whether the text is large, a spare byte, a ring of rows,
+/// then the line being typed.
 const CHAT_ADDRESS: u32 = MAILBOX_ADDRESS + layout::MAILBOX_CHAT_OFFSET;
-/// Where `shown` is in it; `typing` is the byte after, and the two are written as one word.
+/// Where `shown` is in it; `typing` and `large` are the bytes after, and the three are
+/// written as one word with the spare byte.
 const CHAT_SHOWN_OFFSET: u32 = layout::CHAT_SHOWN_OFFSET;
-const _: () = assert!(layout::CHAT_TYPING_OFFSET == CHAT_SHOWN_OFFSET + 1);
+const _: () = assert!(
+    layout::CHAT_TYPING_OFFSET == CHAT_SHOWN_OFFSET + 1
+        && layout::CHAT_LARGE_OFFSET == CHAT_SHOWN_OFFSET + 2
+        && CHAT_SHOWN_OFFSET.is_multiple_of(4)
+);
+/// `padIn`: buttons and a stick the game reads for a number of frames in place of its first
+/// controller's, written by the bridge whole.
+const PAD_IN_ADDRESS: u32 = MAILBOX_ADDRESS + layout::MAILBOX_PAD_IN_OFFSET;
+const _: () = assert!(
+    layout::PAD_IN_BUTTONS_OFFSET == 0
+        && layout::PAD_IN_STICK_X_OFFSET == 2
+        && layout::PAD_IN_STICK_Y_OFFSET == 3
+        && layout::PAD_IN_FRAMES_OFFSET == 4
+        && layout::PAD_IN_SIZE == 8
+);
 const CHAT_ROWS_ADDRESS: u32 = CHAT_ADDRESS + layout::CHAT_ROWS_OFFSET;
 const CHAT_ROWS: u32 = layout::CHAT_ROWS;
 const CHAT_DRAFT_ADDRESS: u32 = CHAT_ADDRESS + layout::CHAT_DRAFT_OFFSET;
@@ -231,6 +247,16 @@ fn mailbox_object(place: Place, state: &ObjectState) -> [u8; MAILBOX_OBJECT_SIZE
     entry
 }
 
+/// Buttons and a stick held for the game's first controller, for so many of its frames.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct HeldPad {
+    /// The controller's buttons, as the game's `OSContPad` has them: A is 0x8000, B 0x4000.
+    pub buttons: u16,
+    /// The stick, right and up, as the controller reports it: about 80 at the edge.
+    pub stick: [i8; 2],
+    pub frames: u16,
+}
+
 /// An index into the mailbox's remote player slots, always in range.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RemoteSlot(u8);
@@ -265,6 +291,12 @@ impl<'a, M: ProcessMemory> Mailbox<'a, M> {
     #[must_use]
     pub const fn new(ram: N64Ram<'a, M>) -> Self {
         Self { ram }
+    }
+
+    /// The game's RAM, for what is read and written outside the mailbox (`crate::game`).
+    #[must_use]
+    pub const fn ram(&self) -> &N64Ram<'a, M> {
+        &self.ram
     }
 
     /// Reports whether a multiplayer build of the expected version is running; it marks itself at boot.
@@ -703,23 +735,31 @@ impl<'a, M: ProcessMemory> Mailbox<'a, M> {
     /// `keys_held` says the player was typing a line as the session ended, or had just sent
     /// one, as the host who types `/end` has: a key may still be down that the game would
     /// take for a button, so the keys are kept from it for one lease more, which the game
-    /// counts down by itself.
+    /// counts down by itself. `size` is the chat text's, which the parting rows were cut for.
+    ///
+    /// A controller held for a bot or the bridge's travel is let go.
     ///
     /// # Errors
     /// Fails if the game's memory cannot be read or written.
-    pub fn end_session(&self, parting: &[[u8; ROW_BYTES]], keys_held: bool) -> io::Result<()> {
+    pub fn end_session(
+        &self,
+        parting: &[[u8; ROW_BYTES]],
+        keys_held: bool,
+        size: ChatSize,
+    ) -> io::Result<()> {
         self.write_chat_draft(&[TEXT_END; ROW_BYTES])?;
+        self.hold_pad(&HeldPad::default())?;
         if parting.is_empty() {
             // No bridge is here now, so the game has nothing to wait out.
             self.ram.write(BRIDGE_LEASE_ADDRESS, &0_u32.to_be_bytes())?;
-            self.show_chat(0, keys_held)?;
+            self.show_chat(0, keys_held, size)?;
         } else {
             let mut count = self.chat_count()?;
             for row in parting {
                 count = self.write_chat_row(count, row)?;
             }
             let rows = u8::try_from(parting.len()).unwrap_or(u8::MAX);
-            self.show_chat(rows, keys_held)?;
+            self.show_chat(rows, keys_held, size)?;
             self.renew_lease()?;
         }
         self.write_guarded(
@@ -775,24 +815,56 @@ impl<'a, M: ProcessMemory> Mailbox<'a, M> {
     /// # Errors
     /// Fails if the game's memory cannot be written.
     pub fn rewrite_chat_row(&self, count: u32, row: &[u8; ROW_BYTES]) -> io::Result<()> {
-        let stride = u32::try_from(ROW_BYTES).map_err(io::Error::other)?;
-        let newest = count.wrapping_sub(1) % CHAT_ROWS;
-        self.ram.write(CHAT_ROWS_ADDRESS + newest * stride, row)
+        self.rewrite_chat_rows(count, std::slice::from_ref(row))
     }
 
-    /// Has the game draw the newest `rows` rows of the chat, or none. If `typing`, it also
-    /// draws the line being typed under them, all in a box, and shows Mario no key or button,
-    /// for the next `TYPING_LEASE` of its frames: so this is called again and again while a
-    /// line is typed, and a bridge that stops calling it has stopped typing.
+    /// Writes `rows`, newest first, over the newest rows of chat of the `count` written so
+    /// far, and no more than the ring holds: for showing earlier rows where the newest were,
+    /// while the player scrolls the chat back, and the newest again after.
     ///
     /// # Errors
     /// Fails if the game's memory cannot be written.
-    pub fn show_chat(&self, rows: u8, typing: bool) -> io::Result<()> {
+    pub fn rewrite_chat_rows(&self, count: u32, rows: &[[u8; ROW_BYTES]]) -> io::Result<()> {
+        let stride = u32::try_from(ROW_BYTES).map_err(io::Error::other)?;
+        for (back, row) in (1..=CHAT_ROWS).zip(rows) {
+            let slot = count.wrapping_sub(back) % CHAT_ROWS;
+            self.ram.write(CHAT_ROWS_ADDRESS + slot * stride, row)?;
+        }
+        Ok(())
+    }
+
+    /// Has the game draw the newest `rows` rows of the chat, or none, in text of `size`. If
+    /// `typing`, it also draws the line being typed under them, all in a box, and shows Mario
+    /// no key or button, for the next `TYPING_LEASE` of its frames: so this is called again
+    /// and again while a line is typed, and a bridge that stops calling it has stopped typing.
+    ///
+    /// # Errors
+    /// Fails if the game's memory cannot be written.
+    pub fn show_chat(&self, rows: u8, typing: bool, size: ChatSize) -> io::Result<()> {
         let lease = if typing { TYPING_LEASE } else { 0 };
-        // A whole word, as every write is: the two, and the two spare bytes after them.
+        let large = u8::from(size == ChatSize::Large);
+        // A whole word, as every write is: the three, and the spare byte after them.
         self.ram.write(
             CHAT_ADDRESS + CHAT_SHOWN_OFFSET,
-            &[rows.min(CHAT_SHOWN_MOST), lease, 0, 0],
+            &[rows.min(CHAT_SHOWN_MOST), lease, large, 0],
+        )
+    }
+
+    /// Holds buttons and the stick for the game's first controller, which it reads in place
+    /// of the controller's own for `pad.frames` of its frames; a hold of none lets go at once.
+    ///
+    /// # Errors
+    /// Fails if the game's memory cannot be written.
+    pub fn hold_pad(&self, pad: &HeldPad) -> io::Result<()> {
+        let [high, low] = pad.buttons.to_be_bytes();
+        let [frames_high, frames_low] = pad.frames.to_be_bytes();
+        let [x] = pad.stick[0].to_be_bytes();
+        let [y] = pad.stick[1].to_be_bytes();
+        // Whole, in one write, the frames last of it: the game never reads a new hold's
+        // frames with the last one's buttons.
+        self.ram.write(
+            PAD_IN_ADDRESS,
+            &[high, low, x, y, frames_high, frames_low, 0, 0],
         )
     }
 
@@ -1027,8 +1099,10 @@ mod tests {
     use super::{
         Mailbox, ObjectsOut, Outfit, Person, Progress, RemoteSlot, RingCoin, Role, VERSION,
     };
+    use crate::layout::len;
     use crate::ram::N64Ram;
     use crate::ram::testing::FakeProcess;
+    use crate::text::ChatSize;
     use b3313_protocol::{
         OBJECT_STATE_SIZE, ObjectSet, ObjectState, PLAYER_STATE_SIZE, WORLD_INPUTS_SIZE,
     };
@@ -1134,7 +1208,11 @@ mod tests {
                 7 => {
                     target.write_chat_row(count, &noise.bytes())?;
                 }
-                8 => target.show_chat(noise.bytes::<1>()[0], noise.below(2) == 1)?,
+                8 => target.show_chat(
+                    noise.bytes::<1>()[0],
+                    noise.below(2) == 1,
+                    ChatSize::Normal,
+                )?,
                 11 => target.write_chat_draft(&noise.bytes())?,
                 9 => {
                     let children: Vec<u16> = (0..noise.below(300))
@@ -1455,23 +1533,40 @@ mod tests {
         assert_eq!(raw(&process, 0x5170 + 0x168, 4)?, 2_u32.to_be_bytes());
 
         // chat at 0x52DC: the count, how many rows to show, the frames a line is typed for,
-        // two spare bytes, then eight 52-byte rows, the ninth written over the first, and
-        // after them, at 0x1A8, the line being typed.
+        // whether the text is large, a spare byte, then eight 52-byte rows, the ninth written
+        // over the first, and after them, at 0x1A8, the line being typed.
         let mut count = target.chat_count()?;
         for row in 0..9_u8 {
             count = target.write_chat_row(count, &[row; 52])?;
         }
-        target.show_chat(9, false)?;
+        target.show_chat(9, false, ChatSize::Normal)?;
         assert_eq!(raw(&process, 0x52DC, 8)?, [0, 0, 0, 9, 6, 0, 0, 0]);
         assert_eq!(raw(&process, 0x52E4, 4)?, [8; 4]);
         assert_eq!(raw(&process, 0x52E4 + 52, 4)?, [1; 4]);
 
-        target.show_chat(2, true)?;
+        target.show_chat(2, true, ChatSize::Large)?;
         target.write_chat_draft(&[b'>'; 52])?;
-        assert_eq!(raw(&process, 0x52E0, 4)?, [2, 30, 0, 0]);
+        assert_eq!(raw(&process, 0x52E0, 4)?, [2, 30, 1, 0]);
         assert_eq!(raw(&process, 0x52DC + 0x1A8, 52)?, [b'>'; 52]);
+        // Two rows back from the newest, written over in place: the count stays.
+        target.rewrite_chat_rows(count, &[[b'n'; 52], [b'o'; 52]])?;
+        assert_eq!(raw(&process, 0x52E4, 4)?, [b'n'; 4]);
+        assert_eq!(raw(&process, 0x52E4 + 7 * 52, 4)?, [b'o'; 4]);
+        assert_eq!(raw(&process, 0x52DC, 4)?, 9_u32.to_be_bytes());
+
+        // padIn at 0x54B8, after the chat: the buttons, the stick's x and y, and the frames.
+        let pad = super::HeldPad {
+            buttons: 0x8000,
+            stick: [-80, 64],
+            frames: 300,
+        };
+        target.hold_pad(&pad)?;
+        assert_eq!(
+            raw(&process, 0x54B8, 8)?,
+            [0x80, 0, 0xB0, 0x40, 0x01, 0x2C, 0, 0]
+        );
         // The mailbox ends with it.
-        assert_eq!(raw(&process, 0x52DC + 0x1A8 + 52, 4)?, [0; 4]);
+        assert_eq!(0x54B8 + 8, len::MAILBOX_SIZE);
         Ok(())
     }
 

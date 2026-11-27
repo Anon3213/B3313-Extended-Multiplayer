@@ -79,8 +79,11 @@ page also covers passwords, your server's key, and running a server without the 
 
 While you're typing, the game ignores your controller, so Mario doesn't move. The keyboard is
 only read while the game's window is in front. Chat lines stay on screen for 8 seconds, and
-opening the chat shows the last six again. You can change the chat key, the time lines stay up
-(5 to 60 seconds), or turn typing in the game off, under **Preferences**.
+opening the chat shows the last six again. While it is open, **Page Up** and **Page Down**
+scroll back through earlier lines, and the **up** and **down arrows** bring back lines you sent.
+Resting the mouse on the chat's corner of the game shows it too. You can change the chat key,
+the time lines stay up (5 to 60 seconds), the chat's size (**Large** draws it twice as big), or
+turn typing in the game off, under **Preferences**.
 
 Your name can be up to 16 plain characters. If someone already has your name, you get a number
 after it. Type `/name` and a new name to change it.
@@ -155,6 +158,26 @@ Type these in the chat, in the game or on the **Play** page:
 | `/end` | Host | Ends the session for everyone and stops the server |
 
 A `<player>` can be a name or a number from `/list`.
+
+These four are carried out by your own game, and only move your own Mario:
+
+| Command | What it does |
+|---|---|
+| `/warp <level> [area]` | Takes you to that level, where it starts, or to that area of it, as `/warp 9 2` |
+| `/goto <player>` | Takes you to the area a player is in, and puts you beside them |
+| `/follow <player>` | Has Mario follow a player by himself, through the paintings and doors they take, until you type `/stop`; your controller does nothing meanwhile |
+| `/stop` | Stops a `/warp`, `/goto` or `/follow` |
+
+Level and area numbers are the ones the player list shows, as "9-2". A number that is no level
+to play in, as 1, the title screen, or one that stops the game, is refused. Any player can use these in their own game; the host
+cannot turn them off.
+
+## Bots
+
+A program on your PC can play a game with you as a player: follow you about, chat, or map the
+game's warps. Turn on **Let a bot play your game** under **Preferences → Bots**, and the bot
+connects to your game while you are in a session. [BOTS.md](BOTS.md) explains how to write
+one, and how to run several.
 
 ## What the panel changes in your emulator
 

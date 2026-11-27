@@ -243,6 +243,7 @@ def build_zip() -> None:
         SOURCES / "server" / "server.example.conf": "server.example.conf",
         SOURCES / "README.md": "README.md",
         SOURCES / "HOSTING.md": "HOSTING.md",
+        SOURCES / "BOTS.md": "BOTS.md",
         SOURCES / "CHANGELOG.md": "CHANGELOG.md",
         SOURCES / "LICENSE.txt": "LICENSE.txt",
         SOURCES / "NOTICE.md": "NOTICE.md",

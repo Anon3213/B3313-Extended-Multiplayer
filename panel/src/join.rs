@@ -7,6 +7,7 @@ use crate::emulator::Install;
 use crate::game_setup::{self, Built, Game};
 use b3313_bridge::client::{WrongServer, resolve, wrong_server};
 use b3313_bridge::session::{self, Event, Input, Options};
+use b3313_bridge::text::ChatSize;
 use b3313_protocol::Outfit;
 use b3313_protocol::secure::{PublicKey, split_join_code};
 use std::io;
@@ -241,6 +242,10 @@ pub struct Request {
     pub chat_key: Option<char>,
     /// How many seconds the game shows the chat's lines for.
     pub chat_seconds: u8,
+    /// How large the game draws the chat.
+    pub chat_size: ChatSize,
+    /// The port a bot on this PC may play the game through, if the player lets one.
+    pub bot_port: Option<u16>,
     /// The server this panel is hosting, if it is: where it listens, its key, and its host
     /// password, which goes to that server alone, so the player hosting is the host.
     pub hosting: Option<Hosting>,
@@ -433,6 +438,8 @@ impl Request {
             host_password,
             chat_key: self.chat_key,
             chat_seconds: self.chat_seconds,
+            chat_size: self.chat_size,
+            bot_port: self.bot_port,
         })
     }
 }

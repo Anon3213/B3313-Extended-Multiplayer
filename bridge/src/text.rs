@@ -16,9 +16,55 @@ pub const ROW_BYTES: usize = len::CHAT_ROW_BYTES;
 /// a screen 320 across, short of the camera's mark in the lower right, and its box while a
 /// line is typed is made this wide.
 pub const ROW_PIXELS: u32 = layout::CHAT_ROW_PIXELS;
-/// The most rows one chat line is cut into: enough for the longest message in letters of the
-/// usual width.
-pub const ROWS_PER_LINE: usize = 4;
+
+/// How large the game draws the chat: at the font's own size, or twice that, for a player who
+/// finds it too small to read. Names and the player list stay at the font's size.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ChatSize {
+    #[default]
+    Normal,
+    Large,
+}
+
+impl ChatSize {
+    /// The widest a row may be, in the font's own pixels: large rows are drawn twice as wide,
+    /// so they hold fewer characters, and their box still stops short of the camera's mark.
+    #[must_use]
+    pub const fn row_pixels(self) -> u32 {
+        match self {
+            Self::Normal => ROW_PIXELS,
+            Self::Large => layout::CHAT_ROW_PIXELS_LARGE,
+        }
+    }
+
+    /// The most rows one chat line is cut into: enough for the longest message, with the
+    /// name before it, in letters of the usual width.
+    #[must_use]
+    pub const fn rows_per_line(self) -> usize {
+        match self {
+            Self::Normal => 4,
+            Self::Large => 6,
+        }
+    }
+
+    /// The size as a setting names it: "normal" or "large".
+    #[must_use]
+    pub fn named(name: &str) -> Option<Self> {
+        match name.trim().to_ascii_lowercase().as_str() {
+            "normal" => Some(Self::Normal),
+            "large" => Some(Self::Large),
+            _ => None,
+        }
+    }
+
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Normal => "normal",
+            Self::Large => "large",
+        }
+    }
+}
 
 /// The font as the ROM carries it, which begins with how far each glyph moves the next one
 /// on: a byte for each character from the space, 0x20, to 0x7F.
@@ -59,26 +105,27 @@ pub fn field<const N: usize>(text: &str) -> [u8; N] {
     bytes
 }
 
-/// How many of `text`'s bytes make a row that fits both its field and the screen.
-fn fitting(text: &str) -> usize {
+/// How many of `text`'s bytes make a row that fits both its field and `row_pixels`.
+fn fitting(text: &str, row_pixels: u32) -> usize {
     let mut pixels = 1;
     text.bytes()
         .take(ROW_BYTES - 1)
         .take_while(|&character| {
             pixels += advance(character);
-            pixels <= ROW_PIXELS
+            pixels <= row_pixels
         })
         .count()
 }
 
-/// The end of `text` that fits a row together with `before` and `after`: all of it if it is
-/// short, and otherwise its newest characters, which someone still typing it wants to see.
+/// The end of `text` that fits a row of `size` together with `before` and `after`: all of it
+/// if it is short, and otherwise its newest characters, which someone still typing it wants
+/// to see.
 #[must_use]
-pub fn ending<'a>(text: &'a str, before: &str, after: &str) -> &'a str {
+pub fn ending<'a>(text: &'a str, before: &str, after: &str, size: ChatSize) -> &'a str {
     let around = before.len() + after.len();
     let bytes = (ROW_BYTES - 1).saturating_sub(around);
     // Each width counts the one pixel of outline that only the row's last glyph adds.
-    let pixels = (ROW_PIXELS + 1).saturating_sub(width(before) + width(after));
+    let pixels = (size.row_pixels() + 1).saturating_sub(width(before) + width(after));
     let mut taken = 0;
     let kept = text
         .bytes()
@@ -93,14 +140,14 @@ pub fn ending<'a>(text: &'a str, before: &str, after: &str) -> &'a str {
     text.get(text.len() - kept..).unwrap_or(text)
 }
 
-/// Cuts a chat line into rows that fit the chat's width, at spaces where it can, and returns
-/// the first `ROWS_PER_LINE` of them, oldest first.
+/// Cuts a chat line into rows that fit the chat's width at `size`, at spaces where it can, and
+/// returns the first `ChatSize::rows_per_line` of them, oldest first.
 #[must_use]
-pub fn rows(line: &str) -> Vec<[u8; ROW_BYTES]> {
+pub fn rows(line: &str, size: ChatSize) -> Vec<[u8; ROW_BYTES]> {
     let mut rows = Vec::new();
     let mut rest = line.trim();
-    while !rest.is_empty() && rows.len() < ROWS_PER_LINE {
-        let fits = fitting(rest);
+    while !rest.is_empty() && rows.len() < size.rows_per_line() {
+        let fits = fitting(rest, size.row_pixels());
         let cut = if fits == rest.len() {
             fits
         } else {
@@ -120,8 +167,10 @@ pub fn rows(line: &str) -> Vec<[u8; ROW_BYTES]> {
 #[cfg(test)]
 mod tests {
     use super::{
-        NAME_BYTES, ROW_BYTES, ROW_PIXELS, ROWS_PER_LINE, TEXT_END, ending, field, rows, width,
+        ChatSize, NAME_BYTES, ROW_BYTES, ROW_PIXELS, TEXT_END, ending, field, rows, width,
     };
+
+    const NORMAL: ChatSize = ChatSize::Normal;
 
     /// A row's text, up to its end code.
     fn text(row: &[u8; ROW_BYTES]) -> &str {
@@ -160,7 +209,7 @@ mod tests {
     #[test]
     fn a_long_line_is_cut_at_spaces_into_rows_that_fit() {
         let line = "Luigi: meet me by the castle door when you have the key, and bring coins";
-        let cut = rows(line);
+        let cut = rows(line, NORMAL);
         assert!(cut.len() > 1);
         assert!(cut.iter().all(|row| width(text(row)) <= ROW_PIXELS));
         // No word is split: the first row ends where a space was, and nothing is lost but
@@ -174,40 +223,62 @@ mod tests {
         // Fifty-one of the narrowest fit the screen with room to spare, so the field ends
         // the row; of the widest, the screen does first.
         // More of each than the rows of one line hold, so every row is a full one.
-        let plenty = ROW_BYTES * (ROWS_PER_LINE + 1);
-        let narrow = rows(&"i".repeat(plenty));
-        assert_eq!(narrow.len(), ROWS_PER_LINE);
+        let most = NORMAL.rows_per_line();
+        let plenty = ROW_BYTES * (most + 1);
+        let narrow = rows(&"i".repeat(plenty), NORMAL);
+        assert_eq!(narrow.len(), most);
         assert!(narrow.iter().all(|row| text(row).len() == ROW_BYTES - 1));
-        let wide = rows(&"W".repeat(plenty));
-        assert_eq!(wide.len(), ROWS_PER_LINE);
+        let wide = rows(&"W".repeat(plenty), NORMAL);
+        assert_eq!(wide.len(), most);
         for row in &wide {
             let drawn = width(text(row));
             assert!(drawn <= ROW_PIXELS && drawn + width("W") > ROW_PIXELS);
             assert!(text(row).len() < ROW_BYTES - 1);
         }
-        assert_eq!(rows("   "), Vec::<[u8; ROW_BYTES]>::new());
+        assert_eq!(rows("   ", NORMAL), Vec::<[u8; ROW_BYTES]>::new());
+    }
+
+    #[test]
+    fn large_text_has_narrower_rows_and_room_for_the_longest_message() {
+        let large = ChatSize::Large;
+        assert!(large.row_pixels() < NORMAL.row_pixels());
+        // A whole message of wide letters after the longest name, as the game shows a line.
+        let line = format!(
+            "{}: {}",
+            "M".repeat(16),
+            "m".repeat(b3313_protocol::MAX_MESSAGE_LENGTH)
+        );
+        let cut = rows(&line, large);
+        assert!(cut.iter().all(|row| width(text(row)) <= large.row_pixels()));
+        let kept: usize = cut.iter().map(|row| text(row).len()).sum();
+        assert_eq!(kept, line.len() - 1, "all of it but the space at the cut");
+        assert_eq!(ChatSize::named(" Large "), Some(large));
+        assert_eq!(ChatSize::named(large.name()), Some(large));
+        assert_eq!(ChatSize::named("huge"), None);
     }
 
     #[test]
     fn a_line_being_typed_shows_its_end_once_it_is_too_long_for_a_row() {
-        assert_eq!(ending("hello", "> ", "_"), "hello");
+        assert_eq!(ending("hello", "> ", "_", NORMAL), "hello");
 
         // Wide letters: as many of the last as the row's width has room for, and no more.
         let wide = "m".repeat(100);
-        let shown = ending(&wide, "> ", "_");
-        assert!(width(&format!("> {shown}_")) <= ROW_PIXELS);
-        assert!(width(&format!("> m{shown}_")) > ROW_PIXELS);
+        for size in [NORMAL, ChatSize::Large] {
+            let shown = ending(&wide, "> ", "_", size);
+            assert!(width(&format!("> {shown}_")) <= size.row_pixels());
+            assert!(width(&format!("> m{shown}_")) > size.row_pixels());
+        }
 
         // Narrow ones: as many as the row's field has room for.
         let narrow = "i".repeat(100);
         assert_eq!(
-            format!("> {}_", ending(&narrow, "> ", "_")).len(),
+            format!("> {}_", ending(&narrow, "> ", "_", NORMAL)).len(),
             ROW_BYTES - 1
         );
 
         // The newest, not the oldest.
         let counted = "0123456789".repeat(10);
-        let shown = ending(&counted, "> ", "_");
+        let shown = ending(&counted, "> ", "_", NORMAL);
         assert!(shown.len() < counted.len() && counted.ends_with(shown));
     }
 }

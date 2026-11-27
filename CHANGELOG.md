@@ -4,6 +4,27 @@ What each version changed, newest first. Versions of the same protocol play toge
 those from 0.1.0 to 0.1.4 join each other's servers, as do those from 0.2.0 to 0.2.2, and a
 version that does not play with the ones before it says so, as 0.3.0 and 0.4.0 do.
 
+## Not yet released
+
+It plays with 0.4.0's servers and players: nothing a player's program tells the server
+changed. The panel builds the game again by itself at the next join, as the game changed.
+
+- **Bots can play.** A program on your PC can play your game as a player in a session: see
+  where Mario and everyone else are, hold the game's controller, chat, and warp, go to a player
+  or follow one. Turn it on under **Preferences → Bots**; `BOTS.md`, in the zip, says how to
+  write one, and how to run several from the command line.
+- **Commands that move your own Mario:** `/warp <level> [area]` takes you to a level or an area
+  of it, `/goto <player>` to another player, `/follow <player>` has Mario follow them by
+  himself, through the paintings and doors they take, and `/stop` ends it. Your own game
+  carries them out, so the host cannot turn them off.
+- **Larger chat:** **Preferences → Chat in the game → Chat text size → Large** draws the chat
+  in the game twice as big.
+- **Chat history in the game:** while the chat is open, Page Up and Page Down scroll back
+  through what was said, and the up and down arrows bring back lines you sent. Resting the
+  mouse on the chat's corner of the game shows it.
+- In a game the panel starts, the emulator's hotkeys on Page Up, Page Down and the up and down
+  arrows are turned off too, as the chat now reads those keys.
+
 ## 0.4.0
 
 **This version does not play with 0.3.0 and earlier**: what a player's program tells the

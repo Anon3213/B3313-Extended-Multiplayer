@@ -103,6 +103,11 @@ When you host from the panel and join your own server, you are both: you speak a
 in the panel's **Server chat**, and as yourself, wearing the crown, on **Play** and in the
 game.
 
+Players can move their own Mario anywhere with `/warp`, `/goto` and `/follow`, and a player may
+let a bot play their game (see [BOTS.md](BOTS.md)). Each player's own program carries these out,
+so the server neither sees nor stops them; a bot is a player like any other, and can be kicked
+or banned like one.
+
 ### Commands for the server owner
 
 Type these into `b3313-server`'s console, or after a `/` in the panel's **Server chat** (on

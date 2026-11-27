@@ -56,21 +56,24 @@
 #define MIN_DEPTH 100.0f
 #define DEFAULT_FOV 45.0f
 
-// The chat is in the lower left corner, clear of the camera's mark in the lower right: its
-// rows from CHAT_BOTTOM up, the newest lowest, and under them the row being typed.
+// The chat is in the lower left corner, clear of the camera's mark in the lower right: the row
+// being typed at CHAT_DRAFT_BOTTOM, and over it the rows, from CHAT_BOTTOM up, the newest
+// lowest. In large text (MpChat's `large`, 1 here) every glyph is twice the size, which moves
+// the rows up and spaces them twice as far.
 #define CHAT_LEFT 12
-#define CHAT_BOTTOM 34
-// The row being typed, and the strip behind it, which reaches CHAT_PAD above and below the
-// row and stops CHAT_GAP short of the rows above. The box they are all in reaches CHAT_SIDE
-// past the text at each side.
+#define CHAT_DRAFT_BOTTOM 17
+// The strip behind the row being typed, which reaches CHAT_PAD above and below the row and
+// stops CHAT_GAP short of the rows above. The box they are all in reaches CHAT_SIDE past the
+// text at each side.
 #define CHAT_PAD 3
 #define CHAT_GAP 2
 #define CHAT_SIDE 5
-#define CHAT_DRAFT_BOTTOM (CHAT_BOTTOM - CHAT_GAP - CHAT_PAD - CELL_HEIGHT)
+#define CHAT_BOTTOM(large) (CHAT_DRAFT_BOTTOM + (CELL_HEIGHT << (large)) + CHAT_PAD + CHAT_GAP)
+#define CHAT_LINE(large) (LINE_HEIGHT << (large))
 #define CHAT_BOX_LEFT (CHAT_LEFT - CHAT_SIDE)
 #define CHAT_BOX_RIGHT (CHAT_LEFT + MP_CHAT_ROW_PIXELS + CHAT_SIDE)
+#define CHAT_BOX_RIGHT_LARGE (CHAT_LEFT + 2 * MP_CHAT_ROW_PIXELS_LARGE + CHAT_SIDE)
 #define CHAT_BOX_BOTTOM (CHAT_DRAFT_BOTTOM - CHAT_PAD)
-#define CHAT_STRIP_TOP (CHAT_BOTTOM - CHAT_GAP)
 // The list is held up with the D-pad's down, which neither the game nor B3313 uses in play; L,
 // the other spare button, B3313 does use. It is two columns of eight rows, below the HUD's own
 // row at the top of the screen, which is drawn after it and would cover it.
@@ -130,26 +133,31 @@ static void text_color(s32 red, s32 green, s32 blue) {
     gDPSetPrimColor(gDisplayListHead++, 0, 0, red, green, blue, 255);
 }
 
-// Draws one cell of the font with its lower left corner at (x, y) from the bottom left.
-static void draw_cell(s32 x, s32 y, s32 cell) {
-    s32 top = SCREEN_HEIGHT - y - CELL_HEIGHT;
+// Draws one cell of the font with its lower left corner at (x, y) from the bottom left, at
+// twice its size if `large` is 1: a rectangle twice as wide and high, which steps through the
+// texture half a pixel at a time.
+static void draw_cell(s32 x, s32 y, s32 cell, s32 large) {
+    s32 height = CELL_HEIGHT << large;
+    s32 top = SCREEN_HEIGHT - y - height;
 
-    gSPTextureRectangle(gDisplayListHead++, x << 2, top << 2, (x + CELL_WIDTH) << 2,
-                        (top + CELL_HEIGHT) << 2, G_TX_RENDERTILE,
+    gSPTextureRectangle(gDisplayListHead++, x << 2, top << 2, (x + (CELL_WIDTH << large)) << 2,
+                        (top + height) << 2, G_TX_RENDERTILE,
                         (cell % FONT_COLUMNS * CELL_WIDTH) << 5,
-                        (cell / FONT_COLUMNS * CELL_HEIGHT) << 5, 1 << 10, 1 << 10);
+                        (cell / FONT_COLUMNS * CELL_HEIGHT) << 5, (1 << 10) >> large,
+                        (1 << 10) >> large);
 }
 
-// Draws one line of text with its lower left corner at (x, y) from the bottom left.
-static void draw_text(s32 x, s32 y, const u8 *text) {
+// Draws one line of text with its lower left corner at (x, y) from the bottom left, at twice
+// the font's size if `large` is 1.
+static void draw_text(s32 x, s32 y, const u8 *text, s32 large) {
     s32 cell;
 
     for (; *text != MP_TEXT_END; text++) {
         cell = *text - ' ';
         if (cell != 0) {
-            draw_cell(x, y, cell);
+            draw_cell(x, y, cell, large);
         }
-        x += FONT_ADVANCES[cell];
+        x += FONT_ADVANCES[cell] << large;
     }
 }
 
@@ -200,7 +208,7 @@ static s32 draw_name(s32 slot, f32 perUnit) {
     } else if (x + width > SCREEN_WIDTH - SCREEN_EDGE) {
         x = SCREEN_WIDTH - SCREEN_EDGE - width;
     }
-    draw_text(x, y, name);
+    draw_text(x, y, name, FALSE);
     return TRUE;
 }
 
@@ -241,30 +249,32 @@ static s32 chat_rows_shown(void) {
 // The chat's box, drawn while the player types: a panel behind the `rows` rows shown and the
 // row being typed, and the same again over that row alone, which makes it the darker, as a
 // field to type in. Before the text is set up, as shading changes what that sets.
-static void shade_chat(s32 rows) {
-    s32 top = rows == 0 ? CHAT_STRIP_TOP : CHAT_BOTTOM + rows * LINE_HEIGHT + CHAT_PAD - 1;
+static void shade_chat(s32 rows, s32 large) {
+    s32 strip = CHAT_BOTTOM(large) - CHAT_GAP;
+    s32 top = rows == 0 ? strip : CHAT_BOTTOM(large) + rows * CHAT_LINE(large) + CHAT_PAD - 1;
+    s32 right = large ? CHAT_BOX_RIGHT_LARGE : CHAT_BOX_RIGHT;
 
-    shade(CHAT_BOX_LEFT, CHAT_BOX_BOTTOM, CHAT_BOX_RIGHT, top);
-    shade(CHAT_BOX_LEFT, CHAT_BOX_BOTTOM, CHAT_BOX_RIGHT, CHAT_STRIP_TOP);
+    shade(CHAT_BOX_LEFT, CHAT_BOX_BOTTOM, right, top);
+    shade(CHAT_BOX_LEFT, CHAT_BOX_BOTTOM, right, strip);
 }
 
 // Draws the newest `shown` rows of the chat, the newest lowest, and under them, while the
 // player types, the row being typed. A row there is no room for is left out, and those above.
-static void draw_chat(s32 shown, s32 typing) {
+static void draw_chat(s32 shown, s32 typing, s32 large) {
     volatile struct MpChat *chat = &gMpMailbox->chat;
     u8 row[MP_CHAT_ROW_BYTES];
     u32 count = chat->count;
     s32 i;
 
     if (typing && has_room(take_text(row, chat->draft, MP_CHAT_ROW_BYTES - 1))) {
-        draw_text(CHAT_LEFT, CHAT_DRAFT_BOTTOM, row);
+        draw_text(CHAT_LEFT, CHAT_DRAFT_BOTTOM, row, large);
     }
     for (i = 0; i < shown; i++) {
         if (!has_room(take_text(row, chat->rows[(count - 1 - i) % MP_CHAT_ROWS],
                                 MP_CHAT_ROW_BYTES - 1))) {
             break;
         }
-        draw_text(CHAT_LEFT, CHAT_BOTTOM + i * LINE_HEIGHT, row);
+        draw_text(CHAT_LEFT, CHAT_BOTTOM(large) + i * CHAT_LINE(large), row, large);
     }
 }
 
@@ -300,19 +310,19 @@ static void draw_list_row(s32 index, s32 who, volatile u8 *name, s32 level, s32 
     if (role == MP_ROLE_HOST) {
         // Gold, as a crown is, and as the game's Power Stars are.
         text_color(255, 216, 0);
-        draw_cell(x, y, MARK_HOST);
+        draw_cell(x, y, MARK_HOST, FALSE);
     } else if (role == MP_ROLE_MODERATOR) {
         text_color(110, 200, 255);
-        draw_cell(x, y, MARK_MODERATOR);
+        draw_cell(x, y, MARK_MODERATOR, FALSE);
     }
     text_color(255, 255, 255);
     take_text(text, name, MP_NAME_BYTES - 1);
-    draw_text(x + LIST_NAME_LEFT, y, text);
+    draw_text(x + LIST_NAME_LEFT, y, text, FALSE);
     out = put_number(out, level);
     *out++ = '-';
     out = put_number(out, area);
     *out = MP_TEXT_END;
-    draw_text(x + LIST_COLUMN_WIDTH - LIST_COLUMN_GAP - text_width(place), y, place);
+    draw_text(x + LIST_COLUMN_WIDTH - LIST_COLUMN_GAP - text_width(place), y, place, FALSE);
 }
 
 // Draws everyone in the session, the local player first, with where each is.
@@ -347,6 +357,7 @@ static void draw_list(void) {
 void mp_render_hud(void) {
     s32 rows;
     s32 typing;
+    s32 large;
 
     render_hud();
     // Nothing until a bridge has said who is here, nor once its lease has run out, when no
@@ -364,13 +375,14 @@ void mp_render_hud(void) {
         // With no line, the keys are only being kept from Mario until those held as the last
         // one was sent are let go: nothing is drawn for that.
         typing = gMpMailbox->chat.typing != 0 && gMpMailbox->chat.draft[0] != MP_TEXT_END;
+        large = gMpMailbox->chat.large != 0;
         if (typing) {
-            shade_chat(rows);
+            shade_chat(rows, large);
         }
         gSPDisplayList(gDisplayListHead++, gMpTextBegin);
         text_color(255, 255, 255);
         draw_names();
-        draw_chat(rows, typing);
+        draw_chat(rows, typing, large);
     }
     gSPDisplayList(gDisplayListHead++, gMpTextEnd);
 }
@@ -385,14 +397,26 @@ void mp_render_hud(void) {
 // counts it down each time the game reads its controllers, so a bridge that was killed leaves
 // the controls dead for a second and no longer.
 //
+// A program on the PC may hold buttons and the stick for the first controller through the
+// bridge (MpPadIn): they are read in its place for as many frames as the hold says.
+//
 // The bridge's own lease is counted down here too, as this runs once in every frame, paused
 // or not, where Mario's update does not. A bridge that was killed took nothing out of the
-// game: once its lease runs out, the other players go, the chat leaves the screen, and every
-// object runs as it would alone.
+// game: once its lease runs out, the other players go, the chat leaves the screen, a held
+// controller is let go, and every object runs as it would alone.
 void mp_read_pads(OSContPad *pads) {
+    volatile struct MpPadIn *held = &gMpMailbox->padIn;
+
     osContGetReadData(pads);
+    if (held->frames != 0) {
+        held->frames--;
+        pads->button = held->buttons;
+        pads->stick_x = held->stickX;
+        pads->stick_y = held->stickY;
+    }
     if (gMpMailbox->bridgeLease != 0 && --gMpMailbox->bridgeLease == 0) {
         bzero(gMpMailbox->players, sizeof(gMpMailbox->players));
+        held->frames = 0;
         gMpMailbox->objectsOwned.levelNum = MP_NO_LEVEL;
         gMpMailbox->chat.shown = 0;
         // Nor is Mario dressed for a session any more. A bridge that is still there after

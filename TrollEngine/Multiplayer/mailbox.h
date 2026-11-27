@@ -16,7 +16,7 @@
 // The multiplayer code segment; Multiplayer/segment.asm and boot.c must agree. It began at
 // 0x807C8000, and has four times been brought down toward the mailbox when it filled: three
 // times into room the mailbox had spare, and then by closing every gap between the
-// mailbox's records. The mailbox ends 8 bytes short of it, so the next time it fills, or the
+// mailbox's records. The mailbox ends where it begins, so the next time it fills, or the
 // mailbox grows, something must move or shrink: see the second segment below.
 #define MP_CODE_ADDR 0x807C56C0
 #define MP_CODE_END 0x807CC000
@@ -41,7 +41,7 @@
 #define MP_ANIM_CACHE_END 0x807E0000
 
 #define MP_MAILBOX_MAGIC 0x42334D50 // "B3MP"
-#define MP_MAILBOX_VERSION 23
+#define MP_MAILBOX_VERSION 24
 #define MP_PLAYER_SLOTS 16
 // Every other player in a full session. Slot 15 stays unused.
 #define MP_PUPPETS 15
@@ -316,11 +316,17 @@ struct MpPeople {
 // controller from Mario (mp_read_pads in Multiplayer/people.c). `typing` counts frames, as
 // `bridgeLease` does: the bridge sets it to MP_TYPING_LEASE again and again and the game
 // counts it down, so that a bridge that was killed does not leave the controls dead.
+//
+// `large`, if not 0, has the game draw the rows and the draft at twice the font's size, for a
+// player who chose large chat text; names and the player list stay as they are.
 #define MP_CHAT_ROWS 8
 // A row: up to 51 characters and the end code. The bridge cuts rows by their width in the
-// font, to MP_CHAT_ROW_PIXELS at most, which the chat's box is made as wide as.
+// font, to MP_CHAT_ROW_PIXELS at most, which the chat's box is made as wide as; in large text,
+// to MP_CHAT_ROW_PIXELS_LARGE, drawn twice as wide, which keeps the box short of the camera's
+// mark in the lower right.
 #define MP_CHAT_ROW_BYTES 52
 #define MP_CHAT_ROW_PIXELS 200
+#define MP_CHAT_ROW_PIXELS_LARGE 124
 #define MP_CHAT_SHOWN_MOST 6
 // About a second of play.
 #define MP_TYPING_LEASE 30
@@ -328,9 +334,24 @@ struct MpChat {
     /*0x000*/ u32 count;
     /*0x004*/ u8 shown;
     /*0x005*/ u8 typing;
-    /*0x006*/ u8 pad[2];
+    /*0x006*/ u8 large;
+    /*0x007*/ u8 pad;
     /*0x008*/ u8 rows[MP_CHAT_ROWS][MP_CHAT_ROW_BYTES];
     /*0x1A8*/ u8 draft[MP_CHAT_ROW_BYTES];
+};
+
+// Buttons and a stick held for the game's first controller by a program on the PC, through
+// its bridge: a bot (bridge/src/bots.rs), or the bridge's own travel (bridge/src/travel.rs).
+// While `frames` is not 0 the game reads them in place of the controller's own and counts it
+// down once a frame (mp_read_pads in Multiplayer/people.c), so a hold lasts as many frames as
+// it says; the game drops it, as it does the rest, when its bridge's lease runs out. The
+// bridge writes the record whole, in one write.
+struct MpPadIn {
+    /*0x0*/ u16 buttons;
+    /*0x2*/ s8 stickX;
+    /*0x3*/ s8 stickY;
+    /*0x4*/ u16 frames;
+    /*0x6*/ u16 pad;
 };
 
 // How many frames of the game a bridge's word that it is here lasts: about five seconds of
@@ -389,6 +410,7 @@ struct MpMailbox {
     /*0x516C*/ u32 earlierCoinsTold;
     /*0x5170*/ struct MpPeople people; // Written by the bridge.
     /*0x52DC*/ struct MpChat chat; // Written by the bridge.
+    /*0x54B8*/ struct MpPadIn padIn; // Written by the bridge.
 };
 
 // Compile-time size checks: a negative array size fails the build.
@@ -409,7 +431,8 @@ typedef char MpProgressSizeCheck[sizeof(struct MpProgress) == 0x48 ? 1 : -1];
 typedef char MpCoinRingSizeCheck[sizeof(struct MpCoinRing) == 0x84 ? 1 : -1];
 typedef char MpPeopleSizeCheck[sizeof(struct MpPeople) == 0x16C ? 1 : -1];
 typedef char MpChatSizeCheck[sizeof(struct MpChat) == 0x1DC ? 1 : -1];
-typedef char MpMailboxSizeCheck[sizeof(struct MpMailbox) == 0x54B8 ? 1 : -1];
+typedef char MpPadInSizeCheck[sizeof(struct MpPadIn) == 0x8 ? 1 : -1];
+typedef char MpMailboxSizeCheck[sizeof(struct MpMailbox) == 0x54C0 ? 1 : -1];
 // A place written beside a member is what the bridge reads and writes at: one that is wrong
 // would have the two sides of the mailbox disagree, in silence.
 #define MP_PLACE_OF(member) ((u32) & (((struct MpMailbox *) 0)->member))
@@ -430,6 +453,7 @@ typedef char MpMailboxPlacesCheck[MP_PLACE_OF(hitsIn) == 0x0034 && MP_PLACE_OF(l
                                           && MP_PLACE_OF(coinsInTaken) == 0x5160
                                           && MP_PLACE_OF(people) == 0x5170
                                           && MP_PLACE_OF(chat) == 0x52DC
+                                          && MP_PLACE_OF(padIn) == 0x54B8
                                       ? 1
                                       : -1];
 // The mailbox must end before the multiplayer code, which ends before GhostPeach.asm's flag at

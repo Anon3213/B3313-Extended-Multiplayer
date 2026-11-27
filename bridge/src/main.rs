@@ -5,6 +5,7 @@
 
 use b3313_bridge::client::resolve;
 use b3313_bridge::session::{self, End, Event, Input, Options};
+use b3313_bridge::text::ChatSize;
 use b3313_bridge::typing::{DEFAULT_CHAT_KEY, DEFAULT_CHAT_SECONDS, chat_key, chat_seconds};
 use b3313_protocol::secure::{PublicKey, split_join_code};
 use b3313_protocol::{Name, Outfit};
@@ -28,8 +29,9 @@ players see, B3313_COLOR the colors they see you in (red, green and so on; /colo
 lists them), and B3313_HOST_PASSWORD, for the host alone, the server's host password. Lines typed
 here go to the chat, and so do lines typed in the game: there, T opens the chat, or the key named
 in B3313_CHAT_KEY, and \"off\" for that leaves the keyboard unread; B3313_CHAT_SECONDS is how long
-the game shows a line, 8 unless given. The control panel's Play page
-does all this without a command line.";
+the game shows a line, 8 unless given, and B3313_CHAT_SIZE=large draws the chat at twice the size.
+B3313_BOT_PORT opens that port on 127.0.0.1 for a bot to play this game through; BOTS.md says how.
+The control panel's Play page does all this without a command line.";
 /// The key the server must have, for a server given by its address alone; unset joins
 /// whatever answers there.
 const SERVER_KEY_VARIABLE: &str = "B3313_SERVER_KEY";
@@ -46,6 +48,10 @@ const HOST_PASSWORD_VARIABLE: &str = "B3313_HOST_PASSWORD";
 const CHAT_KEY_VARIABLE: &str = "B3313_CHAT_KEY";
 /// How many seconds the game shows chat for, from 3 to 120; unset, or anything else, is 8.
 const CHAT_SECONDS_VARIABLE: &str = "B3313_CHAT_SECONDS";
+/// How large the game draws the chat: "normal" or "large"; unset, or anything else, is normal.
+const CHAT_SIZE_VARIABLE: &str = "B3313_CHAT_SIZE";
+/// The port on 127.0.0.1 a bot may connect to; unset opens none.
+const BOT_PORT_VARIABLE: &str = "B3313_BOT_PORT";
 
 /// The server as the command line gave it: where it is now, the name that was looked up for
 /// that, and the key it must have, from a join code or `SERVER_KEY_VARIABLE`.
@@ -108,6 +114,7 @@ fn print_event(server: SocketAddr, event: &Event) {
         Event::Said {
             from: None, text, ..
         } => println!("* {text}"),
+        Event::Bot(notice) => println!("{}", notice.describe()),
     }
 }
 
@@ -155,6 +162,17 @@ fn leave_on_ctrl_c() {
 #[cfg(not(windows))]
 fn leave_on_ctrl_c() {}
 
+/// The port `BOT_PORT_VARIABLE` names, if it is set.
+fn bot_port() -> Result<Option<u16>, Box<dyn Error>> {
+    match std::env::var(BOT_PORT_VARIABLE) {
+        Ok(port) => match port.trim().parse() {
+            Ok(port) => Ok(Some(port)),
+            Err(_) => Err(format!("{BOT_PORT_VARIABLE} is not a port number ({port}).").into()),
+        },
+        Err(_) => Ok(None),
+    }
+}
+
 fn run() -> Result<(), Box<dyn Error>> {
     let (rom_path, pid, server) = parse_args()?;
     let name = std::env::var(NAME_VARIABLE).unwrap_or_default();
@@ -182,6 +200,11 @@ fn run() -> Result<(), Box<dyn Error>> {
             .ok()
             .and_then(|named| chat_seconds(&named))
             .unwrap_or(DEFAULT_CHAT_SECONDS),
+        chat_size: std::env::var(CHAT_SIZE_VARIABLE)
+            .ok()
+            .and_then(|named| ChatSize::named(&named))
+            .unwrap_or_default(),
+        bot_port: bot_port()?,
     };
     leave_on_ctrl_c();
     let says = chat_from_console();

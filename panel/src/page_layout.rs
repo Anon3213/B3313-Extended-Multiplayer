@@ -75,6 +75,7 @@ impl ArrangedPage {
             panel("privacy", "Privacy"),
             panel("behavior", "Behavior"),
             panel("chat", "Chat in the game"),
+            panel("bots", "Bots"),
             panel("alerts", "Alerts"),
             panel("startup", "Startup"),
             panel("shortcuts", "Keyboard shortcuts"),
@@ -253,8 +254,8 @@ mod tests {
     #[test]
     fn a_panel_added_since_an_order_was_saved_takes_its_usual_place() {
         let page = ArrangedPage::Preferences;
-        // Saved before the page had its chat panel, which usually follows Behavior, and its
-        // About, which usually follows the shortcuts.
+        // Saved before the page had its chat panel, which usually follows Behavior, its bots,
+        // which follow the chat, and its About, which usually follows the shortcuts.
         let saved = "appearance,privacy,behavior,alerts,startup,shortcuts,reset";
         assert_eq!(PageLayout::parse(page, saved), PageLayout::usual(page));
         // The user's own order is kept, and each new panel still follows its neighbor there.
@@ -266,6 +267,7 @@ mod tests {
                 "about",
                 "behavior",
                 "chat",
+                "bots",
                 "appearance",
                 "privacy",
                 "alerts",

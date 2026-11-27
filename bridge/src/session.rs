@@ -2,6 +2,7 @@
 //! hits, objects and progress between them until the session ends. The command-line bridge and
 //! the panel's Play page both run it, each showing what it reports in its own way.
 
+use crate::assist::{Assist, BotNotice};
 use crate::client::{
     Connection, JOIN_TIMEOUT, ShownPlayers, apply_snapshot, clear_all, player_for, resolve_within,
     slot_for,
@@ -12,10 +13,11 @@ use crate::mailbox::{Mailbox, RemoteSlot};
 use crate::objects::ObjectSync;
 use crate::pacing::{FRAME_INTERVAL, SEND_INTERVAL, Schedule};
 use crate::people::People;
+use crate::pointer::WindowsPointer;
 use crate::process::WindowsProcess;
 use crate::progress::ProgressSync;
 use crate::ram::{N64Ram, ProcessMemory, Search, attach};
-use crate::text;
+use crate::text::{self, ChatSize};
 use b3313_protocol::metrics::LinkReport;
 use b3313_protocol::secure::PublicKey;
 use b3313_protocol::{HitKind, Hurt, Outfit, PlayerId, RemoveReason, RosterEntry, WorldInputs};
@@ -85,6 +87,11 @@ pub struct Options {
     /// How many seconds the game shows the chat's rows after the newest arrived. Timed by
     /// the bridge, in real time: the game's own rate varies with the emulator.
     pub chat_seconds: u8,
+    /// How large the game draws the chat.
+    pub chat_size: ChatSize,
+    /// The port on 127.0.0.1 a bot may connect to, to play this game (`crate::bots`); none
+    /// opens none.
+    pub bot_port: Option<u16>,
 }
 
 /// What a session reports as it goes.
@@ -120,6 +127,9 @@ pub enum Event {
         name: String,
         text: String,
     },
+    /// What became of the bot API: where a bot may connect, or why none can, and a bot
+    /// connecting and leaving.
+    Bot(BotNotice),
 }
 
 /// What `Event::WrongRom` means for the player, and what to do about it.
@@ -259,21 +269,41 @@ pub fn run(
     let mut keyboard = options
         .chat_key
         .map(|key| Keyboard::new(WindowsKeys::new(options.pid), key));
+    let mut pointer = WindowsPointer::new(options.pid);
+    let mut assist = Assist::new(options.bot_port, &mut |notice| events(Event::Bot(notice)));
     let mut faults = Faults::default();
     let end = loop {
         if stop.load(Ordering::Relaxed) {
             break End::Left;
         }
         let now = Instant::now();
-        if let Some(keyboard) = &mut keyboard {
-            let keys = keyboard.poll(people.is_typing(), now);
-            let keys = keyboard.has_keyboard().then_some(keys.as_slice());
-            let held = keyboard.is_settling(now);
-            people.take_keys(keys, held, session.playing, &mut connection, now);
-        }
+        let over_chat = take_player_input(
+            (keyboard.as_mut(), &mut pointer),
+            &mut people,
+            &mut connection,
+            session.playing,
+            now,
+        );
         let stepped = people
             .send(&mut connection, input, now)
-            .and_then(|()| session.step(&mailbox, &mut connection, now, &mut people, &mut events));
+            .and_then(|()| {
+                session.step(
+                    &mailbox,
+                    &mut connection,
+                    now,
+                    &mut people,
+                    &mut events,
+                    over_chat,
+                )
+            })
+            .and_then(|removed| {
+                let mut notices = |notice| events(Event::Bot(notice));
+                let drawn = (&session.interpolator, session.playing);
+                if removed.is_none() {
+                    assist.turn(&mailbox, &mut connection, &mut people, drawn, &mut notices)?;
+                }
+                Ok(removed)
+            });
         let is_lost = match stepped {
             // The game's memory or the network failed. With the game still there to read, it
             // was the network, as when Wi-Fi drops: the way back is to join again.
@@ -309,9 +339,34 @@ pub fn run(
     connection.leave();
     // A game that closed has nothing left to clear.
     if !matches!(end, End::GameClosed(_)) {
-        let _ = leave_game(&mailbox, &mut session.shown, &end, people.holds_keys());
+        let size = people.chat_size();
+        let _ = leave_game(
+            &mailbox,
+            &mut session.shown,
+            &end,
+            people.holds_keys(),
+            size,
+        );
     }
     Ok(end)
+}
+
+/// Takes what the player does at the PC for the game: the keys typed into its chat, if the
+/// keyboard is read, and whether the pointer rests on its chat, which is returned.
+fn take_player_input(
+    (keyboard, pointer): (Option<&mut Keyboard<WindowsKeys>>, &mut WindowsPointer),
+    people: &mut People,
+    connection: &mut Connection,
+    playing: bool,
+    now: Instant,
+) -> bool {
+    if let Some(keyboard) = keyboard {
+        let keys = keyboard.poll(people.is_typing(), now);
+        let keys = keyboard.has_keyboard().then_some(keys.as_slice());
+        let held = keyboard.is_settling(now);
+        people.take_keys(keys, held, playing, connection, now);
+    }
+    pointer.is_over_chat(people.chat_size(), now)
 }
 
 /// The session's failures that were taken for the network's and answered by joining again.
@@ -450,18 +505,20 @@ fn play_alone<M: ProcessMemory>(
     clear_all(mailbox, &mut link.session.shown)?;
     mailbox.run_every_object()?;
     mailbox.renew_lease()?;
-    link.people.show(mailbox, me, now)
+    link.people.show(mailbox, me, now, false)
 }
 
 /// Takes the session out of a game that goes on without it: other players must not stay frozen
 /// there, nor its chat on the screen, nor its objects waiting on games that no longer say what
 /// they do. A player who did not choose to leave is told in the game why the others are gone.
-/// `keys_held` says the keys were the chat's as the session ended, and may still be down.
+/// `keys_held` says the keys were the chat's as the session ended, and may still be down, and
+/// `size` is the chat text's.
 fn leave_game<M: ProcessMemory>(
     mailbox: &Mailbox<M>,
     shown: &mut ShownPlayers,
     end: &End,
     keys_held: bool,
+    size: ChatSize,
 ) -> io::Result<()> {
     if !mailbox.is_ready()? {
         return Ok(());
@@ -470,10 +527,10 @@ fn leave_game<M: ProcessMemory>(
     let parting = match end {
         End::Left | End::GameClosed(_) => Vec::new(),
         End::ServerSilent | End::Removed(_) | End::Refused(_) | End::NetworkFailing(_) => {
-            text::rows(&format!("- {}", end.describe()))
+            text::rows(&format!("- {}", end.describe()), size)
         }
     };
-    mailbox.end_session(&parting, keys_held)
+    mailbox.end_session(&parting, keys_held, size)
 }
 
 /// Attaches as soon as the game is running, so a session can start with the emulator. None if
@@ -630,7 +687,8 @@ impl Session {
     }
 
     /// One turn of the session: sends what is due, draws the others, and takes in what arrived.
-    /// Returns why the server removed this player, if it did.
+    /// `over_chat` says the mouse rests on the game's chat, which then shows. Returns why the
+    /// server removed this player, if it did.
     fn step<M: ProcessMemory>(
         &mut self,
         mailbox: &Mailbox<M>,
@@ -638,6 +696,7 @@ impl Session {
         now: Instant,
         people: &mut People,
         events: &mut impl FnMut(Event),
+        over_chat: bool,
     ) -> io::Result<Option<RemoveReason>> {
         let ready = mailbox.is_ready()?;
         if !ready {
@@ -742,7 +801,7 @@ impl Session {
         }
         people.receive(connection.player(), &mut received, events);
         if ready {
-            people.show(mailbox, connection.player(), now)?;
+            people.show(mailbox, connection.player(), now, over_chat)?;
         }
         if ready {
             deliver_hurts(
@@ -831,6 +890,8 @@ pub(crate) mod testing {
             host_password: String::new(),
             chat_key: Some('t'),
             chat_seconds: 8,
+            chat_size: crate::text::ChatSize::Normal,
+            bot_port: None,
         }
     }
 
@@ -864,7 +925,7 @@ mod tests {
     use crate::mailbox::{Mailbox, Person};
     use crate::people::People;
     use crate::ram::N64Ram;
-    use crate::text;
+    use crate::text::{self, ChatSize};
     use b3313_protocol::secure::ServerKey;
     use b3313_protocol::{
         ObjectSet, Outfit, PLAYER_STATE_SIZE, PROGRESS_SIZE, PlayerId, Progress, RemoveReason,
@@ -899,9 +960,14 @@ mod tests {
         while Instant::now() < deadline && !done(link.session, link.people) {
             let now = Instant::now();
             link.people.send(link.connection, &nothing_typed, now)?;
-            let removed =
-                link.session
-                    .step(mailbox, link.connection, now, link.people, &mut |_| {})?;
+            let removed = link.session.step(
+                mailbox,
+                link.connection,
+                now,
+                link.people,
+                &mut |_| {},
+                false,
+            )?;
             if removed.is_some() {
                 return Ok(removed);
             }
@@ -1109,7 +1175,13 @@ mod tests {
         let mailbox = Mailbox::new(N64Ram::new(&process, 0));
         let ended = End::Removed(b3313_protocol::RemoveReason::Ended);
 
-        leave_game(&mailbox, &mut ShownPlayers::default(), &ended, false)?;
+        leave_game(
+            &mailbox,
+            &mut ShownPlayers::default(),
+            &ended,
+            false,
+            ChatSize::Normal,
+        )?;
 
         assert_eq!(text_at(&process, CHAT_ROWS)?, "- The session was ended.");
         assert_eq!(raw(&process, CHAT_SHOWN, 4)?, [1, 0, 0, 0]);
@@ -1130,7 +1202,13 @@ mod tests {
 
         // The host typed /end: the Enter that sent it is the game's Start button, and is
         // still down when the server's answer ends the session.
-        leave_game(&mailbox, &mut ShownPlayers::default(), &ended, true)?;
+        leave_game(
+            &mailbox,
+            &mut ShownPlayers::default(),
+            &ended,
+            true,
+            ChatSize::Normal,
+        )?;
 
         // No line is left to draw a box round, and the game counts the keys' lease down
         // by itself, with no bridge left to.
@@ -1198,16 +1276,16 @@ mod tests {
             name: "Luigi",
         };
         mailbox.write_people(&mine, &[])?;
-        for row in text::rows("Luigi: hello") {
+        for row in text::rows("Luigi: hello", ChatSize::Normal) {
             mailbox.write_chat_row(0, &row)?;
         }
-        mailbox.show_chat(1, false)?;
+        mailbox.show_chat(1, false, ChatSize::Normal)?;
         let mut owned = ObjectSet::default();
         owned.insert(3);
         mailbox.write_objects_owned((9, 1), &owned, &ObjectSet::default())?;
         mailbox.write_session_progress(&Progress::from_bytes([0xFF; PROGRESS_SIZE]))?;
 
-        leave_game(&mailbox, &mut shown, &End::Left, false)?;
+        leave_game(&mailbox, &mut shown, &End::Left, false, ChatSize::Normal)?;
 
         // The game takes a sequence of nothing for no progress to add to a save.
         let progress = len::MAILBOX_PROGRESS_IN_OFFSET + len::PROGRESS_SEQUENCE_OFFSET;
@@ -1244,7 +1322,14 @@ mod tests {
     ) -> io::Result<bool> {
         let deadline = Instant::now() + Duration::from_secs(1);
         while Instant::now() < deadline {
-            session.step(mailbox, connection, Instant::now(), people, &mut |_| {})?;
+            session.step(
+                mailbox,
+                connection,
+                Instant::now(),
+                people,
+                &mut |_| {},
+                false,
+            )?;
             if done()? {
                 return Ok(true);
             }
@@ -1270,7 +1355,14 @@ mod tests {
             let mut session = Session::new(Instant::now());
             let mut advance = |session: &mut Session| {
                 let now = Instant::now();
-                session.step(&mailbox, &mut connection, now, &mut people, &mut |_| {})
+                session.step(
+                    &mailbox,
+                    &mut connection,
+                    now,
+                    &mut people,
+                    &mut |_| {},
+                    false,
+                )
             };
             advance(&mut session)?;
 
@@ -1329,7 +1421,13 @@ mod tests {
             assert!(renewed);
 
             // A bridge that leaves says so at once, and does not leave the game to find out.
-            leave_game(&mailbox, &mut session.shown, &End::Left, false)?;
+            leave_game(
+                &mailbox,
+                &mut session.shown,
+                &End::Left,
+                false,
+                ChatSize::Normal,
+            )?;
             assert_eq!(lease()?, Some(0));
             Ok(())
         })
@@ -1340,7 +1438,13 @@ mod tests {
         let process = game();
         let mailbox = Mailbox::new(N64Ram::new(&process, 0));
 
-        leave_game(&mailbox, &mut ShownPlayers::default(), &End::Left, false)?;
+        leave_game(
+            &mailbox,
+            &mut ShownPlayers::default(),
+            &End::Left,
+            false,
+            ChatSize::Normal,
+        )?;
 
         assert!(process.bytes.borrow().iter().all(|&byte| byte == 0));
         Ok(())
@@ -1373,7 +1477,14 @@ mod tests {
                     next_state = now + TICK_INTERVAL;
                 }
                 other.poll(now)?;
-                session.step(&mailbox, &mut connection, now, &mut people, &mut |_| {})?;
+                session.step(
+                    &mailbox,
+                    &mut connection,
+                    now,
+                    &mut people,
+                    &mut |_| {},
+                    false,
+                )?;
             }
 
             assert!(process.bytes.borrow().iter().all(|&byte| byte == 0));
@@ -1388,7 +1499,14 @@ mod tests {
                         told.push(found);
                     }
                 };
-                session.step(&mailbox, &mut connection, now, &mut people, &mut note)?;
+                session.step(
+                    &mailbox,
+                    &mut connection,
+                    now,
+                    &mut people,
+                    &mut note,
+                    false,
+                )?;
             }
             assert_eq!(told, [None]);
             Ok(())

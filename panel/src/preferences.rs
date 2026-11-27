@@ -11,6 +11,7 @@ use crate::sort::{Sort, SortOrder};
 use crate::system;
 use crate::theme::{Mode, ThemeName};
 use crate::zoom::Zoom;
+use b3313_bridge::text::ChatSize;
 use b3313_bridge::typing::{DEFAULT_CHAT_KEY, DEFAULT_CHAT_SECONDS, chat_key, chat_seconds};
 use b3313_protocol::Outfit;
 use b3313_protocol::secure::{PublicKey, join_code, split_join_code};
@@ -177,6 +178,11 @@ pub struct Preferences {
     pub chat_key: Option<char>,
     /// How many seconds the game shows the chat's lines after the newest arrived.
     pub chat_seconds: u8,
+    /// How large the game draws the chat.
+    pub chat_size: ChatSize,
+    /// The port a bot on this PC may play the player's game through, while they are in a
+    /// session; none for no bot.
+    pub bot_port: Option<u16>,
     /// Servers joined, most recent first.
     pub servers: Vec<SavedServer>,
     /// Open the most recent settings file when the panel opens without one named.
@@ -236,6 +242,8 @@ impl Default for Preferences {
             player_outfit: None,
             chat_key: Some(DEFAULT_CHAT_KEY),
             chat_seconds: DEFAULT_CHAT_SECONDS,
+            chat_size: ChatSize::Normal,
+            bot_port: None,
             servers: Vec::new(),
             reopen_settings: true,
             start_server: false,
@@ -485,6 +493,9 @@ impl Preferences {
                     self.chat_seconds = seconds;
                 }
             }
+            "chat_size" => self.chat_size = ChatSize::named(value).unwrap_or_default(),
+            // A port; anything else, as the "off" this writes, is none.
+            "bot_port" => self.bot_port = value.parse().ok().filter(|&port| port != 0),
             "server" if !value.is_empty() && self.servers.len() < RECENT_SERVERS => {
                 self.servers.push(SavedServer {
                     address: value.to_owned(),
@@ -605,6 +616,11 @@ impl Preferences {
         let chat_key = self.chat_key.map_or("off".to_owned(), String::from);
         let _ = writeln!(text, "chat_key = {chat_key}");
         let _ = writeln!(text, "chat_seconds = {}", self.chat_seconds);
+        let _ = writeln!(text, "chat_size = {}", self.chat_size.name());
+        let bot_port = self
+            .bot_port
+            .map_or("off".to_owned(), |port| port.to_string());
+        let _ = writeln!(text, "bot_port = {bot_port}");
         let _ = writeln!(text, "alert_sound = {}", self.alert_sound);
         for server in &self.servers {
             let _ = writeln!(text, "server = {}", server.address);
@@ -824,12 +840,31 @@ mod tests {
     use crate::sort::{Sort, SortOrder};
     use crate::theme::{Mode, ThemeName};
     use crate::zoom::Zoom;
+    use b3313_bridge::text::ChatSize;
     use b3313_protocol::Outfit;
     use b3313_protocol::secure::{SecureError, ServerKey, join_code};
     use std::path::{Path, PathBuf};
 
     fn passwords<'a>(session: &'a str, host: &'a str) -> Passwords<'a> {
         Passwords { session, host }
+    }
+
+    #[test]
+    fn large_chat_and_a_bots_port_read_back_and_are_off_unless_named() {
+        let mut preferences = Preferences {
+            chat_size: ChatSize::Large,
+            bot_port: Some(40000),
+            ..Preferences::default()
+        };
+        assert_eq!(Preferences::parse(&preferences.format()), preferences);
+        preferences.bot_port = None;
+        assert_eq!(Preferences::parse(&preferences.format()).bot_port, None);
+        assert_eq!(Preferences::parse("").bot_port, None);
+        assert_eq!(Preferences::parse("bot_port = 0\n").bot_port, None);
+        assert_eq!(
+            Preferences::parse("chat_size = huge\n").chat_size,
+            ChatSize::Normal
+        );
     }
 
     #[test]
@@ -885,8 +920,6 @@ mod tests {
             log_sort: Sort::by(LogColumn::Kind),
             ban_order: SortOrder::Descending,
             log_kinds: vec![Kind::Flag],
-            player_widths: Widths::default(),
-            log_widths: Widths::default(),
             rate_unit: RateUnit::Bits,
             compact: true,
             start_page: StartPage::Log,
@@ -898,6 +931,8 @@ mod tests {
             chat_key: Some('y'),
             chat_seconds: 30,
             servers: Vec::new(),
+            // The columns' widths, the chat's size and the bot's port: their own tests.
+            ..Preferences::default()
         };
         preferences.remember_server("example.net:41313", Some(passwords("a=b c", "")));
         // With a host password too, and with one alone, for a server anyone may join.

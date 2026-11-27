@@ -11,6 +11,8 @@ use crate::preferences::{
 };
 use crate::theme::{Theme, scaled};
 use crate::widgets::{Button, Tone, card, card_header, switch};
+use b3313_bridge::bots;
+use b3313_bridge::text::ChatSize;
 use gpui::{AnyElement, Context, FontWeight, SharedString, div, prelude::*};
 
 /// What Reset all puts back, and what it leaves.
@@ -92,6 +94,82 @@ impl Panel {
             ))
             .child(self.render_chat_key(theme, cx))
             .child(self.render_chat_time(theme, cx))
+            .child(self.render_chat_size(theme, cx))
+            .into_any_element()
+    }
+
+    /// How large the game draws the chat.
+    fn render_chat_size(&self, theme: &Theme, cx: &mut Context<Self>) -> AnyElement {
+        let chosen = self.preferences.chat_size;
+        let choices = [
+            (
+                ChatSize::Normal,
+                "Normal",
+                "The chat at the size of the game's own text",
+            ),
+            (
+                ChatSize::Large,
+                "Large",
+                "The chat twice the size, with fewer words to a row",
+            ),
+        ]
+        .into_iter()
+        .map(|(size, label, tooltip)| {
+            choice(
+                SharedString::from(format!("chat-size-{}", size.name())),
+                label,
+                size == chosen,
+                tooltip,
+                cx.listener(move |this, _, _, cx| {
+                    this.preferences.chat_size = size;
+                    this.save_preferences();
+                    cx.notify();
+                }),
+            )
+        });
+        setting_row(
+            theme,
+            "Chat text size",
+            "How large the game draws the chat and the line you type; names over the players \
+             and the player list stay as they are. While the chat is open, Page Up and Page \
+             Down scroll back through what was said, and the arrow keys bring back what you \
+             sent; resting the mouse on the chat shows it. Applies the next time you join.",
+            choices,
+        )
+    }
+
+    /// Whether a bot on this PC may play the player's game.
+    pub(super) fn render_bots(&self, theme: &Theme, cx: &mut Context<Self>) -> AnyElement {
+        let port = self.preferences.bot_port.unwrap_or(bots::DEFAULT_PORT);
+        let detail = format!(
+            "While you are in a session, a program on this PC alone can connect to \
+             127.0.0.1:{port} and play your game: see where Mario and everyone else are, hold \
+             its controller, chat, and warp, go to a player or follow one. BOTS.md, beside \
+             this program, says how to write one. Applies the next time you join."
+        );
+        card(theme)
+            .p_5()
+            .gap_4()
+            .child(card_header(
+                theme,
+                "Bots",
+                Some("For a program on this PC that plays your game with you in a session."),
+            ))
+            .child(switch(
+                theme,
+                "bot-port",
+                "Let a bot play your game",
+                &detail,
+                self.preferences.bot_port.is_some(),
+                cx.listener(move |this, _, _, cx| {
+                    this.preferences.bot_port = match this.preferences.bot_port {
+                        Some(_) => None,
+                        None => Some(port),
+                    };
+                    this.save_preferences();
+                    cx.notify();
+                }),
+            ))
             .into_any_element()
     }
 

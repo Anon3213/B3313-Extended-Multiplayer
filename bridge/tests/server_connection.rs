@@ -350,7 +350,8 @@ fn each_line_of_help_is_one_row_of_the_chat_in_the_game() -> io::Result<()> {
         // push another off the six rows the game shows at once.
         for line in &host.lines {
             let shown = format!("- {}", line.text.as_str());
-            assert_eq!(b3313_bridge::text::rows(&shown).len(), 1, "{shown}");
+            let normal = b3313_bridge::text::ChatSize::Normal;
+            assert_eq!(b3313_bridge::text::rows(&shown, normal).len(), 1, "{shown}");
         }
         Ok(())
     })

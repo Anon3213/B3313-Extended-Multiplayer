@@ -87,4 +87,4 @@ def test_the_layout_files_are_the_ones_the_header_gives() -> None:
         assert PYTHON.read_text(encoding="utf-8") == render_python(layout), "run make_layout.py"
     # And it found the layout: a header it could not read would agree with two empty files.
     assert layout["MAILBOX_VERSION"] > 0
-    assert layout["MAILBOX_CHAT_OFFSET"] + layout["CHAT_SIZE"] == layout["MAILBOX_SIZE"]
+    assert layout["MAILBOX_PAD_IN_OFFSET"] + layout["PAD_IN_SIZE"] == layout["MAILBOX_SIZE"]
