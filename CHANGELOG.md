@@ -2,9 +2,9 @@
 
 What each version changed, newest first. Versions of the same protocol play together:
 those from 0.1.0 to 0.1.4 join each other's servers, as do those from 0.2.0 to 0.2.2, and a
-version that does not play with the ones before it says so, as 0.3.0 does.
+version that does not play with the ones before it says so, as 0.3.0 and 0.4.0 do.
 
-## Not yet released
+## 0.4.0
 
 **This version does not play with 0.3.0 and earlier**: what a player's program tells the
 server changed, so everyone in a session updates together. The panel builds the game again
