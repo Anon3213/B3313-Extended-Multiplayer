@@ -242,6 +242,10 @@ pub struct Request {
     pub chat_key: Option<char>,
     /// How many seconds the game shows the chat's lines for.
     pub chat_seconds: u8,
+    /// How many of the chat's rows the game shows at once as lines arrive.
+    pub chat_lines: u8,
+    /// Whether the mouse resting on the game's chat shows it.
+    pub chat_on_hover: bool,
     /// How large the game draws the chat.
     pub chat_size: ChatSize,
     /// The port a bot on this PC may play the game through, if the player lets one.
@@ -438,6 +442,8 @@ impl Request {
             host_password,
             chat_key: self.chat_key,
             chat_seconds: self.chat_seconds,
+            chat_lines: self.chat_lines,
+            chat_on_hover: self.chat_on_hover,
             chat_size: self.chat_size,
             bot_port: self.bot_port,
         })

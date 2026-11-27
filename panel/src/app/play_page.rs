@@ -613,6 +613,8 @@ impl Panel {
             outfit: self.preferences.player_outfit,
             chat_key: self.preferences.chat_key,
             chat_seconds: self.preferences.chat_seconds,
+            chat_lines: self.preferences.chat_lines,
+            chat_on_hover: self.preferences.chat_on_hover,
             chat_size: self.preferences.chat_size,
             bot_port: self.preferences.bot_port,
             server: server.clone(),

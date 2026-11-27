@@ -45,6 +45,22 @@ pub fn chat_seconds(named: &str) -> Option<u8> {
         .then_some(seconds)
 }
 
+/// How many rows of chat the game shows at once as lines arrive, unless the player chooses
+/// fewer, and the fewest they may choose. Opening the chat, or resting the mouse on it, shows
+/// all of them whatever was chosen.
+pub const DEFAULT_CHAT_LINES: u8 = crate::mailbox::CHAT_SHOWN_MOST;
+pub const CHAT_LINES_MIN: u8 = 1;
+
+/// The rows a player named for the chat to show at once, if they are a number that may be
+/// chosen.
+#[must_use]
+pub fn chat_lines(named: &str) -> Option<u8> {
+    let lines = named.trim().parse().ok()?;
+    (CHAT_LINES_MIN..=DEFAULT_CHAT_LINES)
+        .contains(&lines)
+        .then_some(lines)
+}
+
 /// A key pressed while the game's window has the keyboard, as the chat takes it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Key {
@@ -200,7 +216,7 @@ impl Draft {
 
 #[cfg(test)]
 mod tests {
-    use super::{BLINK, Draft, Key, SENT_KEPT, chat_key, chat_seconds};
+    use super::{BLINK, Draft, Key, SENT_KEPT, chat_key, chat_lines, chat_seconds};
     use crate::text::{ChatSize, ROW_BYTES, TEXT_END};
     use b3313_protocol::MAX_MESSAGE_LENGTH;
     use std::time::Instant;
@@ -382,6 +398,15 @@ mod tests {
         assert_eq!(chat_seconds("2"), None);
         assert_eq!(chat_seconds("121"), None);
         assert_eq!(chat_seconds("long"), None);
+    }
+
+    #[test]
+    fn the_rows_the_chat_shows_at_once_are_one_to_as_many_as_the_game_draws() {
+        assert_eq!(chat_lines("1"), Some(1));
+        assert_eq!(chat_lines(" 6 "), Some(6));
+        assert_eq!(chat_lines("0"), None);
+        assert_eq!(chat_lines("7"), None);
+        assert_eq!(chat_lines("few"), None);
     }
 
     #[test]

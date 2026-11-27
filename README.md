@@ -81,9 +81,15 @@ While you're typing, the game ignores your controller, so Mario doesn't move. Th
 only read while the game's window is in front. Chat lines stay on screen for 8 seconds, and
 opening the chat shows the last six again. While it is open, **Page Up** and **Page Down**
 scroll back through earlier lines, and the **up** and **down arrows** bring back lines you sent.
-Resting the mouse on the chat's corner of the game shows it too. You can change the chat key,
-the time lines stay up (5 to 60 seconds), the chat's size (**Large** draws it twice as big), or
-turn typing in the game off, under **Preferences**.
+
+Under **Preferences → Chat in the game** you can change:
+
+- the chat key, or turn typing in the game off;
+- how long lines stay up (5 to 60 seconds);
+- how many lines show at once as they arrive (1 to 6), so the chat covers less of the game;
+- the chat's size (**Large** draws it twice as big);
+- whether resting the mouse on the chat's corner of the game shows it (off unless you turn it
+  on).
 
 Your name can be up to 16 plain characters. If someone already has your name, you get a number
 after it. Type `/name` and a new name to change it.

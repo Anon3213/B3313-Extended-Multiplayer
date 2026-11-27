@@ -6,7 +6,9 @@
 use b3313_bridge::client::resolve;
 use b3313_bridge::session::{self, End, Event, Input, Options};
 use b3313_bridge::text::ChatSize;
-use b3313_bridge::typing::{DEFAULT_CHAT_KEY, DEFAULT_CHAT_SECONDS, chat_key, chat_seconds};
+use b3313_bridge::typing::{
+    DEFAULT_CHAT_KEY, DEFAULT_CHAT_LINES, DEFAULT_CHAT_SECONDS, chat_key, chat_lines, chat_seconds,
+};
 use b3313_protocol::secure::{PublicKey, split_join_code};
 use b3313_protocol::{Name, Outfit};
 use std::error::Error;
@@ -29,7 +31,9 @@ players see, B3313_COLOR the colors they see you in (red, green and so on; /colo
 lists them), and B3313_HOST_PASSWORD, for the host alone, the server's host password. Lines typed
 here go to the chat, and so do lines typed in the game: there, T opens the chat, or the key named
 in B3313_CHAT_KEY, and \"off\" for that leaves the keyboard unread; B3313_CHAT_SECONDS is how long
-the game shows a line, 8 unless given, and B3313_CHAT_SIZE=large draws the chat at twice the size.
+the game shows a line, 8 unless given, B3313_CHAT_LINES how many rows it shows at once, 1 to 6
+(6 unless given), B3313_CHAT_HOVER=on shows the chat while the mouse rests on it, and
+B3313_CHAT_SIZE=large draws the chat at twice the size.
 B3313_BOT_PORT opens that port on 127.0.0.1 for a bot to play this game through; BOTS.md says how.
 The control panel's Play page does all this without a command line.";
 /// The key the server must have, for a server given by its address alone; unset joins
@@ -48,6 +52,11 @@ const HOST_PASSWORD_VARIABLE: &str = "B3313_HOST_PASSWORD";
 const CHAT_KEY_VARIABLE: &str = "B3313_CHAT_KEY";
 /// How many seconds the game shows chat for, from 3 to 120; unset, or anything else, is 8.
 const CHAT_SECONDS_VARIABLE: &str = "B3313_CHAT_SECONDS";
+/// How many rows of chat the game shows at once as lines arrive, from 1 to 6; unset, or
+/// anything else, is 6.
+const CHAT_LINES_VARIABLE: &str = "B3313_CHAT_LINES";
+/// Whether the mouse resting on the game's chat shows it: "on"; unset, or anything else, is off.
+const CHAT_HOVER_VARIABLE: &str = "B3313_CHAT_HOVER";
 /// How large the game draws the chat: "normal" or "large"; unset, or anything else, is normal.
 const CHAT_SIZE_VARIABLE: &str = "B3313_CHAT_SIZE";
 /// The port on 127.0.0.1 a bot may connect to; unset opens none.
@@ -200,6 +209,12 @@ fn run() -> Result<(), Box<dyn Error>> {
             .ok()
             .and_then(|named| chat_seconds(&named))
             .unwrap_or(DEFAULT_CHAT_SECONDS),
+        chat_lines: std::env::var(CHAT_LINES_VARIABLE)
+            .ok()
+            .and_then(|named| chat_lines(&named))
+            .unwrap_or(DEFAULT_CHAT_LINES),
+        chat_on_hover: std::env::var(CHAT_HOVER_VARIABLE)
+            .is_ok_and(|named| named.trim().eq_ignore_ascii_case("on")),
         chat_size: std::env::var(CHAT_SIZE_VARIABLE)
             .ok()
             .and_then(|named| ChatSize::named(&named))

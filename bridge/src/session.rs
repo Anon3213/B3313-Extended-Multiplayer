@@ -87,6 +87,12 @@ pub struct Options {
     /// How many seconds the game shows the chat's rows after the newest arrived. Timed by
     /// the bridge, in real time: the game's own rate varies with the emulator.
     pub chat_seconds: u8,
+    /// How many of the chat's rows the game shows at once as lines arrive, from
+    /// `typing::CHAT_LINES_MIN` to `typing::DEFAULT_CHAT_LINES`, all of them; opening the chat
+    /// shows all whatever this is.
+    pub chat_lines: u8,
+    /// Whether the mouse resting on the game's chat shows it, as opening it does.
+    pub chat_on_hover: bool,
     /// How large the game draws the chat.
     pub chat_size: ChatSize,
     /// The port on 127.0.0.1 a bot may connect to, to play this game (`crate::bots`); none
@@ -266,10 +272,7 @@ pub fn run(
     events(Event::Server(connection.server_key()));
     let mut session = Session::new(Instant::now());
     let mut people = People::new(options);
-    let mut keyboard = options
-        .chat_key
-        .map(|key| Keyboard::new(WindowsKeys::new(options.pid), key));
-    let mut pointer = WindowsPointer::new(options.pid);
+    let (mut keyboard, mut pointer) = player_devices(options);
     let mut assist = Assist::new(options.bot_port, &mut |notice| events(Event::Bot(notice)));
     let mut faults = Faults::default();
     let end = loop {
@@ -278,7 +281,7 @@ pub fn run(
         }
         let now = Instant::now();
         let over_chat = take_player_input(
-            (keyboard.as_mut(), &mut pointer),
+            (keyboard.as_mut(), pointer.as_mut()),
             &mut people,
             &mut connection,
             session.playing,
@@ -351,10 +354,26 @@ pub fn run(
     Ok(end)
 }
 
+/// What the session reads of the player at the PC: the keyboard, for a player who types in the
+/// game, and the mouse, for one who asked for the chat to show under it.
+fn player_devices(options: &Options) -> (Option<Keyboard<WindowsKeys>>, Option<WindowsPointer>) {
+    let keyboard = options
+        .chat_key
+        .map(|key| Keyboard::new(WindowsKeys::new(options.pid), key));
+    let pointer = options
+        .chat_on_hover
+        .then(|| WindowsPointer::new(options.pid));
+    (keyboard, pointer)
+}
+
 /// Takes what the player does at the PC for the game: the keys typed into its chat, if the
-/// keyboard is read, and whether the pointer rests on its chat, which is returned.
+/// keyboard is read, and whether the pointer rests on its chat, if that is looked at, which is
+/// returned.
 fn take_player_input(
-    (keyboard, pointer): (Option<&mut Keyboard<WindowsKeys>>, &mut WindowsPointer),
+    (keyboard, pointer): (
+        Option<&mut Keyboard<WindowsKeys>>,
+        Option<&mut WindowsPointer>,
+    ),
     people: &mut People,
     connection: &mut Connection,
     playing: bool,
@@ -366,7 +385,7 @@ fn take_player_input(
         let held = keyboard.is_settling(now);
         people.take_keys(keys, held, playing, connection, now);
     }
-    pointer.is_over_chat(people.chat_size(), now)
+    pointer.is_some_and(|pointer| pointer.is_over_chat(people.chat_size(), now))
 }
 
 /// The session's failures that were taken for the network's and answered by joining again.
@@ -890,6 +909,8 @@ pub(crate) mod testing {
             host_password: String::new(),
             chat_key: Some('t'),
             chat_seconds: 8,
+            chat_lines: crate::typing::DEFAULT_CHAT_LINES,
+            chat_on_hover: false,
             chat_size: crate::text::ChatSize::Normal,
             bot_port: None,
         }

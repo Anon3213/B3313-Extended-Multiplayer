@@ -12,7 +12,7 @@ use crate::ram::ProcessMemory;
 use crate::session::{Event, Input, Options};
 use crate::text::{self, ChatSize, ROW_BYTES, TEXT_END};
 use crate::travel::{self, Order};
-use crate::typing::{Draft, Key};
+use crate::typing::{CHAT_LINES_MIN, Draft, Key};
 use b3313_protocol::{Message, Name, Outfit, PlayerId, RosterEntry};
 use std::collections::VecDeque;
 use std::io;
@@ -57,6 +57,8 @@ pub(crate) struct People {
     /// stop.
     shown: u8,
     hide_at: Option<Instant>,
+    /// The most rows the game draws as lines arrive, as the player chose.
+    shown_most: u8,
     /// The character whose key opens the chat in the game, if the keyboard is read for it,
     /// and whether the player has been told of it there.
     chat_key: Option<char>,
@@ -168,6 +170,7 @@ impl People {
             chat_count: None,
             shown: 0,
             hide_at: None,
+            shown_most: options.chat_lines.clamp(CHAT_LINES_MIN, CHAT_SHOWN_MOST),
             chat_key: options.chat_key,
             hinted: false,
             shown_for: Duration::from_secs(u64::from(options.chat_seconds)),
@@ -447,7 +450,7 @@ impl People {
             for row in self.rows.drain(..) {
                 count = mailbox.write_chat_row(count, &row)?;
                 self.scroll.add(row);
-                self.shown = self.shown.saturating_add(1).min(CHAT_SHOWN_MOST);
+                self.shown = self.shown.saturating_add(1).min(self.shown_most);
             }
             self.chat_count = Some(count);
             self.hide_at = Some(now + self.shown_for);
@@ -625,6 +628,8 @@ mod tests {
                 host_password: String::new(),
                 chat_key: None,
                 chat_seconds: 8,
+                chat_lines: 6,
+                chat_on_hover: false,
                 chat_size: ChatSize::Normal,
                 bot_port: None,
             };
@@ -687,6 +692,32 @@ mod tests {
         assert_eq!(shown()?, Some(6));
         people.show(&mailbox, me, later, false)?;
         assert_eq!(shown()?, Some(0));
+        Ok(())
+    }
+
+    #[test]
+    fn the_game_shows_no_more_rows_at_once_than_the_player_chose() -> io::Result<()> {
+        let process = game();
+        make_ready(&process)?;
+        let mailbox = Mailbox::new(N64Ram::new(&process, 0));
+        let server = (Ipv4Addr::LOCALHOST, 9).into();
+        let chosen = Options {
+            chat_lines: 2,
+            ..options(server)
+        };
+        let mut people = People::new(&chosen);
+        let me = PlayerId::new(0).ok_or_else(|| io::Error::other("no player 0"))?;
+        let now = Instant::now();
+        let shown = || Ok::<_, io::Error>(raw(&process, CHAT_SHOWN, 4)?.first().copied());
+
+        for line in ["Luigi: one", "Luigi: two", "Luigi: three"] {
+            people.rows.extend(text::rows(line, ChatSize::Normal));
+        }
+        people.show(&mailbox, me, now, false)?;
+        assert_eq!(shown()?, Some(2));
+        // The mouse on the chat, as opening it, still shows all there is room for.
+        people.show(&mailbox, me, now, true)?;
+        assert_eq!(shown()?, Some(6));
         Ok(())
     }
 

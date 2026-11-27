@@ -13,6 +13,7 @@ use crate::theme::{Theme, scaled};
 use crate::widgets::{Button, Tone, card, card_header, switch};
 use b3313_bridge::bots;
 use b3313_bridge::text::ChatSize;
+use b3313_bridge::typing::{CHAT_LINES_MIN, DEFAULT_CHAT_LINES};
 use gpui::{AnyElement, Context, FontWeight, SharedString, div, prelude::*};
 
 /// What Reset all puts back, and what it leaves.
@@ -94,8 +95,54 @@ impl Panel {
             ))
             .child(self.render_chat_key(theme, cx))
             .child(self.render_chat_time(theme, cx))
+            .child(self.render_chat_lines(theme, cx))
             .child(self.render_chat_size(theme, cx))
+            .child(switch(
+                theme,
+                "chat-on-hover",
+                "Show the chat while the mouse rests on it",
+                "Resting the mouse on the chat's corner of the game's window shows its last \
+                 lines, as opening the chat does. Off, the mouse is never looked at. Applies \
+                 the next time you join.",
+                self.preferences.chat_on_hover,
+                cx.listener(|this, _, _, cx| {
+                    this.preferences.chat_on_hover = !this.preferences.chat_on_hover;
+                    this.save_preferences();
+                    cx.notify();
+                }),
+            ))
             .into_any_element()
+    }
+
+    /// How many rows of chat the game shows at once as lines arrive.
+    fn render_chat_lines(&self, theme: &Theme, cx: &mut Context<Self>) -> AnyElement {
+        let chosen = self.preferences.chat_lines;
+        let choices = (CHAT_LINES_MIN..=DEFAULT_CHAT_LINES).map(|lines| {
+            let tooltip = if lines == 1 {
+                "The game shows the newest row of chat alone".to_owned()
+            } else {
+                format!("The game shows up to {lines} rows of chat at once")
+            };
+            choice(
+                SharedString::from(format!("chat-lines-{lines}")),
+                &lines.to_string(),
+                lines == chosen,
+                &tooltip,
+                cx.listener(move |this, _, _, cx| {
+                    this.preferences.chat_lines = lines;
+                    this.save_preferences();
+                    cx.notify();
+                }),
+            )
+        });
+        setting_row(
+            theme,
+            "Chat lines on screen",
+            "How many rows of chat the game shows at once as lines arrive, so that fewer cover \
+             the game; a long line takes more than one. Opening the chat still shows six. \
+             Applies the next time you join.",
+            choices,
+        )
     }
 
     /// How large the game draws the chat.
@@ -133,7 +180,7 @@ impl Panel {
             "How large the game draws the chat and the line you type; names over the players \
              and the player list stay as they are. While the chat is open, Page Up and Page \
              Down scroll back through what was said, and the arrow keys bring back what you \
-             sent; resting the mouse on the chat shows it. Applies the next time you join.",
+             sent. Applies the next time you join.",
             choices,
         )
     }

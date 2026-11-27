@@ -12,7 +12,9 @@ use crate::system;
 use crate::theme::{Mode, ThemeName};
 use crate::zoom::Zoom;
 use b3313_bridge::text::ChatSize;
-use b3313_bridge::typing::{DEFAULT_CHAT_KEY, DEFAULT_CHAT_SECONDS, chat_key, chat_seconds};
+use b3313_bridge::typing::{
+    DEFAULT_CHAT_KEY, DEFAULT_CHAT_LINES, DEFAULT_CHAT_SECONDS, chat_key, chat_lines, chat_seconds,
+};
 use b3313_protocol::Outfit;
 use b3313_protocol::secure::{PublicKey, join_code, split_join_code};
 use std::fmt::Write as _;
@@ -178,6 +180,10 @@ pub struct Preferences {
     pub chat_key: Option<char>,
     /// How many seconds the game shows the chat's lines after the newest arrived.
     pub chat_seconds: u8,
+    /// How many of the chat's rows the game shows at once as lines arrive.
+    pub chat_lines: u8,
+    /// Whether the mouse resting on the game's chat shows it.
+    pub chat_on_hover: bool,
     /// How large the game draws the chat.
     pub chat_size: ChatSize,
     /// The port a bot on this PC may play the player's game through, while they are in a
@@ -242,6 +248,8 @@ impl Default for Preferences {
             player_outfit: None,
             chat_key: Some(DEFAULT_CHAT_KEY),
             chat_seconds: DEFAULT_CHAT_SECONDS,
+            chat_lines: DEFAULT_CHAT_LINES,
+            chat_on_hover: false,
             chat_size: ChatSize::Normal,
             bot_port: None,
             servers: Vec::new(),
@@ -493,6 +501,12 @@ impl Preferences {
                     self.chat_seconds = seconds;
                 }
             }
+            "chat_lines" => {
+                if let Some(lines) = chat_lines(value) {
+                    self.chat_lines = lines;
+                }
+            }
+            "chat_on_hover" => set_flag(&mut self.chat_on_hover, value),
             "chat_size" => self.chat_size = ChatSize::named(value).unwrap_or_default(),
             // A port; anything else, as the "off" this writes, is none.
             "bot_port" => self.bot_port = value.parse().ok().filter(|&port| port != 0),
@@ -616,6 +630,8 @@ impl Preferences {
         let chat_key = self.chat_key.map_or("off".to_owned(), String::from);
         let _ = writeln!(text, "chat_key = {chat_key}");
         let _ = writeln!(text, "chat_seconds = {}", self.chat_seconds);
+        let _ = writeln!(text, "chat_lines = {}", self.chat_lines);
+        let _ = writeln!(text, "chat_on_hover = {}", self.chat_on_hover);
         let _ = writeln!(text, "chat_size = {}", self.chat_size.name());
         let bot_port = self
             .bot_port
@@ -865,6 +881,19 @@ mod tests {
             Preferences::parse("chat_size = huge\n").chat_size,
             ChatSize::Normal
         );
+    }
+
+    #[test]
+    fn fewer_chat_lines_and_the_chat_on_hover_read_back_and_hover_is_off_unless_named() {
+        let preferences = Preferences {
+            chat_lines: 2,
+            chat_on_hover: true,
+            ..Preferences::default()
+        };
+        assert_eq!(Preferences::parse(&preferences.format()), preferences);
+        let usual = Preferences::parse("");
+        assert_eq!((usual.chat_lines, usual.chat_on_hover), (6, false));
+        assert_eq!(Preferences::parse("chat_lines = 9\n").chat_lines, 6);
     }
 
     #[test]
