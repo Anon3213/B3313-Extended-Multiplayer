@@ -26,6 +26,8 @@
 ; addresses in the model's layouts.
 .definelabel geo_mirror_mario_set_alpha, 0x802770A4
 .definelabel geo_switch_mario_cap_effect, 0x802776D8
+; Where the model draws what Mario holds; found the same way, at all 40 of its held-object nodes.
+.definelabel geo_switch_mario_hand_grab_pos, 0x8027795C
 ; Checks the free object list first; verified by disassembly.
 .definelabel try_to_spawn_object, 0x8029EE24
 ; From libultra; the address is the one the engine's Objects/blaarg/labels.asm gives.

@@ -20,6 +20,15 @@ by itself at the next join, as the game changed too.
 - A bridge closed and started again beside a game still in the session no longer takes
   coins away that nobody collected.
 - Enemies other players run are no longer lost for a moment after your game hitches.
+- **Something a player picks up no longer vanishes from everyone else's game.** When one
+  player grabbed Bowser, he went from the other players' games until they left the room, as
+  would anything picked up. And the player holding something no longer sees a second one in
+  every other player's hand.
+- **Doors open for the players who go through them** in everyone's game, where they stayed
+  shut for all but that player.
+- **After B3313's Toad jumpscare your controller works again.** If the game went on after it,
+  Mario ran on by himself for good and the game stopped at the next warp, which only closing
+  the emulator ended.
 - **The Play page has a Host password field**, under **Advanced**, for a server whose owner
   gave you one: join with it and you are the host. Most players never open it. It is kept
   with the server when the password is, and hidden in streamer mode.

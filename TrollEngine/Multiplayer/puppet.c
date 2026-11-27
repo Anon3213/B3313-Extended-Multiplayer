@@ -2,7 +2,10 @@
 #include "area.h"
 #include "engine/graph_node.h"
 #include "engine/math_util.h"
+#include "game_init.h"
+#include "game/main.h"
 #include "game/memory.h"
+#include "interaction.h"
 #include "level_update.h"
 #include "object_fields.h"
 #include "object_helpers.h"
@@ -58,6 +61,9 @@ struct MpPrivate {
     u32 hitsInTaken;
     // Whether the current swing has already hit each puppet, so one swing lands once per player.
     u8 swingLanded[MP_PUPPETS];
+    // Which controllers the game reads, as last seen while it read them; see
+    // restore_controllers.
+    u8 controllerBits;
     // The camera's field of view, in degrees, as of the last Mario drawn; Multiplayer/people.c
     // places names with it.
     f32 fov;
@@ -69,6 +75,14 @@ struct MpPrivate {
 typedef char MpPrivateSizeCheck[sizeof(struct MpPrivate) <= MP_WORLD_STASH_ADDR - MP_PRIVATE_ADDR
                                     ? 1
                                     : -1];
+
+// What the game's own door action marks on a door as Mario starts through it, which the door
+// opens on: pulled toward him, or pushed away (in the game's sDoorActions).
+#define DOOR_PULLED 0x00010000
+#define DOOR_PUSHED 0x00020000
+// How far past touching a door, and above or below it, a player starting through it may be.
+#define DOOR_REACH 100.0f
+#define DOOR_HEIGHT 200.0f
 
 // How far past touching a punch, kick or trip reaches.
 #define HIT_REACH 60.0f
@@ -94,6 +108,7 @@ extern void bhv_mario_update(void);
 // The game's own, which Mario's model calls as it is drawn; trollfinity.asm lacks them.
 extern Gfx *geo_mirror_mario_set_alpha(s32 callContext, struct GraphNode *node, Mat4 *mtx);
 extern Gfx *geo_switch_mario_cap_effect(s32 callContext, struct GraphNode *node, Mat4 *mtx);
+extern Gfx *geo_switch_mario_hand_grab_pos(s32 callContext, struct GraphNode *node, Mat4 *mtx);
 extern s32 mario_anim_load_patchable_table(struct DmaHandlerList *list, s32 index);
 extern u32 mario_patchable_table_TWO[];
 extern struct Object *try_to_spawn_object(s16 offsetY, f32 scale, struct Object *parent, s32 model,
@@ -359,6 +374,44 @@ static void fade_out(struct Object *puppet, s32 hasLeft) {
     puppet->oOpacity -= FADE_STEP;
 }
 
+// A door opens in the game of the player going through it, which marks it so as Mario starts
+// through; nothing tells any other game. So when a puppet starts going through a door, as its
+// animation shows, this marks the nearest closed door it can be at, and the door opens here too.
+static void open_door_for(struct Object *puppet, s32 animID) {
+    struct ObjectNode *list;
+    struct ObjectNode *node;
+    struct Object *door;
+    struct Object *nearest = NULL;
+    f32 dx, dz, distance, reach;
+    f32 best = 0.0f;
+    s32 i;
+
+    for (i = 0; i < NUM_OBJ_LISTS; i++) {
+        list = &gObjectLists[i];
+        for (node = list->next; node != list; node = node->next) {
+            door = (struct Object *) node;
+            if (!(door->oInteractType & (INTERACT_DOOR | INTERACT_WARP_DOOR))
+                || door->oAction != 0 || (door->activeFlags & ACTIVE_FLAG_FAR_AWAY)
+                || door->oPosY - puppet->oPosY > DOOR_HEIGHT
+                || puppet->oPosY - door->oPosY > DOOR_HEIGHT) {
+                continue;
+            }
+            dx = door->oPosX - puppet->oPosX;
+            dz = door->oPosZ - puppet->oPosZ;
+            distance = dx * dx + dz * dz;
+            reach = door->hitboxRadius + puppet->hitboxRadius + DOOR_REACH;
+            if (distance < reach * reach && (nearest == NULL || distance < best)) {
+                nearest = door;
+                best = distance;
+            }
+        }
+    }
+    if (nearest != NULL) {
+        nearest->oInteractStatus |=
+            animID == MARIO_ANIM_PULL_DOOR_WALK_IN ? DOOR_PULLED : DOOR_PUSHED;
+    }
+}
+
 void mp_puppet_update(void) {
     struct Object *puppet = gCurrentObject;
     s32 index = puppet->oBehParams2ndByte;
@@ -419,6 +472,11 @@ void mp_puppet_update(void) {
     gfx->animInfo.animAccel = 0;
     gfx->animInfo.animYTrans = gMarioObject->header.gfx.animInfo.animYTrans;
     if (isNewAnim) {
+        if (slot->animID != gfx->animInfo.animID
+            && (slot->animID == MARIO_ANIM_PULL_DOOR_WALK_IN
+                || slot->animID == MARIO_ANIM_PUSH_DOOR_WALK_IN)) {
+            open_door_for(puppet, slot->animID);
+        }
         gfx->animInfo.animID = slot->animID;
         // A negative frame would index before the animation's data.
         gfx->animInfo.animFrame = slot->animFrame < 0 ? 0 : slot->animFrame;
@@ -484,6 +542,15 @@ f32 mp_camera_fov(void) {
 
 typedef Gfx *(*GeoFunction)(s32 callContext, struct GraphNode *node, Mat4 *mtx);
 
+// Whether the object being drawn is a puppet. Only objects in the pool have a behavior to ask:
+// the mirror's Mario, for one, is not one.
+static s32 is_drawing_puppet(void) {
+    struct Object *drawn = (struct Object *) gCurGraphNodeObject;
+
+    return drawn >= gObjectPool && drawn < gObjectPool + OBJECT_POOL_CAPACITY
+        && drawn->behavior == bhvMpPuppet;
+}
+
 // Mario's model takes its opacity, and whether he is metal, from one state that every Mario
 // drawn shares: the local Mario's. While a puppet is drawn, that state is the puppet's own: if
 // it is fading, see-through, and by how much, as the vanish cap does; and if not, as he is with
@@ -496,10 +563,8 @@ static Gfx *with_puppet_opacity(GeoFunction function, s32 callContext, struct Gr
     s16 own;
     Gfx *gfx;
 
-    // The model also calls these as it is built, at boot, before Mario has a state; and only
-    // objects in the pool have a behavior to ask: the mirror's Mario, for one, is not one.
-    if (callContext != GEO_CONTEXT_RENDER || body == NULL || drawn < gObjectPool
-        || drawn >= gObjectPool + OBJECT_POOL_CAPACITY || drawn->behavior != bhvMpPuppet) {
+    // The model also calls these as it is built, at boot, before Mario has a state.
+    if (callContext != GEO_CONTEXT_RENDER || body == NULL || !is_drawing_puppet()) {
         return function(callContext, node, mtx);
     }
     own = body->modelState;
@@ -594,6 +659,19 @@ Gfx *mp_mario_set_alpha(s32 callContext, struct GraphNode *node, Mat4 *mtx) {
 
 Gfx *mp_mario_cap_effect(s32 callContext, struct GraphNode *node, Mat4 *mtx) {
     return with_puppet_opacity(geo_switch_mario_cap_effect, callContext, node, mtx);
+}
+
+// Stands in for the game's own where Mario's model draws what he holds in his hand: the local
+// Mario's held object, as every Mario drawn reads the local Mario's state. A puppet holds
+// nothing of this game's, so it draws nothing there; else every other player held a second of
+// whatever the local one did, and set where the local one throws it from. See hooks.asm.
+Gfx *mp_mario_hand_grab_pos(s32 callContext, struct GraphNode *node, Mat4 *mtx) {
+    Gfx *gfx = geo_switch_mario_hand_grab_pos(callContext, node, mtx);
+
+    if (callContext == GEO_CONTEXT_RENDER && is_drawing_puppet()) {
+        ((struct GraphNodeHeldObject *) node)->objNode = NULL;
+    }
+    return gfx;
 }
 
 // Whether Mario's and a puppet's cylinders overlap in height, as in the game's own collisions.
@@ -723,11 +801,32 @@ static void take_hits(void) {
     }
 }
 
+// B3313's Toad jumpscare stops the game reading its controllers, by clearing gControllerBits in
+// each frame it runs, and nothing in the game ever sets them again. It then crashes on purpose;
+// should the game go on, as one in a session did, after a death took the player elsewhere, the
+// controllers are never read again, and Mario does forever what the last reading said. So the
+// bits are put back here, in every frame: before the level's objects run, so the jumpscare
+// clears them again for as long as it is there.
+//
+// The read the game started before the bits were cleared was never taken, and its message
+// would wait in the queue the save routines wait on too: the next save then ran out of step
+// with the controller's interface, and the game stopped at the next warp, with or without
+// this. Each time the bits are put back, that message is taken.
+static void restore_controllers(void) {
+    if (gControllerBits != 0) {
+        sPrivate->controllerBits = gControllerBits;
+    } else if (sPrivate->controllerBits != 0) {
+        osRecvMesg(&gSIEventMesgQueue, NULL, OS_MESG_NOBLOCK);
+        gControllerBits = sPrivate->controllerBits;
+    }
+}
+
 // Runs as Mario's behavior, so it only runs when objects do: never while paused or between areas.
 // Mario's object list updates before the puppets', so this runs first in every frame.
 void mp_mario_update(void) {
     s32 i;
 
+    restore_controllers();
     // Before Mario's own update, so his step starts from a knockback or where a bump left him,
     // among objects where their owners have them.
     take_hits();

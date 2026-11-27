@@ -124,3 +124,50 @@ mp_pointer 0x12A6C8, geo_switch_mario_cap_effect, mp_mario_cap_effect
 mp_pointer 0x12A6FC, geo_switch_mario_cap_effect, mp_mario_cap_effect
 mp_pointer 0x11A46D4, geo_switch_mario_cap_effect, mp_mario_cap_effect
 mp_pointer 0x11D9A4C, geo_switch_mario_cap_effect, mp_mario_cap_effect
+
+; Mario's model draws what he holds through the game's own function, which reads the local
+; Mario's held object for every Mario drawn. These are every one of its held-object nodes, B3313's
+; copies included; they call through Multiplayer/puppet.c, so a puppet holds nothing.
+.macro mp_hand_grab, offset
+    mp_pointer offset, geo_switch_mario_hand_grab_pos, mp_mario_hand_grab_pos
+.endmacro
+mp_hand_grab 0x127E88
+mp_hand_grab 0x127EA8
+mp_hand_grab 0x128164
+mp_hand_grab 0x128184
+mp_hand_grab 0x12857C
+mp_hand_grab 0x12859C
+mp_hand_grab 0x128994
+mp_hand_grab 0x1289B4
+mp_hand_grab 0x128C70
+mp_hand_grab 0x128C90
+mp_hand_grab 0x129088
+mp_hand_grab 0x1290A8
+mp_hand_grab 0x129410
+mp_hand_grab 0x129430
+mp_hand_grab 0x1296EC
+mp_hand_grab 0x12970C
+mp_hand_grab 0x129A74
+mp_hand_grab 0x129A94
+mp_hand_grab 0x129DFC
+mp_hand_grab 0x129E1C
+mp_hand_grab 0x12A0D8
+mp_hand_grab 0x12A0F8
+mp_hand_grab 0x12A470
+mp_hand_grab 0x12A490
+mp_hand_grab 0x11A3708
+mp_hand_grab 0x11A38CC
+mp_hand_grab 0x11A3C68
+mp_hand_grab 0x11A3DE4
+mp_hand_grab 0x11A40A0
+mp_hand_grab 0x11A421C
+mp_hand_grab 0x11A44D8
+mp_hand_grab 0x11A495C
+mp_hand_grab 0x11D8A80
+mp_hand_grab 0x11D8C44
+mp_hand_grab 0x11D8FE0
+mp_hand_grab 0x11D915C
+mp_hand_grab 0x11D9418
+mp_hand_grab 0x11D9594
+mp_hand_grab 0x11D9850
+mp_hand_grab 0x11D9CD4

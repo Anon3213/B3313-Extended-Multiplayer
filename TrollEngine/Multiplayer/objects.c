@@ -291,9 +291,13 @@ u16 mp_object_id(struct Object *obj) {
     }
     entry = &sIds->slots[slot];
     // A slot freed and filled again holds a different object, spawned at runtime by another
-    // object, so its parent is not itself.
+    // object, so its parent is not itself. But Mario picking an object up makes him its parent
+    // (the game's obj_set_held_state), for good: it is still the object numbered unless its slot
+    // was freed. Taken for another, a held Bowser was reported gone, and other games removed
+    // theirs for the rest of the visit.
     if (entry->id == 0 || obj->activeFlags == ACTIVE_FLAG_DEACTIVATED
-        || obj->behavior != entry->behavior || obj->parentObj != obj) {
+        || obj->behavior != entry->behavior
+        || (obj->parentObj != obj && (obj->parentObj != gMarioObject || entry->left))) {
         return 0;
     }
     return entry->id;
