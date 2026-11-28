@@ -14,9 +14,9 @@ changed, and neither did the game.
   there from Preferences. Its shortcut is Ctrl+7, so Preferences is now Ctrl+8.
 - **Bot games:** while you are in a session, the Bots page starts from 1 to 8 more games beside
   yours, each a player of its own for a bot on your PC to play, and lists the port each bot
-  connects to. Each is your game in an emulator of its own that opens in a window 640 by 480,
-  even when yours plays full screen, is muted, ignores your controller and goes on running
-  behind other windows. They close when you stop them or leave
+  connects to. Each is your game in an emulator of its own that opens in a window 640 by 480
+  behind the panel, even when yours plays full screen, draws its picture at 640 by 480, is
+  muted, ignores your controller and goes on running behind other windows. They close when you stop them or leave
   the session. With **Follow you**, their Marios follow yours by themselves until a bot takes
   over.
 - **Bots and commands work from the title screen.** A `warp`, `goto` or `follow` asked for

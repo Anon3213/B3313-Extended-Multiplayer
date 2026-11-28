@@ -14,6 +14,7 @@ use crate::theme::{Theme, scaled};
 use crate::widgets::{Button, OneLine as _, Tone, card, card_header, dot, switch};
 use b3313_bridge::bots;
 use gpui::{AnyElement, Context, SharedString, div, prelude::*};
+use std::time::{Duration, Instant};
 
 /// The bot games: how many to start, those running, and the player's request for the session
 /// they join, while the player is in one.
@@ -24,7 +25,14 @@ pub(super) struct BotGames {
     follow: bool,
     games: Vec<BotGame>,
     joined_with: Option<Request>,
+    /// Until when other programs are kept from taking the focus (`emulator::hold_focus`), while
+    /// bot games' windows open, at the latest.
+    focus_held_until: Option<Instant>,
 }
+
+/// The longest the focus is held while bot games open; they are usually in the session, their
+/// windows open, within a few seconds.
+const FOCUS_HELD_FOR: Duration = Duration::from_secs(20);
 
 impl Default for BotGames {
     fn default() -> Self {
@@ -33,6 +41,7 @@ impl Default for BotGames {
             follow: false,
             games: Vec::new(),
             joined_with: None,
+            focus_held_until: None,
         }
     }
 }
@@ -54,6 +63,7 @@ impl BotGames {
     /// each waits for its session to leave and its emulator to close, which the window is not
     /// to wait for.
     fn stop_games(&mut self) {
+        self.release_focus();
         let games = std::mem::take(&mut self.games);
         if !games.is_empty() {
             // Should no thread start, they are closed here, the window waiting.
@@ -70,7 +80,30 @@ impl BotGames {
         for game in &mut self.games {
             changed |= game.poll();
         }
+        // Once every window is open, as it is when its game is in the session, or ended.
+        let opened = self
+            .games
+            .iter()
+            .all(|game| matches!(game.status, Status::Playing(_) | Status::Ended(_)));
+        let overdue = self
+            .focus_held_until
+            .is_some_and(|until| Instant::now() >= until);
+        if opened || overdue {
+            self.release_focus();
+        }
         changed
+    }
+
+    /// Keeps the focus from the bot games' windows as they open (`emulator::hold_focus`).
+    fn hold_focus(&mut self) {
+        emulator::hold_focus(true);
+        self.focus_held_until = Some(Instant::now() + FOCUS_HELD_FOR);
+    }
+
+    fn release_focus(&mut self) {
+        if self.focus_held_until.take().is_some() {
+            emulator::hold_focus(false);
+        }
     }
 
     /// How many bot games are in the session, and how many are running at all.
@@ -192,6 +225,9 @@ impl Panel {
             }
             _ => None,
         };
+        // Pressing Start leaves the panel in front, so it may keep the windows from taking
+        // the focus as they open.
+        self.play.bots.hold_focus();
         for number in 1..=self.play.bots.count {
             let started = bot_games::port(self.preferences.bot_port, number)
                 .ok_or_else(|| "No port is left after yours for a bot game.".to_owned())

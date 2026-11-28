@@ -20,7 +20,7 @@ const BACKUPS_KEPT: usize = 30;
 pub struct Change {
     pub what: String,
     pub why: &'static str,
-    settings: Vec<(String, &'static str)>,
+    settings: Vec<(String, String)>,
 }
 
 /// A setting given the value that binds a hotkey to no key.
@@ -148,7 +148,9 @@ const BOT_CHANGES: [FixedChange; 4] = [
         "It reads no controller.",
         "The emulator reads a controller with its window behind others, so yours would move \
          the bot's Mario as well as your own.",
-        &[("input_joypad_driver", "null")],
+        // The game's controller is the sixteenth plugged in, which no PC has. A joypad driver
+        // of "null" does not do it: RetroArch 1.22 has none on Windows and takes dinput.
+        &[("input_player1_joypad_index", "15")],
     ),
     (
         "It goes on running while its window is behind others.",
@@ -160,7 +162,64 @@ const BOT_CHANGES: [FixedChange; 4] = [
 
 /// What a bot's game is changed in, for the player to be told, in the player's words.
 pub fn bot_changes() -> impl Iterator<Item = &'static str> {
-    BOT_CHANGES.iter().map(|&(what, _, _)| what)
+    BOT_CHANGES
+        .iter()
+        .map(|&(what, _, _)| what)
+        .chain([BOT_PICTURE.0])
+}
+
+/// What a bot's game draws its picture at, and why: as what and why, then the core's options
+/// that do it, laid over a copy of the player's own (`bot_core_options`), which the game is
+/// pointed at (`core_options_path`).
+const BOT_PICTURE: (&str, &str, [(&str, &str); 2]) = (
+    "It draws its picture at 640 by 480.",
+    "Parallel Launcher draws a game at up to 2880 by 2160, which several bot games would ask of \
+     your graphics card at once.",
+    [
+        ("parallel-n64-screensize", "640x480"),
+        ("parallel-n64-parallel-rdp-upscaling", "1x"),
+    ],
+);
+
+/// The player's core options, `theirs`, as a bot's game is given them: as they are but for
+/// what `BOT_PICTURE` sets.
+fn bot_core_options(theirs: &str) -> String {
+    let (_, _, options) = BOT_PICTURE;
+    let mut file = String::new();
+    for line in theirs.lines() {
+        let name = line.split_once('=').map(|(name, _)| name.trim());
+        if !options.iter().any(|&(option, _)| Some(option) == name) {
+            // Writing to a String cannot fail.
+            let _ = writeln!(file, "{line}");
+        }
+    }
+    for (option, value) in options {
+        let _ = writeln!(file, "{option} = \"{value}\"");
+    }
+    file
+}
+
+/// The change that points a bot's game at its own core options, kept at `path`.
+fn bot_picture_change(path: &Path) -> Change {
+    let (what, why, _) = BOT_PICTURE;
+    Change {
+        what: what.to_owned(),
+        why,
+        settings: vec![("core_options_path".to_owned(), path.display().to_string())],
+    }
+}
+
+/// Keeps other programs from taking the keyboard's focus from this one while `held`, as a bot
+/// game's emulator does as its window opens (`win32_set_window` calls `SetForegroundWindow`),
+/// which Windows allows a program started by the one in front. It does nothing unless the
+/// panel is in front, and a click or the Alt key anywhere ends it.
+pub fn hold_focus(held: bool) {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        LSFW_LOCK, LSFW_UNLOCK, LockSetForegroundWindow,
+    };
+    let code = if held { LSFW_LOCK } else { LSFW_UNLOCK };
+    // SAFETY: takes no pointers. It fails, changing nothing, when the panel is not in front.
+    let _ = unsafe { LockSetForegroundWindow(code) };
 }
 
 /// The keys a line of chat is typed with, as `RetroArch`'s settings name them, besides the
@@ -252,7 +311,7 @@ fn typing_change(hotkeys: &[(&str, &str)]) -> Option<Change> {
               as you typed. Turn typing in the game off, under Preferences, to keep them.",
         settings: hotkeys
             .iter()
-            .map(|&(name, _)| (name.to_owned(), NO_KEY))
+            .map(|&(name, _)| (name.to_owned(), NO_KEY.to_owned()))
             .collect(),
     })
 }
@@ -264,7 +323,7 @@ fn fixed_changes(fixed: &'static [FixedChange]) -> impl Iterator<Item = Change> 
         why,
         settings: lines
             .iter()
-            .map(|&(name, value)| (name.to_owned(), value))
+            .map(|&(name, value)| (name.to_owned(), value.to_owned()))
             .collect(),
     })
 }
@@ -384,22 +443,30 @@ impl Install {
     /// # Errors
     /// As `start`.
     pub fn start_bot(&self, rom: &Path) -> io::Result<u32> {
-        let changes = bot_changes_to(&self.read_settings()?);
+        let settings = self.read_settings()?;
         let name = rom.file_stem().unwrap_or_default().to_string_lossy();
+        // The player's core options, which a game reads from beside the emulator's settings
+        // unless those name another file; none yet is none to copy.
+        let theirs = match core_options_named(&settings) {
+            Some(path) => PathBuf::from(path),
+            None => self.settings.with_file_name("retroarch-core-options.cfg"),
+        };
+        let theirs = match std::fs::read(&theirs) {
+            Ok(bytes) => String::from_utf8_lossy(&bytes).into_owned(),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => String::new(),
+            Err(error) => return Err(error),
+        };
+        let core_options = panel_file(rom, &format!("{name}.core-options.cfg"));
+        write_creating_folder(&core_options, &bot_core_options(&theirs))?;
+        let mut changes = bot_changes_to(&settings);
+        changes.push(bot_picture_change(&core_options));
         self.launch(rom, &changes, &format!("{name}.retroarch.cfg"))
     }
 
     /// Starts `rom` with `changes` laid over the player's settings, from a file of that name.
     fn launch(&self, rom: &Path, changes: &[Change], file: &str) -> io::Result<u32> {
-        // Among the panel's own files, not in a folder of the player's that a ROM they chose
-        // may be in; beside the ROM only where the panel has no folder.
-        let overrides = crate::preferences::path()
-            .and_then(|preferences| Some(preferences.parent()?.join(file)))
-            .unwrap_or_else(|| rom.with_extension("retroarch.cfg"));
-        if let Some(folder) = overrides.parent() {
-            std::fs::create_dir_all(folder)?;
-        }
-        std::fs::write(&overrides, self::overrides(changes))?;
+        let overrides = panel_file(rom, file);
+        write_creating_folder(&overrides, &self::overrides(changes))?;
         let child = Command::new(&self.program)
             .args(self.arguments(rom, &overrides))
             .spawn()?;
@@ -471,6 +538,32 @@ pub fn close(pid: u32) -> io::Result<()> {
     } else {
         Err(io::Error::other(format!("taskkill ended with {status}")))
     }
+}
+
+/// Where the panel keeps a file named `file` that a game it starts reads: among the panel's own
+/// files, not in a folder of the player's that a ROM they chose may be in; beside `rom` only
+/// where the panel has no folder.
+fn panel_file(rom: &Path, file: &str) -> PathBuf {
+    crate::preferences::path()
+        .and_then(|preferences| Some(preferences.parent()?.join(file)))
+        .unwrap_or_else(|| rom.with_file_name(file))
+}
+
+fn write_creating_folder(path: &Path, text: &str) -> io::Result<()> {
+    if let Some(folder) = path.parent() {
+        std::fs::create_dir_all(folder)?;
+    }
+    std::fs::write(path, text)
+}
+
+/// The core options file the emulator's settings name, if they name one:
+/// `core_options_path = "..."`.
+fn core_options_named(settings: &str) -> Option<&str> {
+    settings.lines().find_map(|line| {
+        let (key, value) = line.split_once('=')?;
+        let path = value.trim().trim_matches('"');
+        (key.trim() == "core_options_path" && !path.is_empty()).then_some(path)
+    })
 }
 
 /// The folder `RetroArch` keeps saves in, from its settings: `savefile_directory = "..."`.
@@ -557,7 +650,7 @@ mod tests {
         let written = overrides(&bot_changes_to(theirs));
         for needed in [
             "audio_mute_enable = \"true\"",
-            "input_joypad_driver = \"null\"",
+            "input_player1_joypad_index = \"15\"",
             "pause_nonactive = \"false\"",
             "video_fullscreen = \"false\"",
             // What every game is given, so the bot's stays in step too.
@@ -568,7 +661,36 @@ mod tests {
         }
         // Nobody types in it, so the player's hotkeys stay as they are.
         assert!(!written.contains("input_pause_toggle"));
-        assert_eq!(super::bot_changes().count(), super::BOT_CHANGES.len());
+        // Said to the player: each of those, and the picture's size.
+        assert_eq!(super::bot_changes().count(), super::BOT_CHANGES.len() + 1);
+    }
+
+    #[test]
+    fn a_bots_game_draws_smaller_with_the_players_other_core_options() {
+        let theirs = "parallel-n64-gfxplugin = \"gliden64\"\n\
+                      parallel-n64-screensize = \"2880x2160\"\n\
+                      parallel-n64-parallel-rdp-upscaling = \"8x\"\n";
+        let options = super::bot_core_options(theirs);
+        assert!(options.contains("parallel-n64-gfxplugin = \"gliden64\""));
+        assert!(options.contains("parallel-n64-screensize = \"640x480\""));
+        assert!(options.contains("parallel-n64-parallel-rdp-upscaling = \"1x\""));
+        assert!(!options.contains("2880x2160") && !options.contains("8x"));
+        // With none of the player's own, the size is still set.
+        assert!(super::bot_core_options("").contains("640x480"));
+        // And the game is pointed at them.
+        let change = super::bot_picture_change(Path::new(r"C:\panel\bot1.core-options.cfg"));
+        assert_eq!(
+            overrides(&[change]),
+            "core_options_path = \"C:\\panel\\bot1.core-options.cfg\"\n"
+        );
+        assert_eq!(
+            super::core_options_named("core_options_path = \"\"\n"),
+            None
+        );
+        assert_eq!(
+            super::core_options_named("core_options_path = \"D:\\o.cfg\"\n"),
+            Some("D:\\o.cfg")
+        );
     }
 
     /// A sample of an emulator's settings with the hotkeys it is to name, kept as files so
