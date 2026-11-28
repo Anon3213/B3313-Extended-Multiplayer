@@ -7,7 +7,8 @@ use b3313_bridge::client::resolve;
 use b3313_bridge::session::{self, End, Event, Input, Options};
 use b3313_bridge::text::ChatSize;
 use b3313_bridge::typing::{
-    DEFAULT_CHAT_KEY, DEFAULT_CHAT_LINES, DEFAULT_CHAT_SECONDS, chat_key, chat_lines, chat_seconds,
+    DEFAULT_CHAT_KEY, DEFAULT_CHAT_LINES, DEFAULT_CHAT_SECONDS, DEFAULT_MAP_KEY, chat_key,
+    chat_lines, chat_seconds,
 };
 use b3313_protocol::secure::{PublicKey, split_join_code};
 use b3313_protocol::{Name, Outfit};
@@ -30,11 +31,12 @@ the command line, where other programs on the PC could read it. B3313_NAME is th
 players see, B3313_COLOR the colors they see you in (red, green and so on; /color in the chat
 lists them), and B3313_HOST_PASSWORD, for the host alone, the server's host password. Lines typed
 here go to the chat, and so do lines typed in the game: there, T opens the chat, or the key named
-in B3313_CHAT_KEY, and \"off\" for that leaves the keyboard unread; B3313_CHAT_SECONDS is how long
+in B3313_CHAT_KEY, and \"off\" for that turns typing in the game off; B3313_CHAT_SECONDS is how long
 the game shows a line, 8 unless given, B3313_CHAT_LINES how many rows it shows at once, 1 to 6
 (6 unless given), B3313_CHAT_HOVER=on shows the chat while the mouse rests on it, and
-B3313_CHAT_SIZE=large draws the chat at twice the size. B3313_MINIMAP=off hides the minimap of
-the walls and players around you in the lower right corner.
+B3313_CHAT_SIZE=large draws the chat at twice the size. B3313_MINIMAP=off starts with the
+minimap of the walls and players around you hidden; M in the game, or the key named in
+B3313_MAP_KEY (\"off\" for none), shows or hides it, as /map does.
 B3313_BOT_PORT opens that port on 127.0.0.1 for a bot to play this game through; BOTS.md says how.
 The control panel's Play page does all this without a command line.";
 /// The key the server must have, for a server given by its address alone; unset joins
@@ -49,7 +51,7 @@ const COLOR_VARIABLE: &str = "B3313_COLOR";
 /// The host's own password; unset for everyone else.
 const HOST_PASSWORD_VARIABLE: &str = "B3313_HOST_PASSWORD";
 /// The key that opens the chat in the game: a letter or digit; unset is T, and anything else,
-/// as "off", leaves the keyboard unread.
+/// as "off", turns typing in the game off.
 const CHAT_KEY_VARIABLE: &str = "B3313_CHAT_KEY";
 /// How many seconds the game shows chat for, from 3 to 120; unset, or anything else, is 8.
 const CHAT_SECONDS_VARIABLE: &str = "B3313_CHAT_SECONDS";
@@ -60,8 +62,12 @@ const CHAT_LINES_VARIABLE: &str = "B3313_CHAT_LINES";
 const CHAT_HOVER_VARIABLE: &str = "B3313_CHAT_HOVER";
 /// How large the game draws the chat: "normal" or "large"; unset, or anything else, is normal.
 const CHAT_SIZE_VARIABLE: &str = "B3313_CHAT_SIZE";
-/// Whether the game shows the minimap: "off" hides it; unset, or anything else, shows it.
+/// Whether the game shows the minimap as the session begins: "off" hides it; unset, or
+/// anything else, shows it.
 const MINIMAP_VARIABLE: &str = "B3313_MINIMAP";
+/// The key that shows or hides the minimap in the game: a letter or digit; unset is M, and
+/// anything else, as "off", leaves it to /map.
+const MAP_KEY_VARIABLE: &str = "B3313_MAP_KEY";
 /// The port on 127.0.0.1 a bot may connect to; unset opens none.
 const BOT_PORT_VARIABLE: &str = "B3313_BOT_PORT";
 
@@ -224,6 +230,8 @@ fn run() -> Result<(), Box<dyn Error>> {
             .unwrap_or_default(),
         minimap: !std::env::var(MINIMAP_VARIABLE)
             .is_ok_and(|named| named.trim().eq_ignore_ascii_case("off")),
+        map_key: std::env::var(MAP_KEY_VARIABLE)
+            .map_or(Some(DEFAULT_MAP_KEY), |named| chat_key(&named)),
         bot_port: bot_port()?,
     };
     leave_on_ctrl_c();

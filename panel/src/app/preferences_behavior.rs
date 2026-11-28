@@ -117,7 +117,8 @@ impl Panel {
                 "A small map in the lower right corner of the game: the walls around your \
                  Mario seen from above, turned with the camera, and an arrow for each player \
                  in the same room, in their colors. Holding the D-pad down shows the player \
-                 list in its place. Applies the next time you join.",
+                 list in its place. This is how a session begins; the minimap's key, or /map \
+                 in the chat, shows or hides it in the game. Applies the next time you join.",
                 self.preferences.minimap,
                 cx.listener(|this, _, _, cx| {
                     this.preferences.minimap = !this.preferences.minimap;
@@ -125,7 +126,45 @@ impl Panel {
                     cx.notify();
                 }),
             ))
+            .child(self.render_map_key(theme, cx))
             .into_any_element()
+    }
+
+    /// Which key shows or hides the minimap in the game: a few that suit it, and one set in
+    /// the preferences file by hand if it is none of them.
+    fn render_map_key(&self, theme: &Theme, cx: &mut Context<Self>) -> AnyElement {
+        let chosen = self.preferences.map_key;
+        let mut keys = vec![None, Some('m'), Some('n'), Some('b')];
+        if !keys.contains(&chosen) {
+            keys.push(chosen);
+        }
+        let choices = keys.into_iter().map(|key| {
+            let label = key.map_or("Off".to_owned(), |key| key.to_ascii_uppercase().to_string());
+            let tooltip = key.map_or_else(
+                || "No key: /map in the chat shows or hides the minimap".to_owned(),
+                |_| format!("{label} shows or hides the minimap in the game"),
+            );
+            choice(
+                SharedString::from(format!("map-key-{label}")),
+                &label,
+                key == chosen,
+                &tooltip,
+                cx.listener(move |this, _, _, cx| {
+                    this.preferences.map_key = key;
+                    this.save_preferences();
+                    cx.notify();
+                }),
+            )
+        });
+        setting_row(
+            theme,
+            "Minimap key in the game",
+            "While the game's window is in front and the chat is closed, this key shows or hides \
+             the minimap; /map in the chat does the same. Turn it off if you play Mario with \
+             that key. The chat's key wins if the two are the same. Applies the next time you \
+             join.",
+            choices,
+        )
     }
 
     /// How many rows of chat the game shows at once as lines arrive.
@@ -210,7 +249,7 @@ impl Panel {
         let choices = keys.into_iter().map(|key| {
             let label = key.map_or("Off".to_owned(), |key| key.to_ascii_uppercase().to_string());
             let tooltip = key.map_or_else(
-                || "The keyboard is never read; chat here in the panel".to_owned(),
+                || "No typing in the game; chat here in the panel".to_owned(),
                 |_| format!("{label} opens the chat in the game"),
             );
             choice(

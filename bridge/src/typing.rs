@@ -18,9 +18,11 @@ const BLINK: Duration = Duration::from_millis(500);
 /// The key that opens the chat unless the player chooses another: where many games have it,
 /// and bound to nothing in the keyboard layout Parallel Launcher gives the game.
 pub const DEFAULT_CHAT_KEY: char = 't';
+/// The key that shows or hides the minimap in the game, unless the player names another.
+pub const DEFAULT_MAP_KEY: char = 'm';
 
-/// The key a player named to open the chat with: one letter or digit, which every keyboard
-/// types without Shift. Anything else, as "off", is none: the keyboard is then left unread.
+/// The key a player named to open the chat with, or to show and hide the minimap: one letter
+/// or digit, which every keyboard types without Shift. Anything else, as "off", is none.
 #[must_use]
 pub fn chat_key(named: &str) -> Option<char> {
     let mut characters = named.trim().chars();
@@ -68,6 +70,8 @@ pub enum Key {
     Chat,
     /// The slash, pressed while the chat is closed: it opens the chat with a command begun.
     Command,
+    /// The key that shows or hides the minimap, pressed while the chat is closed.
+    Map,
     /// A character typed into the open chat.
     Character(char),
     Backspace,
@@ -173,7 +177,7 @@ impl Draft {
                 None
             }
             // Only pressed while the chat is closed, or for the chat's rows and not the line.
-            Key::Chat | Key::Command | Key::PageUp | Key::PageDown => None,
+            Key::Chat | Key::Command | Key::Map | Key::PageUp | Key::PageDown => None,
         }
     }
 

@@ -131,9 +131,10 @@ pub fn command(line: &str) -> Option<Result<Order, String>> {
     Some(order)
 }
 
-/// The chat's help for these commands, which the server's own `/help` does not know of.
+/// The chat's help for these commands, and `/map` (`crate::people`), which the server's own
+/// `/help` does not know of.
 pub const COMMANDS_HELP: &str = "In your own game: /warp <level> [area], /goto <player>, \
-                                 /follow <player>, /stop.";
+                                 /follow <player>, /stop, /map (shows or hides the minimap).";
 
 fn warp_command(words: &[&str]) -> Result<Order, String> {
     const USAGE: &str = "Usage: /warp <level> [area], as /warp 9 or /warp 9 2.";

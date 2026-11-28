@@ -249,8 +249,10 @@ pub struct Request {
     pub chat_on_hover: bool,
     /// How large the game draws the chat.
     pub chat_size: ChatSize,
-    /// Whether the game shows the minimap.
+    /// Whether the game shows the minimap as the session begins.
     pub minimap: bool,
+    /// The key that shows or hides the minimap in the game, if any.
+    pub map_key: Option<char>,
     /// The port a bot on this PC may play the game through, if the player lets one.
     pub bot_port: Option<u16>,
     /// The server this panel is hosting, if it is: where it listens, its key, and its host
@@ -410,7 +412,8 @@ impl Request {
         let started = if self.bot_of.is_some() {
             install.start_bot(&self.rom)
         } else {
-            install.start(&self.rom, self.chat_key.is_some())
+            // The emulator's hotkeys on typing keys go for the minimap's key too.
+            install.start(&self.rom, self.chat_key.is_some() || self.map_key.is_some())
         };
         started
             .map(|pid| (pid, true))
@@ -487,6 +490,7 @@ impl Request {
             chat_on_hover: self.chat_on_hover,
             chat_size: self.chat_size,
             minimap: self.minimap,
+            map_key: self.map_key,
             bot_port: self.bot_port,
         })
     }

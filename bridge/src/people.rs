@@ -59,9 +59,10 @@ pub(crate) struct People {
     hide_at: Option<Instant>,
     /// The most rows the game draws as lines arrive, as the player chose.
     shown_most: u8,
-    /// The character whose key opens the chat in the game, if the keyboard is read for it,
-    /// and whether the player has been told of it there.
+    /// The characters whose keys open the chat and show or hide the minimap in the game, if
+    /// the keyboard is read for them, and whether the player has been told of them there.
     chat_key: Option<char>,
+    map_key: Option<char>,
     hinted: bool,
     /// How long the game shows the chat's rows after the newest arrived.
     shown_for: Duration,
@@ -86,6 +87,16 @@ pub(crate) struct People {
     orders: Vec<Result<Order, String>>,
     /// The lines of chat heard since the session last asked, by whom, for a bot.
     heard: Vec<(Option<String>, String)>,
+    /// Each time the player asked to show or hide the minimap since the session last asked:
+    /// by `/map`, which is answered in the chat, or by its key, which is seen to work.
+    map_toggles: Vec<MapToggle>,
+}
+
+/// How the player asked to show or hide the minimap.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum MapToggle {
+    Command,
+    Key,
 }
 
 /// The chat's rows as written to the game, to scroll back through while a line is typed.
@@ -146,6 +157,22 @@ impl Scroll {
     }
 }
 
+/// What the game's keys are, said once in play: the chat's, and the minimap's.
+fn keys_hint(chat_key: Option<char>, map_key: Option<char>) -> Option<String> {
+    let chat = chat_key.map(|key| {
+        format!(
+            "Press {} to chat, or / for a command.",
+            key.to_ascii_uppercase()
+        )
+    });
+    let map =
+        map_key.map(|key| format!("{} shows or hides the minimap.", key.to_ascii_uppercase()));
+    match (chat, map) {
+        (Some(chat), Some(map)) => Some(format!("{chat} {map}")),
+        (chat, map) => chat.or(map),
+    }
+}
+
 /// A player in the roster, as the game is told of them.
 fn person(entry: &RosterEntry) -> Person<'_> {
     Person {
@@ -172,6 +199,7 @@ impl People {
             hide_at: None,
             shown_most: options.chat_lines.clamp(CHAT_LINES_MIN, CHAT_SHOWN_MOST),
             chat_key: options.chat_key,
+            map_key: options.map_key,
             hinted: false,
             shown_for: Duration::from_secs(u64::from(options.chat_seconds)),
             told_left: None,
@@ -184,7 +212,13 @@ impl People {
             scroll: Scroll::default(),
             orders: Vec::new(),
             heard: Vec::new(),
+            map_toggles: Vec::new(),
         }
+    }
+
+    /// Each time the player asked to show or hide the minimap since the last call.
+    pub(crate) fn take_map_toggles(&mut self) -> Vec<MapToggle> {
+        std::mem::take(&mut self.map_toggles)
     }
 
     /// How large the game draws the chat.
@@ -230,6 +264,10 @@ impl People {
     fn route(&mut self, line: Message, connection: &mut Connection) {
         if let Some(order) = travel::command(line.as_str()) {
             self.orders.push(order);
+            return;
+        }
+        if line.as_str().trim().eq_ignore_ascii_case("/map") {
+            self.map_toggles.push(MapToggle::Command);
             return;
         }
         if line.as_str().trim().eq_ignore_ascii_case("/help") {
@@ -335,11 +373,10 @@ impl People {
     ) {
         // Said once, and where it will be seen: no manual is open beside a game.
         if playing
-            && let Some(key) = self.chat_key
+            && let Some(hint) = keys_hint(self.chat_key, self.map_key)
             && !std::mem::replace(&mut self.hinted, true)
         {
-            let key = key.to_ascii_uppercase();
-            self.say_here(&format!("Press {key} to chat, or / for a command."));
+            self.say_here(&hint);
         }
         let Some(keys) = keys else {
             // The player has gone to another window. A line left open would keep the
@@ -358,6 +395,7 @@ impl People {
             }
             match key {
                 Key::PageUp | Key::PageDown => self.scroll.page(key == Key::PageUp),
+                Key::Map => self.map_toggles.push(MapToggle::Key),
                 _ => {
                     if let Some(line) = self.draft.press(key, now) {
                         self.route(line, connection);
@@ -641,6 +679,7 @@ mod tests {
                 chat_on_hover: false,
                 chat_size: ChatSize::Normal,
                 minimap: true,
+                map_key: None,
                 bot_port: None,
             };
             let mut people = People::new(&options);
@@ -800,6 +839,24 @@ mod tests {
     }
 
     #[test]
+    fn the_hint_names_the_chats_key_and_the_minimaps_whichever_there_are() {
+        let hint = |chat, map| super::keys_hint(chat, map);
+        assert_eq!(
+            hint(Some('t'), Some('m')).as_deref(),
+            Some("Press T to chat, or / for a command. M shows or hides the minimap.")
+        );
+        assert_eq!(
+            hint(None, Some('m')).as_deref(),
+            Some("M shows or hides the minimap.")
+        );
+        assert_eq!(
+            hint(Some('t'), None).as_deref(),
+            Some("Press T to chat, or / for a command.")
+        );
+        assert_eq!(hint(None, None), None);
+    }
+
+    #[test]
     fn a_command_for_the_players_own_game_is_kept_and_large_text_is_told_to_the_game()
     -> io::Result<()> {
         let process = game();
@@ -818,6 +875,9 @@ mod tests {
             .map_err(|_| io::Error::other("closed"))?;
         typed
             .send(Input::Say("/warp nowhere".into()))
+            .map_err(|_| io::Error::other("closed"))?;
+        typed
+            .send(Input::Say("/MAP".into()))
             .map_err(|_| io::Error::other("closed"))?;
         // No server is joined here: a line for one would need a connection, which `send` is
         // given only to queue it. The commands never reach it.
@@ -838,6 +898,25 @@ mod tests {
                 }))
             );
             assert!(matches!(orders.get(1), Some(Err(_))));
+            // The minimap's command and key are kept for the minimap, in play only.
+            people.take_keys(
+                Some(&[Key::Map]),
+                false,
+                false,
+                &mut connection,
+                Instant::now(),
+            );
+            people.take_keys(
+                Some(&[Key::Map]),
+                false,
+                true,
+                &mut connection,
+                Instant::now(),
+            );
+            assert_eq!(
+                people.take_map_toggles(),
+                [super::MapToggle::Command, super::MapToggle::Key]
+            );
             Ok::<_, io::Error>(())
         })?;
         people.draft.press(Key::Chat, Instant::now());
@@ -976,14 +1055,15 @@ mod tests {
             people.show(&mailbox, me, now, false)?;
             assert_eq!(count()?, Some(0));
 
+            // The chat's key and the minimap's, in two rows.
             people.take_keys(Some(&[]), false, true, &mut connection, now);
             people.show(&mailbox, me, now, false)?;
-            assert_eq!(count()?, Some(1));
+            assert_eq!(count()?, Some(2));
             assert!(text_at(&process, CHAT_ROWS)?.contains("Press T to chat"));
 
             people.take_keys(Some(&[]), false, true, &mut connection, now);
             people.show(&mailbox, me, now, false)?;
-            assert_eq!(count()?, Some(1));
+            assert_eq!(count()?, Some(2));
             Ok(())
         })
     }

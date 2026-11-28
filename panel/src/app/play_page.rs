@@ -624,6 +624,7 @@ impl Panel {
             chat_on_hover: self.preferences.chat_on_hover,
             chat_size: self.preferences.chat_size,
             minimap: self.preferences.minimap,
+            map_key: self.preferences.map_key,
             bot_port: self.preferences.bot_port,
             server: server.clone(),
             password,
@@ -1091,8 +1092,11 @@ impl Panel {
                 key.to_ascii_uppercase()
             )
         });
+        let map = self.preferences.map_key.map_or_else(String::new, |key| {
+            format!(" {} shows or hides the minimap.", key.to_ascii_uppercase())
+        });
         let about = format!(
-            "Everyone in the session sees what you send, here and in their games.{in_game} \
+            "Everyone in the session sees what you send, here and in their games.{in_game}{map} \
              /help lists the commands."
         );
         Some(
@@ -1624,7 +1628,7 @@ impl Panel {
     /// read from the player's settings, with whether they type the chat in the game.
     fn emulator_changes(&self) -> Option<Result<Vec<Change>, String>> {
         let launcher = self.play.launcher.as_ref()?;
-        let typing = self.preferences.chat_key.is_some();
+        let typing = self.preferences.chat_key.is_some() || self.preferences.map_key.is_some();
         Some(launcher.changes(typing).map_err(|error| error.to_string()))
     }
 

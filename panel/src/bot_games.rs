@@ -187,6 +187,8 @@ fn request(joined: &Request, number: u8, port: u16) -> Request {
         chat_on_hover: false,
         chat_size: ChatSize::Normal,
         minimap: true,
+        // Nobody types in a bot game; a bot that wants the map hidden sends `/map`.
+        map_key: None,
         bot_port: Some(port),
         hosting: joined.hosting.as_ref().map(|hosting| Hosting {
             host_password: String::new(),
@@ -239,6 +241,7 @@ mod tests {
             chat_on_hover: true,
             chat_size: b3313_bridge::text::ChatSize::Large,
             minimap: true,
+            map_key: Some('m'),
             bot_port: Some(40000),
             hosting: Some(Hosting {
                 address: ([127, 0, 0, 1], 41313).into(),

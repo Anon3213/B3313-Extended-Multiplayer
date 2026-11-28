@@ -1,13 +1,13 @@
 //! The minimap's turn in the session (`crate::minimap` draws it): reads the loaded area's walls
 //! and warps when the game loads one, and draws the map again for the game to show while Mario
-//! runs in a level.
+//! runs in a level and the player wants it, which `/map` and the map's key turn.
 
 use crate::assist;
 use crate::game::{self, Area};
 use crate::interpolation::Interpolator;
 use crate::mailbox::Mailbox;
 use crate::minimap::{Mark, Terrain, View, draw};
-use crate::people::People;
+use crate::people::{MapToggle, People};
 use crate::ram::ProcessMemory;
 use b3313_protocol::{PlayerId, Whereabouts};
 use std::io;
@@ -20,7 +20,9 @@ const DRAW_EVERY: Duration = Duration::from_millis(50);
 /// read again only when the game loads another area, and whether the game shows the map.
 #[derive(Debug, Default)]
 pub(crate) struct Minimap {
-    enabled: bool,
+    /// Whether the player wants the map: as the session's options began it, then as `/map`
+    /// and the map's key have turned it.
+    wanted: bool,
     /// The area the terrain is of, by its place and the game's count of areas loaded.
     area: Option<((i16, u8), u32)>,
     terrain: Terrain,
@@ -30,30 +32,47 @@ pub(crate) struct Minimap {
 }
 
 impl Minimap {
-    pub(crate) fn new(enabled: bool) -> Self {
+    pub(crate) fn new(wanted: bool) -> Self {
         Self {
-            enabled,
+            wanted,
             ..Self::default()
         }
     }
 
-    /// Draws the map again if it is due, and has the game show it while Mario runs in a level,
-    /// or hide it otherwise. `drawn` holds the other players as the session draws them.
+    /// Shows or hides the map as the player asked since the last turn, and draws it again if
+    /// it is due, for the game to show while Mario runs in a level, or hides it otherwise.
+    /// `drawn` holds the other players as the session draws them.
     ///
     /// # Errors
     /// Fails if the game's memory cannot be read or written.
     pub(crate) fn turn<M: ProcessMemory>(
         &mut self,
         mailbox: &Mailbox<M>,
-        people: &People,
+        people: &mut People,
         me: PlayerId,
         (drawn, playing): (&Interpolator, bool),
     ) -> io::Result<()> {
+        for toggle in people.take_map_toggles() {
+            self.wanted = !self.wanted;
+            // The key is seen to work; the command, typed into the chat, is answered there.
+            if toggle == MapToggle::Command {
+                people.say_here(if self.wanted {
+                    "The minimap is shown."
+                } else {
+                    "The minimap is hidden: /map shows it again."
+                });
+            }
+            // Drawn at once when shown again, not up to a turn later.
+            self.drawn = None;
+        }
+        if !self.wanted {
+            return self.hide(mailbox);
+        }
         let now = Instant::now();
         let is_due = self
             .drawn
             .is_none_or(|drawn| now.saturating_duration_since(drawn) >= DRAW_EVERY);
-        if !self.enabled || !is_due || !mailbox.is_ready()? {
+        if !is_due || !mailbox.is_ready()? {
             return Ok(());
         }
         self.drawn = Some(now);

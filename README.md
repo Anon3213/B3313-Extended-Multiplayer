@@ -75,7 +75,7 @@ page also covers passwords, your server's key, and running a server without the 
   above, turned with the camera, so up is the way you're looking. Each player in the same
   area is an arrow in the color of their cap; one beyond the map's edge is a dot at the edge,
   the way to them. A player in another area of the level is a dot at the door, pipe or warp
-  that leads straight there, if one does.
+  that leads straight there, if one does. Press **M** to hide or show it, or type `/map`.
 - **Change Mario's colors:** pick a swatch on the **Play** page, or type `/color` in the chat
   to list the colors and `/color green` to wear one.
 - **Chat:** press **T** in the game, type a line, and press **Enter** to send it. Press **/**
@@ -95,7 +95,8 @@ Under **Preferences → Chat and minimap in the game** you can change:
 - the chat's size (**Large** draws it twice as big);
 - whether resting the mouse on the chat's corner of the game shows it (off unless you turn it
   on);
-- whether the game shows the minimap (on unless you turn it off).
+- whether the game shows the minimap as you join (on unless you turn it off), and the key that
+  shows or hides it (M, or none if you play Mario with that key; `/map` always works).
 
 Your name can be up to 16 plain characters. If someone already has your name, you get a number
 after it. Type `/name` and a new name to change it.
@@ -171,7 +172,7 @@ Type these in the chat, in the game or on the **Play** page:
 
 A `<player>` can be a name or a number from `/list`.
 
-These four are carried out by your own game, and only move your own Mario:
+These five are carried out by your own game, and only change your own game:
 
 | Command | What it does |
 |---|---|
@@ -179,6 +180,7 @@ These four are carried out by your own game, and only move your own Mario:
 | `/goto <player>` | Takes you to the area a player is in, and puts you beside them |
 | `/follow <player>` | Has Mario follow a player by himself, through the paintings and doors they take, until you type `/stop`; your controller does nothing meanwhile |
 | `/stop` | Stops a `/warp`, `/goto` or `/follow` |
+| `/map` | Hides the minimap, or shows it again, as its key does |
 
 Level and area numbers are the ones the player list shows, as "9-2". A number that is no level
 to play in, as 1, the title screen, or one that stops the game, is refused. Any player can use these in their own game; the host

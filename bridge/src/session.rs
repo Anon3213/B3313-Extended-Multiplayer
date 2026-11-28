@@ -83,7 +83,8 @@ pub struct Options {
     /// The host's own password, which makes this player the host; empty for everyone else.
     pub host_password: String,
     /// The character whose key opens the chat in the game, where the player then types a
-    /// line; none leaves the keyboard unread, and the chat to the panel or the console.
+    /// line; none leaves the chat to the panel or the console, and the keyboard unread unless
+    /// `map_key` names a key.
     pub chat_key: Option<char>,
     /// How many seconds the game shows the chat's rows after the newest arrived. Timed by
     /// the bridge, in real time: the game's own rate varies with the emulator.
@@ -97,8 +98,11 @@ pub struct Options {
     /// How large the game draws the chat.
     pub chat_size: ChatSize,
     /// Whether the game shows the minimap of the walls about Mario and the players near him
-    /// (`crate::minimap`).
+    /// (`crate::minimap`) when the session begins.
     pub minimap: bool,
+    /// The key that shows or hides the minimap while the game's window is in front and the
+    /// chat is closed, as `/map` does; none leaves that to `/map`.
+    pub map_key: Option<char>,
     /// The port on 127.0.0.1 a bot may connect to, to play this game (`crate::bots`); none
     /// opens none.
     pub bot_port: Option<u16>,
@@ -309,7 +313,7 @@ pub fn run(
                 let drawn = (&session.interpolator, session.playing);
                 if removed.is_none() {
                     assist.turn(&mailbox, &mut connection, &mut people, drawn, &mut notices)?;
-                    minimap.turn(&mailbox, &people, connection.player(), drawn)?;
+                    minimap.turn(&mailbox, &mut people, connection.player(), drawn)?;
                 }
                 Ok(removed)
             });
@@ -361,11 +365,12 @@ pub fn run(
 }
 
 /// What the session reads of the player at the PC: the keyboard, for a player who types in the
-/// game, and the mouse, for one who asked for the chat to show under it.
+/// game or has a key for the minimap, and the mouse, for one who asked for the chat to show
+/// under it.
 fn player_devices(options: &Options) -> (Option<Keyboard<WindowsKeys>>, Option<WindowsPointer>) {
-    let keyboard = options
-        .chat_key
-        .map(|key| Keyboard::new(WindowsKeys::new(options.pid), key));
+    let keyboard = (options.chat_key.is_some() || options.map_key.is_some()).then(|| {
+        Keyboard::new(WindowsKeys::new(options.pid), options.chat_key).with_map_key(options.map_key)
+    });
     let pointer = options
         .chat_on_hover
         .then(|| WindowsPointer::new(options.pid));
@@ -919,6 +924,7 @@ pub(crate) mod testing {
             chat_on_hover: false,
             chat_size: crate::text::ChatSize::Normal,
             minimap: true,
+            map_key: Some(crate::typing::DEFAULT_MAP_KEY),
             bot_port: None,
         }
     }

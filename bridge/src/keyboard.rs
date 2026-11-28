@@ -2,8 +2,9 @@
 //!
 //! The game cannot read a keyboard: the emulator gives it only the keys bound to its
 //! controller. So the bridge reads the keyboard for it, and as little of it as will do: only
-//! while the emulator's window has the keyboard, only the keys that open the chat until one
-//! does, and the typing keys only while a line is open. It asks Windows which of those keys are
+//! while the emulator's window has the keyboard, only the keys that open the chat and the one
+//! that shows or hides the minimap until the chat opens, and the typing keys only while a line
+//! is open. It asks Windows which of those keys are
 //! down each time round its loop. It installs no hook, so no key pressed in another program
 //! ever passes through here.
 //!
@@ -65,12 +66,14 @@ pub trait Keys {
     fn key_for(&self, character: char) -> Option<u16>;
 }
 
-/// Turns the keys' states into the keys pressed for the chat.
+/// Turns the keys' states into the keys pressed for the chat, and for the minimap.
 #[derive(Debug)]
 pub struct Keyboard<K> {
     keys: K,
-    /// The character whose key opens the chat.
-    opener: char,
+    /// The character whose key opens the chat, if the player types in the game.
+    opener: Option<char>,
+    /// The character whose key shows or hides the minimap, if any does.
+    map_key: Option<char>,
     /// Whether each key was down when it was last looked at.
     down: [bool; KEY_CODES],
     /// Whether a line was open at the last poll, if the window had the keyboard then.
@@ -84,17 +87,27 @@ pub struct Keyboard<K> {
 }
 
 impl<K: Keys> Keyboard<K> {
-    /// A reader of `keys` for a chat that the key typing `opener` opens.
-    pub const fn new(keys: K, opener: char) -> Self {
+    /// A reader of `keys` for a chat that the key typing `opener` opens, or none for a player
+    /// who does not type in the game, and the slash then opens nothing either.
+    pub const fn new(keys: K, opener: Option<char>) -> Self {
         Self {
             keys,
             opener,
+            map_key: None,
             down: [false; KEY_CODES],
             watching: None,
             repeat: None,
             settling: Vec::new(),
             settle_until: None,
         }
+    }
+
+    /// Has the key typing `key` show and hide the minimap while the chat is closed. The chat's
+    /// key comes first, should the two be the same.
+    #[must_use]
+    pub const fn with_map_key(mut self, key: Option<char>) -> Self {
+        self.map_key = key;
+        self
     }
 
     /// Has the next `poll` take nothing for a press: after a while in which the keys were
@@ -169,12 +182,16 @@ impl<K: Keys> Keyboard<K> {
         !self.settling.is_empty() && self.settle_until.is_some_and(|until| now < until)
     }
 
-    /// The keys that open the chat on this keyboard: the opener's and the slash's.
+    /// The keys watched while the chat is closed: the opener's and the slash's, which open it,
+    /// and the minimap's.
     fn openers(&self) -> Vec<u16> {
-        let mut keys: Vec<u16> = [self.opener, '/']
+        let slash = self.opener.map(|_| '/');
+        let mut keys: Vec<u16> = [self.opener, slash, self.map_key]
             .into_iter()
+            .flatten()
             .filter_map(|character| self.keys.key_for(character))
             .collect();
+        keys.sort_unstable();
         keys.dedup();
         keys
     }
@@ -185,12 +202,19 @@ impl<K: Keys> Keyboard<K> {
         if open {
             return Some(typed);
         }
-        match typed {
-            Key::Character(character) if character.eq_ignore_ascii_case(&self.opener) => {
-                Some(Key::Chat)
-            }
-            Key::Character('/') => Some(Key::Command),
-            _ => None,
+        let Key::Character(character) = typed else {
+            return None;
+        };
+        let is =
+            |named: Option<char>| named.is_some_and(|named| named.eq_ignore_ascii_case(&character));
+        if is(self.opener) {
+            Some(Key::Chat)
+        } else if character == '/' && self.opener.is_some() {
+            Some(Key::Command)
+        } else if is(self.map_key) {
+            Some(Key::Map)
+        } else {
+            None
         }
     }
 
@@ -444,7 +468,7 @@ mod tests {
     #[test]
     fn only_the_opening_keys_are_read_until_the_chat_opens() {
         let keys = FakeKeys::default();
-        let mut keyboard = Keyboard::new(&keys, 't');
+        let mut keyboard = Keyboard::new(&keys, Some('t'));
         let now = Instant::now();
         assert_eq!(keyboard.poll(false, now), []);
 
@@ -461,9 +485,36 @@ mod tests {
     }
 
     #[test]
+    fn the_map_key_toggles_while_the_chat_is_closed_and_types_while_it_is_open() {
+        const M: u16 = 0x4D;
+        let keys = FakeKeys::default();
+        let mut keyboard = Keyboard::new(&keys, Some('t')).with_map_key(Some('m'));
+        let now = Instant::now();
+        assert_eq!(keyboard.poll(false, now), []);
+        keys.hold(M);
+        assert_eq!(keyboard.poll(false, now), [Key::Map]);
+        // Held, it does not repeat.
+        assert_eq!(keyboard.poll(false, now), []);
+        keys.release(M);
+        assert_eq!(keyboard.poll(true, now), []);
+        keys.hold(M);
+        assert_eq!(keyboard.poll(true, now), [Key::Character('m')]);
+
+        // With the chat turned off, the map key is still read, and neither T nor the slash
+        // opens anything.
+        let keys = FakeKeys::default();
+        let mut keyboard = Keyboard::new(&keys, None).with_map_key(Some('m'));
+        assert_eq!(keyboard.poll(false, now), []);
+        for key in [T, SLASH, M] {
+            keys.hold(key);
+        }
+        assert_eq!(keyboard.poll(false, now), [Key::Map]);
+    }
+
+    #[test]
     fn a_key_pressed_while_the_keys_were_not_looked_at_opens_nothing() {
         let keys = FakeKeys::default();
-        let mut keyboard = Keyboard::new(&keys, 't');
+        let mut keyboard = Keyboard::new(&keys, Some('t'));
         let now = Instant::now();
         assert_eq!(keyboard.poll(false, now), []);
 
@@ -484,7 +535,7 @@ mod tests {
             german: true,
             ..FakeKeys::default()
         };
-        let mut keyboard = Keyboard::new(&keys, 't');
+        let mut keyboard = Keyboard::new(&keys, Some('t'));
         let now = Instant::now();
         keyboard.poll(false, now);
 
@@ -501,7 +552,7 @@ mod tests {
     #[test]
     fn keys_held_as_the_chat_opens_type_nothing_until_pressed_again() {
         let keys = FakeKeys::default();
-        let mut keyboard = Keyboard::new(&keys, 't');
+        let mut keyboard = Keyboard::new(&keys, Some('t'));
         let now = Instant::now();
         keyboard.poll(false, now);
         // Running forward, the player opens the chat.
@@ -524,7 +575,7 @@ mod tests {
     #[test]
     fn a_held_key_repeats_after_a_pause_and_stops_when_let_go() {
         let keys = FakeKeys::default();
-        let mut keyboard = Keyboard::new(&keys, 't');
+        let mut keyboard = Keyboard::new(&keys, Some('t'));
         let start = Instant::now();
         keyboard.poll(true, start);
 
@@ -546,7 +597,7 @@ mod tests {
     #[test]
     fn nothing_is_read_while_another_window_has_the_keyboard() {
         let keys = FakeKeys::default();
-        let mut keyboard = Keyboard::new(&keys, 't');
+        let mut keyboard = Keyboard::new(&keys, Some('t'));
         let now = Instant::now();
         keyboard.poll(true, now);
 
@@ -569,7 +620,7 @@ mod tests {
     #[test]
     fn the_keys_held_as_the_chat_closes_are_waited_on_and_no_others() {
         let keys = FakeKeys::default();
-        let mut keyboard = Keyboard::new(&keys, 't');
+        let mut keyboard = Keyboard::new(&keys, Some('t'));
         let start = Instant::now();
         keyboard.poll(true, start);
         assert!(!keyboard.is_settling(start));

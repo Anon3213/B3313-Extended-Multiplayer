@@ -13,7 +13,8 @@ use crate::theme::{Mode, ThemeName};
 use crate::zoom::Zoom;
 use b3313_bridge::text::ChatSize;
 use b3313_bridge::typing::{
-    DEFAULT_CHAT_KEY, DEFAULT_CHAT_LINES, DEFAULT_CHAT_SECONDS, chat_key, chat_lines, chat_seconds,
+    DEFAULT_CHAT_KEY, DEFAULT_CHAT_LINES, DEFAULT_CHAT_SECONDS, DEFAULT_MAP_KEY, chat_key,
+    chat_lines, chat_seconds,
 };
 use b3313_protocol::Outfit;
 use b3313_protocol::secure::{PublicKey, join_code, split_join_code};
@@ -176,7 +177,7 @@ pub struct Preferences {
     /// leaves it to the server, which gives one by the player's number.
     pub player_outfit: Option<Outfit>,
     /// The key that opens the chat in the game, where the player then types a line; none
-    /// leaves the keyboard unread, and the chat to the panel.
+    /// leaves the chat to the panel.
     pub chat_key: Option<char>,
     /// How many seconds the game shows the chat's lines after the newest arrived.
     pub chat_seconds: u8,
@@ -186,8 +187,11 @@ pub struct Preferences {
     pub chat_on_hover: bool,
     /// How large the game draws the chat.
     pub chat_size: ChatSize,
-    /// Whether the game shows the minimap of the walls and players around the player's Mario.
+    /// Whether the game shows the minimap of the walls and players around the player's Mario
+    /// as a session begins.
     pub minimap: bool,
+    /// The key that shows or hides the minimap in the game; none leaves that to `/map`.
+    pub map_key: Option<char>,
     /// The port a bot on this PC may play the player's game through, while they are in a
     /// session; none for no bot.
     pub bot_port: Option<u16>,
@@ -254,6 +258,7 @@ impl Default for Preferences {
             chat_on_hover: false,
             chat_size: ChatSize::Normal,
             minimap: true,
+            map_key: Some(DEFAULT_MAP_KEY),
             bot_port: None,
             servers: Vec::new(),
             reopen_settings: true,
@@ -515,6 +520,7 @@ impl Preferences {
             "chat_on_hover" => set_flag(&mut self.chat_on_hover, value),
             "chat_size" => self.chat_size = ChatSize::named(value).unwrap_or_default(),
             "minimap" => set_flag(&mut self.minimap, value),
+            "map_key" => self.map_key = chat_key(value),
             // A port; anything else, as the "off" this writes, is none.
             "bot_port" => self.bot_port = value.parse().ok().filter(|&port| port != 0),
             "server" if !value.is_empty() && self.servers.len() < RECENT_SERVERS => {
@@ -549,6 +555,19 @@ impl Preferences {
             }
             _ => {}
         }
+    }
+
+    /// The lines for the player's own game: its chat and its minimap.
+    fn format_in_game(&self, text: &mut String) {
+        // The keys are written either way: without the line, a key is the usual one.
+        let key = |key: Option<char>| key.map_or("off".to_owned(), String::from);
+        let _ = writeln!(text, "chat_key = {}", key(self.chat_key));
+        let _ = writeln!(text, "chat_seconds = {}", self.chat_seconds);
+        let _ = writeln!(text, "chat_lines = {}", self.chat_lines);
+        let _ = writeln!(text, "chat_on_hover = {}", self.chat_on_hover);
+        let _ = writeln!(text, "chat_size = {}", self.chat_size.name());
+        let _ = writeln!(text, "minimap = {}", self.minimap);
+        let _ = writeln!(text, "map_key = {}", key(self.map_key));
     }
 
     /// What `parse` reads back.
@@ -633,14 +652,7 @@ impl Preferences {
         if let Some(outfit) = self.player_outfit {
             let _ = writeln!(text, "player_color = {}", outfit.name());
         }
-        // Written either way: without the line, the key is the usual one.
-        let chat_key = self.chat_key.map_or("off".to_owned(), String::from);
-        let _ = writeln!(text, "chat_key = {chat_key}");
-        let _ = writeln!(text, "chat_seconds = {}", self.chat_seconds);
-        let _ = writeln!(text, "chat_lines = {}", self.chat_lines);
-        let _ = writeln!(text, "chat_on_hover = {}", self.chat_on_hover);
-        let _ = writeln!(text, "chat_size = {}", self.chat_size.name());
-        let _ = writeln!(text, "minimap = {}", self.minimap);
+        self.format_in_game(&mut text);
         let bot_port = self
             .bot_port
             .map_or("off".to_owned(), |port| port.to_string());
@@ -905,13 +917,16 @@ mod tests {
     }
 
     #[test]
-    fn the_minimap_is_shown_unless_turned_off() {
-        assert!(Preferences::parse("").minimap);
+    fn the_minimap_is_shown_unless_turned_off_and_its_key_is_m_unless_named() {
+        let usual = Preferences::parse("");
+        assert_eq!((usual.minimap, usual.map_key), (true, Some('m')));
         let off = Preferences {
             minimap: false,
+            map_key: None,
             ..Preferences::default()
         };
         assert_eq!(Preferences::parse(&off.format()), off);
+        assert_eq!(Preferences::parse("map_key = N\n").map_key, Some('n'));
     }
 
     #[test]
