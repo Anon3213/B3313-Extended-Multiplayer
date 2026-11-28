@@ -181,9 +181,16 @@ cannot turn them off.
 ## Bots
 
 A program on your PC can play a game with you as a player: follow you about, chat, or map the
-game's warps. Turn on **Let a bot play your game** under **Preferences → Bots**, and the bot
-connects to your game while you are in a session. [BOTS.md](BOTS.md) explains how to write
-one, and how to run several.
+game's warps. Everything for bots is on the panel's **Bots** page:
+
+- **Let a bot play your game** lets a bot connect to your own game while you are in a session.
+- **Bot games** starts more games beside yours while you are in a session, from 1 to 8, each a
+  player of its own for a bot to play. Each is muted, ignores your controller, and costs about
+  a tenth of a processor core and 600 MB of memory. With **Follow you**, their Marios get into
+  the game and follow yours by themselves until a bot takes over. They close when you stop
+  them or leave.
+
+[BOTS.md](BOTS.md) explains how to write a bot.
 
 ## What the panel changes in your emulator
 

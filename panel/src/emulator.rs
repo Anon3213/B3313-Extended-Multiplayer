@@ -121,6 +121,33 @@ const FIXED_CHANGES: [FixedChange; 6] = [
     ),
 ];
 
+/// What a bot's game is given besides what every game is, as what, why and the settings. A
+/// bot's game runs beside the player's own, behind it, and no person plays it.
+const BOT_CHANGES: [FixedChange; 3] = [
+    (
+        "Its sound is muted.",
+        "Several games make a din, and none of a bot's is yours to hear.",
+        &[("audio_mute_enable", "true")],
+    ),
+    (
+        "It reads no controller.",
+        "The emulator reads a controller with its window behind others, so yours would move \
+         the bot's Mario as well as your own.",
+        &[("input_joypad_driver", "null")],
+    ),
+    (
+        "It goes on running while its window is behind others.",
+        "A bot's game is always behind something, and one that paused there would stand still \
+         in the session.",
+        &[("pause_nonactive", "false")],
+    ),
+];
+
+/// What a bot's game is changed in, for the player to be told, in the player's words.
+pub fn bot_changes() -> impl Iterator<Item = &'static str> {
+    BOT_CHANGES.iter().map(|&(what, _, _)| what)
+}
+
 /// The keys a line of chat is typed with, as `RetroArch`'s settings name them, besides the
 /// letters, which are their own names: the marks and the space of a keyboard's main part, its
 /// digits, and the number pad, and the keys that scroll the chat and bring back lines sent.
@@ -215,17 +242,31 @@ fn typing_change(hotkeys: &[(&str, &str)]) -> Option<Change> {
     })
 }
 
-/// What the panel changes in the emulator for a game it starts, given the player's own
-/// `settings`; `typing` says the player types the chat in the game.
-fn changes_to(settings: &str, typing: bool) -> Vec<Change> {
-    let fixed = FIXED_CHANGES.iter().map(|&(what, why, lines)| Change {
+/// `fixed` as the changes they are.
+fn fixed_changes(fixed: &'static [FixedChange]) -> impl Iterator<Item = Change> {
+    fixed.iter().map(|&(what, why, lines)| Change {
         what: what.to_owned(),
         why,
         settings: lines
             .iter()
             .map(|&(name, value)| (name.to_owned(), value))
             .collect(),
-    });
+    })
+}
+
+/// What the panel changes in the emulator for a bot's game, given the player's own
+/// `settings`: what it changes for every game, and that nobody plays this one. Nobody types
+/// in it, so the player's hotkeys are left as they are.
+fn bot_changes_to(settings: &str) -> Vec<Change> {
+    let mut changes = changes_to(settings, false);
+    changes.extend(fixed_changes(&BOT_CHANGES));
+    changes
+}
+
+/// What the panel changes in the emulator for a game it starts, given the player's own
+/// `settings`; `typing` says the player types the chat in the game.
+fn changes_to(settings: &str, typing: bool) -> Vec<Change> {
+    let fixed = fixed_changes(&FIXED_CHANGES);
     // Not those turned off whatever key they are on, which are said once already.
     let is_fixed = |name: &str| {
         let mut fixed = FIXED_CHANGES.iter().flat_map(|&(_, _, lines)| lines);
@@ -318,15 +359,32 @@ impl Install {
     /// Fails if the player's settings cannot be read, the settings laid over them cannot be
     /// written, or `RetroArch` cannot be started.
     pub fn start(&self, rom: &Path, typing: bool) -> io::Result<u32> {
+        self.launch(rom, &self.changes(typing)?, "game.retroarch.cfg")
+    }
+
+    /// Starts `rom` as a bot's game (`bot_changes_to`) and returns the emulator's process ID.
+    /// Each bot's game has a ROM of its own, and its settings a file named after it, as
+    /// several start at once.
+    ///
+    /// # Errors
+    /// As `start`.
+    pub fn start_bot(&self, rom: &Path) -> io::Result<u32> {
+        let changes = bot_changes_to(&self.read_settings()?);
+        let name = rom.file_stem().unwrap_or_default().to_string_lossy();
+        self.launch(rom, &changes, &format!("{name}.retroarch.cfg"))
+    }
+
+    /// Starts `rom` with `changes` laid over the player's settings, from a file of that name.
+    fn launch(&self, rom: &Path, changes: &[Change], file: &str) -> io::Result<u32> {
         // Among the panel's own files, not in a folder of the player's that a ROM they chose
         // may be in; beside the ROM only where the panel has no folder.
         let overrides = crate::preferences::path()
-            .and_then(|preferences| Some(preferences.parent()?.join("game.retroarch.cfg")))
+            .and_then(|preferences| Some(preferences.parent()?.join(file)))
             .unwrap_or_else(|| rom.with_extension("retroarch.cfg"));
         if let Some(folder) = overrides.parent() {
             std::fs::create_dir_all(folder)?;
         }
-        std::fs::write(&overrides, self::overrides(&self.changes(typing)?))?;
+        std::fs::write(&overrides, self::overrides(changes))?;
         let child = Command::new(&self.program)
             .args(self.arguments(rom, &overrides))
             .spawn()?;
@@ -373,6 +431,33 @@ impl Install {
     }
 }
 
+/// Closes the emulator with the process ID `pid`, as a bot's game is closed when its bot
+/// games are stopped. Nothing is done if no emulator runs under that ID any more: the player
+/// may have closed it, and another program have the ID now.
+///
+/// # Errors
+/// Fails if the running programs cannot be listed, or the emulator cannot be closed.
+pub fn close(pid: u32) -> io::Result<()> {
+    use std::os::windows::process::CommandExt as _;
+    /// Runs a console program without opening a window for it.
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    if !b3313_bridge::process::find_processes(b3313_bridge::process::EMULATOR)?.contains(&pid) {
+        return Ok(());
+    }
+    // Ended at once: nobody plays a bot's game, and what it saved is the session's.
+    let status = Command::new("taskkill")
+        .args(["/PID", &pid.to_string(), "/F"])
+        .creation_flags(CREATE_NO_WINDOW)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(io::Error::other(format!("taskkill ended with {status}")))
+    }
+}
+
 /// The folder `RetroArch` keeps saves in, from its settings: `savefile_directory = "..."`.
 fn save_directory(settings: &str) -> Option<&Path> {
     settings.lines().find_map(|line| {
@@ -405,7 +490,7 @@ fn forget_old_backups(backups: &Path) {
 
 #[cfg(test)]
 mod tests {
-    use super::{BACKUPS_KEPT, Install, changes_to, overrides};
+    use super::{BACKUPS_KEPT, Install, bot_changes_to, changes_to, overrides};
     use std::path::{Path, PathBuf};
 
     #[test]
@@ -449,6 +534,25 @@ mod tests {
         let untyped = changes_to(theirs, false);
         assert_eq!(untyped.len() + 1, changes.len());
         assert!(!overrides(&untyped).contains("input_pause_toggle"));
+    }
+
+    #[test]
+    fn a_bots_game_is_muted_reads_no_controller_and_runs_behind_other_windows() {
+        let theirs = "input_pause_toggle = \"p\"\n";
+        let written = overrides(&bot_changes_to(theirs));
+        for needed in [
+            "audio_mute_enable = \"true\"",
+            "input_joypad_driver = \"null\"",
+            "pause_nonactive = \"false\"",
+            // What every game is given, so the bot's stays in step too.
+            "audio_sync = \"true\"",
+            "config_save_on_exit = \"false\"",
+        ] {
+            assert!(written.contains(needed), "{needed} is missing");
+        }
+        // Nobody types in it, so the player's hotkeys stay as they are.
+        assert!(!written.contains("input_pause_toggle"));
+        assert_eq!(super::bot_changes().count(), super::BOT_CHANGES.len());
     }
 
     /// A sample of an emulator's settings with the hotkeys it is to name, kept as files so

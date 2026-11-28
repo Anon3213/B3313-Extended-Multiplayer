@@ -1,6 +1,7 @@
 //! Joining a session as a player: the server from an invite, this PC's game, and how the
 //! session goes once joined. The bridge runs on a thread of its own (`join.rs`).
 
+use super::bots_page::BotGames;
 use super::chat::{Chat, ChatBox, ChatEntry, ChatLog};
 use super::messages::ToastTone;
 use super::overview::{hint, label};
@@ -161,7 +162,9 @@ pub(super) struct Play {
     changes: Option<Result<Vec<Change>, String>>,
     /// Whether the multiplayer ROM is being built from the player's files right now.
     building: bool,
-    bridge: Option<Bridge>,
+    pub(super) bridge: Option<Bridge>,
+    /// Games beside the player's for bots to play in the same session (the Bots page).
+    pub(super) bots: BotGames,
     pub(super) state: PlayState,
     /// The second of the session's clock that was last drawn: see `Panel::poll_play`.
     shown_second: u64,
@@ -249,6 +252,7 @@ impl Play {
             changes: None,
             building: false,
             bridge: None,
+            bots: BotGames::default(),
             state: PlayState::Idle,
             shown_second: 0,
             server: String::new(),
@@ -367,6 +371,7 @@ impl Panel {
             changed = true;
             self.play_notice(notice);
         }
+        changed |= self.play.bots.poll();
         let due = self
             .play
             .looked
@@ -424,7 +429,7 @@ impl Panel {
                 // Worth looking up for, from the game or another page.
                 self.alert_due = true;
             }
-            Notice::GameStarted => self.note_game_started(),
+            Notice::GameStarted(_) => self.note_game_started(),
             Notice::Event(Event::Joined(player)) => self.note_joined(player),
             Notice::Event(Event::Server(key)) => {
                 // Joined by its address alone: kept with the key it has, so that the next
@@ -485,6 +490,8 @@ impl Panel {
                 let left = matches!(self.play.state, PlayState::Ended { left: true, .. });
                 // The thread has finished; this only collects it.
                 drop(self.play.bridge.take());
+                // Bot games were started for this session, and go with it.
+                self.play.bots.end_session();
                 self.play.link = None;
                 self.play.roster.clear();
                 self.play.note(reason.clone());
@@ -622,7 +629,9 @@ impl Panel {
             host_password,
             name,
             hosting,
+            bot_of: None,
         };
+        self.play.bots.joining(&request);
         match Bridge::start(request) {
             Ok(bridge) => {
                 self.play.bridge = Some(bridge);
@@ -657,6 +666,7 @@ impl Panel {
             // the game or looking the server's name up, and the window would stand still
             // until it had. Its end comes as any other's, and is taken then.
             bridge.ask_to_leave();
+            self.play.bots.end_session();
             self.play.state = PlayState::Ended {
                 headline: "",
                 reason: String::new(),

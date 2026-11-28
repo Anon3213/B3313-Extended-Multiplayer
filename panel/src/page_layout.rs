@@ -9,6 +9,7 @@ pub enum ArrangedPage {
     Players,
     Bans,
     Settings,
+    Bots,
     Preferences,
 }
 
@@ -24,11 +25,12 @@ const fn panel(key: &'static str, title: &'static str) -> PagePanel {
 }
 
 impl ArrangedPage {
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
         Self::Play,
         Self::Players,
         Self::Bans,
         Self::Settings,
+        Self::Bots,
         Self::Preferences,
     ];
 
@@ -40,6 +42,7 @@ impl ArrangedPage {
             Self::Players => "players_panels",
             Self::Bans => "bans_panels",
             Self::Settings => "settings_panels",
+            Self::Bots => "bots_panels",
             Self::Preferences => "preferences_panels",
         }
     }
@@ -75,15 +78,16 @@ impl ArrangedPage {
             panel("privacy", "Privacy"),
             panel("behavior", "Behavior"),
             panel("chat", "Chat in the game"),
-            panel("bots", "Bots"),
             panel("alerts", "Alerts"),
             panel("startup", "Startup"),
             panel("shortcuts", "Keyboard shortcuts"),
             panel("about", "About"),
             panel("reset", "Reset"),
         ];
+        const BOTS: &[PagePanel] = &[panel("yours", "Your game"), panel("games", "Bot games")];
         match self {
             Self::Play => PLAY,
+            Self::Bots => BOTS,
             Self::Players => PLAYERS,
             Self::Bans => BANS,
             Self::Settings => SETTINGS,
@@ -179,6 +183,7 @@ pub struct PageLayouts {
     players: PageLayout,
     bans: PageLayout,
     settings: PageLayout,
+    bots: PageLayout,
     preferences: PageLayout,
 }
 
@@ -189,6 +194,7 @@ impl Default for PageLayouts {
             players: PageLayout::usual(ArrangedPage::Players),
             bans: PageLayout::usual(ArrangedPage::Bans),
             settings: PageLayout::usual(ArrangedPage::Settings),
+            bots: PageLayout::usual(ArrangedPage::Bots),
             preferences: PageLayout::usual(ArrangedPage::Preferences),
         }
     }
@@ -202,6 +208,7 @@ impl PageLayouts {
             ArrangedPage::Players => &self.players,
             ArrangedPage::Bans => &self.bans,
             ArrangedPage::Settings => &self.settings,
+            ArrangedPage::Bots => &self.bots,
             ArrangedPage::Preferences => &self.preferences,
         }
     }
@@ -212,6 +219,7 @@ impl PageLayouts {
             ArrangedPage::Players => &mut self.players,
             ArrangedPage::Bans => &mut self.bans,
             ArrangedPage::Settings => &mut self.settings,
+            ArrangedPage::Bots => &mut self.bots,
             ArrangedPage::Preferences => &mut self.preferences,
         }
     }
@@ -254,8 +262,8 @@ mod tests {
     #[test]
     fn a_panel_added_since_an_order_was_saved_takes_its_usual_place() {
         let page = ArrangedPage::Preferences;
-        // Saved before the page had its chat panel, which usually follows Behavior, its bots,
-        // which follow the chat, and its About, which usually follows the shortcuts.
+        // Saved before the page had its chat panel, which usually follows Behavior, and its
+        // About, which usually follows the shortcuts.
         let saved = "appearance,privacy,behavior,alerts,startup,shortcuts,reset";
         assert_eq!(PageLayout::parse(page, saved), PageLayout::usual(page));
         // The user's own order is kept, and each new panel still follows its neighbor there.
@@ -267,7 +275,6 @@ mod tests {
                 "about",
                 "behavior",
                 "chat",
-                "bots",
                 "appearance",
                 "privacy",
                 "alerts",

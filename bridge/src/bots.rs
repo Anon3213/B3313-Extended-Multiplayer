@@ -778,6 +778,7 @@ mod tests {
         let seen = Seen {
             now: Instant::now(),
             playing: true,
+            in_level: true,
             place: (9, 1),
             area_loads: 3,
             mario: Mario {
@@ -822,6 +823,7 @@ mod tests {
             Seen {
                 now,
                 playing: true,
+                in_level: true,
                 place,
                 area_loads: 0,
                 mario,

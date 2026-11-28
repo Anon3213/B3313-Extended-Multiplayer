@@ -14,12 +14,18 @@ use the same few requests.
 
 Each bot plays its own game, in its own emulator, joined to the session like any player.
 
-- **From the panel:** turn on **Let a bot play your game** under **Preferences → Bots**, then
-  join a session from the **Play** page. While you are in the session, the bot connects to
-  `127.0.0.1:33130` and plays that game, the panel's own, so a bot that plays beside you needs
-  a PC of its own, or the command line below. The Play page says when a bot connects and
-  leaves.
-- **From a command line**, for bots beside you, or several on one PC: start each bot's
+- **Your own game, from the panel:** turn on **Let a bot play your game** on the **Bots** page,
+  then join a session from the **Play** page. While you are in the session, the bot connects
+  to `127.0.0.1:33130` and plays that game, the panel's own. The Play page says when a bot
+  connects and leaves.
+- **Bot games beside yours, from the panel:** while you are in a session, the **Bots** page
+  starts from 1 to 8 more games, each a player of its own in your session: your game, copied,
+  in an emulator of its own that is muted, reads no controller, and goes on running behind
+  other windows. The page lists the port each one's bot connects to, `127.0.0.1:33131` and
+  on, and whether one has; **Stop bot games**, or leaving, closes them. Under **When they
+  join**, **Follow you** has their Marios get into the game and follow yours until a bot takes
+  the controller; **Wait for a bot** leaves them at the title screen.
+- **From a command line**, for bots on a PC without the panel: start each bot's
   emulator with the multiplayer ROM, which the panel builds into
   `%APPDATA%\B3313 Extended Multiplayer\game`.
   Give each bot a copy of it under a name of its own, as `bot1.z64`, or the emulators all write
@@ -120,6 +126,11 @@ which for a door or a pipe is also where to go to leave by it. Paintings are not
 
 ## Getting about in B3313
 
+- **From the title screen:** a game joins the session as soon as it has started, at the title
+  screen, where `playing` is false. A `warp`, `goto` or `follow` sent then presses Start and A
+  in turn, once a second, through the title screen, the file select and any text, until Mario
+  runs in a level, and is carried out there; `doing` says "getting into the game" meanwhile. A
+  bot that would rather press its own way in sends `pad`, which ends that.
 - **Steering by yourself:** the game turns the stick by the camera. To walk toward a point, take
   the angle to it, `atan2(dx, dz)`, less `camera_yaw`, and push the stick to `[sin, -cos]` of
   what is left: straight up walks away from the camera. A push under about a tenth does nothing.

@@ -2,6 +2,7 @@
 
 mod arrange;
 mod bans_page;
+mod bots_page;
 mod chat;
 mod column_resize;
 mod crash_notice;
@@ -71,6 +72,7 @@ actions!(
         ShowBans,
         ShowSettings,
         ShowLog,
+        ShowBots,
         ShowPreferences
     ]
 );
@@ -99,15 +101,16 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("secondary-4", ShowBans, None),
         KeyBinding::new("secondary-5", ShowSettings, None),
         KeyBinding::new("secondary-6", ShowLog, None),
-        KeyBinding::new("secondary-7", ShowPreferences, None),
+        KeyBinding::new("secondary-7", ShowBots, None),
+        KeyBinding::new("secondary-8", ShowPreferences, None),
     ]);
 }
 
 /// Every shortcut, as the Preferences page lists them: keys, then what they do.
 pub(crate) const SHORTCUTS: [(&str, &str); 14] = [
     (
-        "Ctrl+1 to Ctrl+7",
-        "Play, Overview, Players, Bans, Server settings, Log, Preferences",
+        "Ctrl+1 to Ctrl+8",
+        "Play, Overview, Players, Bans, Server settings, Log, Bots, Preferences",
     ),
     ("Ctrl+N", "Start new server settings from the defaults"),
     ("Ctrl+O", "Open a settings file"),
@@ -151,6 +154,8 @@ enum Page {
     /// The server's settings file.
     Settings,
     Log,
+    /// Bots playing in the player's session: their own game, and games beside it.
+    Bots,
     /// The panel's own: how it looks, alerts and starts.
     Preferences,
 }
@@ -164,19 +169,21 @@ impl From<StartPage> for Page {
             StartPage::Bans => Self::Bans,
             StartPage::Settings => Self::Settings,
             StartPage::Log => Self::Log,
+            StartPage::Bots => Self::Bots,
             StartPage::Preferences => Self::Preferences,
         }
     }
 }
 
 impl Page {
-    const ALL: [Self; 7] = [
+    const ALL: [Self; 8] = [
         Self::Play,
         Self::Overview,
         Self::Players,
         Self::Bans,
         Self::Settings,
         Self::Log,
+        Self::Bots,
         Self::Preferences,
     ];
 
@@ -188,6 +195,7 @@ impl Page {
             Self::Bans => "Bans",
             Self::Settings => "Server settings",
             Self::Log => "Log",
+            Self::Bots => "Bots",
             Self::Preferences => "Preferences",
         }
     }
@@ -200,6 +208,7 @@ impl Page {
             Self::Bans => IconName::Ban,
             Self::Settings => IconName::Settings,
             Self::Log => IconName::ScrollText,
+            Self::Bots => IconName::Bot,
             Self::Preferences => IconName::SlidersHorizontal,
         }
     }
@@ -213,7 +222,8 @@ impl Page {
             Self::Bans => "Ctrl+4",
             Self::Settings => "Ctrl+5",
             Self::Log => "Ctrl+6",
-            Self::Preferences => "Ctrl+7",
+            Self::Bots => "Ctrl+7",
+            Self::Preferences => "Ctrl+8",
         }
     }
 }
@@ -685,6 +695,7 @@ impl Render for Panel {
             Page::Bans => self.render_bans(cx),
             Page::Settings => self.render_settings(window, cx),
             Page::Log => self.render_log(cx),
+            Page::Bots => self.render_bots_page(cx),
             Page::Preferences => self.render_preferences(cx),
         };
         self.update_title(window);
@@ -744,6 +755,7 @@ impl Render for Panel {
             .on_action(cx.listener(|this, _: &ShowBans, _, cx| this.go_to(Page::Bans, cx)))
             .on_action(cx.listener(|this, _: &ShowSettings, _, cx| this.go_to(Page::Settings, cx)))
             .on_action(cx.listener(|this, _: &ShowLog, _, cx| this.go_to(Page::Log, cx)))
+            .on_action(cx.listener(|this, _: &ShowBots, _, cx| this.go_to(Page::Bots, cx)))
             .on_action(cx.listener(|this, _: &ShowPreferences, _, cx| {
                 this.go_to(Page::Preferences, cx);
             }))

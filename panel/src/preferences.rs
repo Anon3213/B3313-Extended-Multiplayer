@@ -319,17 +319,19 @@ pub enum StartPage {
     Bans,
     Settings,
     Log,
+    Bots,
     Preferences,
 }
 
 impl StartPage {
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 8] = [
         Self::Play,
         Self::Overview,
         Self::Players,
         Self::Bans,
         Self::Settings,
         Self::Log,
+        Self::Bots,
         Self::Preferences,
     ];
 
@@ -342,6 +344,7 @@ impl StartPage {
             Self::Bans => "bans",
             Self::Settings => "settings",
             Self::Log => "log",
+            Self::Bots => "bots",
             Self::Preferences => "preferences",
         }
     }

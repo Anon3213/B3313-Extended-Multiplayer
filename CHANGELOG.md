@@ -5,6 +5,24 @@ those from 0.1.0 to 0.1.4 join each other's servers, as do those from 0.2.0 to 0
 0.4.0 and 0.4.1; a version that does not play with the ones before it says so, as 0.3.0 and
 0.4.1 do.
 
+## Not yet released
+
+It plays with 0.4.1's servers and players: nothing a player's program tells the server
+changed, and neither did the game.
+
+- **A Bots page in the panel**, for everything about bots. **Let a bot play your game** moved
+  there from Preferences. Its shortcut is Ctrl+7, so Preferences is now Ctrl+8.
+- **Bot games:** while you are in a session, the Bots page starts from 1 to 8 more games beside
+  yours, each a player of its own for a bot on your PC to play, and lists the port each bot
+  connects to. Each is your game in an emulator of its own that is muted, ignores your
+  controller and goes on running behind other windows. They close when you stop them or leave
+  the session. With **Follow you**, their Marios follow yours by themselves until a bot takes
+  over.
+- **Bots and commands work from the title screen.** A `warp`, `goto` or `follow` asked for
+  there, by a bot or as `/warp`, `/goto` or `/follow` in the chat, presses through the title
+  screen and the file select into a level first, and is then carried out. They were refused
+  until Mario was in a level.
+
 ## 0.4.1
 
 **About the version numbers:** 0.4.0 was tagged the same day and never published, and this

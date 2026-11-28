@@ -24,7 +24,6 @@ impl Panel {
             ("privacy", Some(self.render_privacy(&theme, cx))),
             ("behavior", Some(self.render_behavior(&theme, cx))),
             ("chat", Some(self.render_game_chat(&theme, cx))),
-            ("bots", Some(self.render_bots(&theme, cx))),
             ("alerts", Some(self.render_alerts(&theme, cx))),
             ("startup", Some(self.render_startup(&theme, cx))),
             ("shortcuts", Some(render_shortcuts(&theme))),

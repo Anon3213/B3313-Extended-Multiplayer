@@ -8,6 +8,7 @@
 
 mod alert;
 mod app;
+mod bot_games;
 mod chart;
 mod columns;
 mod crash;

@@ -25,8 +25,9 @@ pub enum Notice {
     /// No save of the game was found to copy aside before the session, which adds to it:
     /// the emulator keeps this game's save somewhere the panel did not look, or it has none.
     SaveNotCopied,
-    /// The session started the game in the emulator, as it does when none was running it.
-    GameStarted,
+    /// The session started the game in the emulator, as it does when none was running it,
+    /// under this process ID.
+    GameStarted(u32),
     /// The session ended, saying what happened in a few words for the sidebar and why in a
     /// sentence for the player, with what the system said of it when there is more to know.
     Ended {
@@ -253,6 +254,11 @@ pub struct Request {
     /// The server this panel is hosting, if it is: where it listens, its key, and its host
     /// password, which goes to that server alone, so the player hosting is the host.
     pub hosting: Option<Hosting>,
+    /// For a bot's game beside the player's (`bot_games`): the player's ROM, which `rom` is
+    /// made a copy of before the game starts, so that each bot's game keeps a save of its own.
+    /// A bot's game is started as one (`Install::start_bot`), and its save is not copied
+    /// aside, which would push the player's own copies out.
+    pub bot_of: Option<PathBuf>,
 }
 
 /// The server the panel is hosting, as a session joining it needs to know it.
@@ -354,6 +360,30 @@ fn current_rom(
     }
 }
 
+/// Makes `copy` a copy of the ROM at `rom`, unless it is one already: as long, and written
+/// since `rom` was. The 1.0.2 ROMs are 96 MB, so a bot's copy is not made again each time.
+fn copy_rom(rom: &Path, copy: &Path) -> Result<(), String> {
+    let is_current = || -> io::Result<bool> {
+        let (from, to) = (std::fs::metadata(rom)?, std::fs::metadata(copy)?);
+        Ok(from.len() == to.len() && to.modified()? >= from.modified()?)
+    };
+    if is_current().unwrap_or(false) {
+        return Ok(());
+    }
+    let made = || -> io::Result<()> {
+        if let Some(folder) = copy.parent() {
+            std::fs::create_dir_all(folder)?;
+        }
+        std::fs::copy(rom, copy).map(|_| ())
+    };
+    made().map_err(|error| {
+        format!(
+            "Could not copy the game for a bot to {}: {error}.",
+            copy.display()
+        )
+    })
+}
+
 impl Request {
     /// The ROM's bytes, brought up to date if the panel built it; see `current_rom`.
     fn current_rom(&self) -> Result<Vec<u8>, String> {
@@ -375,8 +405,12 @@ impl Request {
             "Parallel Launcher's emulator was not found. Install Parallel Launcher and start \
              any game in it once, or start the multiplayer ROM yourself.",
         )?;
-        install
-            .start(&self.rom, self.chat_key.is_some())
+        let started = if self.bot_of.is_some() {
+            install.start_bot(&self.rom)
+        } else {
+            install.start(&self.rom, self.chat_key.is_some())
+        };
+        started
             .map(|pid| (pid, true))
             .map_err(|error| format!("Could not start the emulator: {error}."))
     }
@@ -401,6 +435,9 @@ impl Request {
             .map_err(|error| format!("Server not found: {name} could not be looked up. {error}."))
             .map_err(failed(headline::SERVER_NOT_FOUND))?;
         let name = name.to_owned();
+        if let Some(players) = &self.bot_of {
+            copy_rom(players, &self.rom).map_err(failed(headline::GAME_NOT_READY))?;
+        }
         let rom = self
             .current_rom()
             .map_err(failed(headline::GAME_NOT_READY))?;
@@ -409,18 +446,20 @@ impl Request {
         if stop.load(Ordering::Relaxed) {
             return Err((headline::LEFT, "You left the session.".to_owned()));
         }
-        let copied = self
-            .back_up_save()
-            .map_err(failed(headline::SAVE_NOT_COPIED))?;
-        if copied == 0 {
-            // Said, not passed over: the session changes a save that then has no copy.
-            let _ = notify.send(Notice::SaveNotCopied);
+        if self.bot_of.is_none() {
+            let copied = self
+                .back_up_save()
+                .map_err(failed(headline::SAVE_NOT_COPIED))?;
+            if copied == 0 {
+                // Said, not passed over: the session changes a save that then has no copy.
+                let _ = notify.send(Notice::SaveNotCopied);
+            }
         }
         let (pid, started) = self
             .emulator()
             .map_err(failed(headline::EMULATOR_NOT_STARTED))?;
         if started {
-            let _ = notify.send(Notice::GameStarted);
+            let _ = notify.send(Notice::GameStarted(pid));
         }
         let own = self
             .hosting
@@ -452,7 +491,9 @@ impl Request {
 
 #[cfg(test)]
 mod tests {
-    use super::{Hosting, current_rom, headline, host_password_for, is_own_server, not_joined};
+    use super::{
+        Hosting, copy_rom, current_rom, headline, host_password_for, is_own_server, not_joined,
+    };
     use crate::game_setup::{Built, GAMES, Game};
     use b3313_bridge::session::HEADLINE_MOST;
     use b3313_protocol::secure::{SecureError, ServerKey};
@@ -480,6 +521,27 @@ mod tests {
 
     fn never_rebuilt(_: &Path, _: &Path) -> Result<Built, String> {
         unreachable!("this ROM is not one to build again")
+    }
+
+    #[test]
+    fn a_bots_copy_of_the_rom_is_made_once_and_again_when_the_rom_changes() -> std::io::Result<()> {
+        let (folder, _) = scratch("bot-copy");
+        let rom = folder.join("game.z64");
+        let copy = folder.join("bots").join("game-bot1.z64");
+        std::fs::write(&rom, b"first")?;
+        copy_rom(&rom, &copy).map_err(std::io::Error::other)?;
+        assert_eq!(std::fs::read(&copy)?, b"first");
+
+        // A copy as long as the ROM, and written since, is kept as it is.
+        std::fs::write(&copy, b"FIRST")?;
+        copy_rom(&rom, &copy).map_err(std::io::Error::other)?;
+        assert_eq!(std::fs::read(&copy)?, b"FIRST");
+
+        // A ROM built anew is copied again.
+        std::fs::write(&rom, b"second one")?;
+        copy_rom(&rom, &copy).map_err(std::io::Error::other)?;
+        assert_eq!(std::fs::read(&copy)?, b"second one");
+        Ok(())
     }
 
     #[test]

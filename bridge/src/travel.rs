@@ -50,6 +50,13 @@ pub fn warp_levels() -> Vec<i16> {
 }
 /// The controller's A button, which jumps.
 pub const A_BUTTON: u16 = 0x8000;
+/// The controller's Start button, which goes on from the title screen and the file select.
+pub const START_BUTTON: u16 = 0x1000;
+/// How often a button is pressed to get into a level from the game's menus: long enough for a
+/// menu or a text box to act on one press before the next, as the test scripts press them.
+const ENTER_PRESS_EVERY: Duration = Duration::from_secs(1);
+/// How long pressing through the menus is kept at before it is given up.
+const ENTER_LIMIT: Duration = Duration::from_secs(180);
 /// How far the stick is pushed, of the 80 or so a real one reaches: Mario runs.
 pub const STICK_EDGE: f32 = 80.0;
 /// How many of the game's frames each hold lasts: more than pass between two of the bridge's
@@ -213,6 +220,9 @@ pub struct Seen<'a> {
     /// Whether the game is in a level with its Mario running: not at a menu, paused or between
     /// areas.
     pub playing: bool,
+    /// Whether the game is in a level at all, Mario running or not: not at the title screen
+    /// or another of its menus.
+    pub in_level: bool,
     pub place: (i16, u8),
     /// How many areas the game has loaded since it started, which rises when a warp lands.
     pub area_loads: u32,
@@ -493,12 +503,59 @@ enum Kind {
         to: [f32; 3],
         progress: Progress,
     },
+    /// Into a level from the game's menus first, for an order given there.
+    Enter(Entering),
+}
+
+/// Pressing through the game's menus into a level, to carry out an order then.
+#[derive(Debug)]
+struct Entering {
+    then: Order,
+    /// Whether Start is pressed next at a menu, where Start and A are pressed in turn.
+    start_next: bool,
+    next_press: Instant,
+    until: Instant,
+}
+
+impl Entering {
+    fn new(then: Order, now: Instant) -> Self {
+        Self {
+            then,
+            start_next: true,
+            next_press: now,
+            until: now + ENTER_LIMIT,
+        }
+    }
+
+    /// The button to press now, if one is due: in a level, as at an act's choice or in a text
+    /// box, A; at a menu, Start and A in turn, which take the title screen and the file select.
+    fn press(&mut self, seen: &Seen<'_>) -> Option<u16> {
+        if seen.now < self.next_press {
+            return None;
+        }
+        self.next_press = seen.now + ENTER_PRESS_EVERY;
+        let start = !seen.in_level && self.start_next;
+        self.start_next = !start;
+        Some(if start { START_BUTTON } else { A_BUTTON })
+    }
 }
 
 impl Kind {
     /// What it is, in a few words.
     fn describe(&self) -> String {
         match self {
+            Self::Enter(entering) => match &entering.then {
+                Order::Warp {
+                    level,
+                    area: Some(area),
+                } => format!("getting into the game to warp to {level}-{area}"),
+                Order::Warp { level, area: None } => {
+                    format!("getting into the game to warp to level {level}")
+                }
+                Order::Goto(name) => format!("getting into the game to go to {name}"),
+                Order::Follow(name) => format!("getting into the game to follow {name}"),
+                Order::Go(_) | Order::Stop => "getting into the game".to_owned(),
+            },
             Self::Warp(warping) => match warping.area {
                 Some(area) => format!("warping to {}-{area}", warping.level),
                 None => format!("warping to level {}", warping.level),
@@ -582,7 +639,19 @@ impl Travel {
             return Ok(None);
         }
         if !seen.playing {
-            return Err("Mario is not in a level now.".to_owned());
+            // From a menu, or a text box, into a level first, where the order is carried out;
+            // a point to walk to means nothing until Mario is in an area.
+            return match order {
+                Order::Warp { level, area } => {
+                    check_place(level, area)?;
+                    Ok(Some(Kind::Enter(Entering::new(order, seen.now))))
+                }
+                Order::Goto(_) | Order::Follow(_) => {
+                    Ok(Some(Kind::Enter(Entering::new(order, seen.now))))
+                }
+                Order::Go(_) => Err("Mario is not in a level now.".to_owned()),
+                Order::Stop => Ok(None),
+            };
         }
         Ok(Some(match order {
             Order::Stop => return Ok(None),
@@ -661,7 +730,38 @@ impl Travel {
         seen: &Seen<'_>,
         moves: &mut impl Moves,
     ) -> io::Result<Turn> {
+        if let Kind::Enter(entering) = kind
+            && seen.playing
+        {
+            // In a level now: the order it was given for begins.
+            let order = entering.then.clone();
+            self.let_go(moves)?;
+            return Ok(match Self::kind_for(order, seen) {
+                Ok(Some(next)) => {
+                    *kind = next;
+                    Turn::Going
+                }
+                Ok(None) => Turn::Done("In a level.".to_owned()),
+                Err(why) => Turn::Failed(why),
+            });
+        }
         match kind {
+            Kind::Enter(entering) => {
+                if seen.now >= entering.until {
+                    return Ok(Turn::Failed(
+                        "Could not get past the game's menus into a level.".to_owned(),
+                    ));
+                }
+                if let Some(button) = entering.press(seen) {
+                    let pad = HeldPad {
+                        buttons: button,
+                        stick: [0, 0],
+                        frames: HOLD_FRAMES,
+                    };
+                    self.hold(moves, pad)?;
+                }
+                Ok(Turn::Going)
+            }
             Kind::Warp(warping) => Ok(match warping.advance(seen, moves)? {
                 WarpStep::Underway => Turn::Going,
                 WarpStep::Arrived => Turn::Done(format!("At {}-{}.", seen.place.0, seen.place.1)),
@@ -840,8 +940,8 @@ impl<M: ProcessMemory> Moves for GameMoves<'_, '_, M> {
 #[cfg(test)]
 mod tests {
     use super::{
-        A_BUTTON, EXIT_PATIENCE, GIVE_UP_AFTER, Moves, Order, Origin, Other, Report, Seen, Travel,
-        WARP_AGAIN_AFTER, command, stick_toward,
+        A_BUTTON, ENTER_LIMIT, ENTER_PRESS_EVERY, EXIT_PATIENCE, GIVE_UP_AFTER, Moves, Order,
+        Origin, Other, Report, START_BUTTON, Seen, Travel, WARP_AGAIN_AFTER, command, stick_toward,
     };
     use crate::game::{Area, Mario, WarpNode};
     use crate::mailbox::HeldPad;
@@ -923,6 +1023,7 @@ mod tests {
         Seen {
             now,
             playing: true,
+            in_level: true,
             place,
             area_loads: loads,
             mario: mario_at(at),
@@ -1251,7 +1352,7 @@ mod tests {
     }
 
     #[test]
-    fn stop_ends_what_mario_was_doing_and_nothing_starts_outside_a_level() -> io::Result<()> {
+    fn stop_ends_what_mario_was_doing_and_a_walk_needs_a_level() -> io::Result<()> {
         let start = Instant::now();
         let mut record = Record::default();
         let mut travel = Travel::default();
@@ -1280,10 +1381,7 @@ mod tests {
         let mut menu = seen(start, (9, 1), 3, here, &[]);
         menu.playing = false;
         let (refused, _) = travel.order(
-            Order::Warp {
-                level: 9,
-                area: None,
-            },
+            Order::Go([0.0, 0.0, 900.0]),
             Origin::Chat,
             &menu,
             &mut record,
@@ -1299,6 +1397,68 @@ mod tests {
             refused,
             Err("Nobody in a level is called Nobody.".to_owned())
         );
+        Ok(())
+    }
+
+    #[test]
+    fn an_order_at_the_title_screen_presses_into_a_level_and_is_then_carried_out() -> io::Result<()>
+    {
+        let start = Instant::now();
+        let mut record = Record::default();
+        let mut travel = Travel::default();
+        let here = [0.0; 3];
+        let at_menu = |now: Instant| {
+            let mut menu = seen(now, (1, 0), 0, here, &[]);
+            menu.playing = false;
+            menu.in_level = false;
+            menu
+        };
+        let order = Order::Warp {
+            level: 9,
+            area: None,
+        };
+        let (taken, _) = travel.order(order, Origin::Bot(4), &at_menu(start), &mut record)?;
+        assert_eq!(
+            taken.as_deref(),
+            Ok("Getting into the game to warp to level 9.")
+        );
+
+        // At a menu, Start and A in turn, a press a second.
+        let pressed = |record: &Record| record.held.last().map(|pad| pad.buttons);
+        travel.step(&at_menu(start), &mut record)?;
+        assert_eq!(pressed(&record), Some(START_BUTTON));
+        let held_before = record.held.len();
+        travel.step(&at_menu(start + Duration::from_millis(500)), &mut record)?;
+        assert_eq!(record.held.len(), held_before);
+        travel.step(&at_menu(start + ENTER_PRESS_EVERY), &mut record)?;
+        assert_eq!(pressed(&record), Some(A_BUTTON));
+        // In a level but not running, as at an act's choice: A alone.
+        let mut choosing = at_menu(start + ENTER_PRESS_EVERY * 2);
+        choosing.in_level = true;
+        travel.step(&choosing, &mut record)?;
+        travel.step(
+            &{
+                let mut again = choosing;
+                again.now += ENTER_PRESS_EVERY;
+                again
+            },
+            &mut record,
+        )?;
+        assert_eq!(pressed(&record), Some(A_BUTTON));
+
+        // Running in a level: the controller is let go and the warp begins.
+        let later = start + ENTER_PRESS_EVERY * 5;
+        let reports = travel.step(&seen(later, (6, 1), 1, here, &[]), &mut record)?;
+        assert_eq!(reports.len(), 0);
+        assert_eq!(record.held.last(), Some(&HeldPad::default()));
+        assert_eq!(travel.doing().as_deref(), Some("warping to level 9"));
+
+        // One that never gets past the menus is given up.
+        let mut stuck = Travel::default();
+        let follow = Order::Follow("Luigi".into());
+        let (_, _) = stuck.order(follow, Origin::Chat, &at_menu(start), &mut record)?;
+        let reports = stuck.step(&at_menu(start + ENTER_LIMIT), &mut record)?;
+        assert_eq!(reports.first().map(|report| report.done), Some(false));
         Ok(())
     }
 }

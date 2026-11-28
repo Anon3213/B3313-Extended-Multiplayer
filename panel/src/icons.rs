@@ -42,6 +42,7 @@ icons! {
     ArrowUpDown => "arrow-up-down.svg",
     Ban => "ban.svg",
     Bell => "bell.svg",
+    Bot => "bot.svg",
     ChevronDown => "chevron-down.svg",
     ChevronRight => "chevron-right.svg",
     CircleAlert => "circle-alert.svg",

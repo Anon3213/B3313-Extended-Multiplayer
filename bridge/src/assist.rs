@@ -134,6 +134,7 @@ impl Assist {
         let seen = Seen {
             now,
             playing: playing && published.is_some() && place == current,
+            in_level: published.is_some(),
             place,
             area_loads: mailbox.area_loads()?,
             mario,
