@@ -2,10 +2,10 @@
 
 What each version changed, newest first. Versions of the same protocol play together:
 those from 0.1.0 to 0.1.4 join each other's servers, as do those from 0.2.0 to 0.2.2, and
-0.4.0 to 0.4.2; a version that does not play with the ones before it says so, as 0.3.0 and
+0.4.0 to 0.4.3; a version that does not play with the ones before it says so, as 0.3.0 and
 0.4.1 do.
 
-## Not yet released
+## 0.4.3
 
 It plays with 0.4.2 and 0.4.1, and uses 0.4.2's game: only the bridge and the panel changed.
 

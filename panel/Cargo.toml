@@ -1,6 +1,6 @@
 [package]
 name = "b3313-panel"
-version = "0.4.2"
+version = "0.4.3"
 description = "Desktop control panel that joins, hosts and moderates B3313 multiplayer sessions"
 edition = "2024"
 rust-version = "1.99"
