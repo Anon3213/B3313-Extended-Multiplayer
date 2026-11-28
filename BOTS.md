@@ -20,8 +20,9 @@ Each bot plays its own game, in its own emulator, joined to the session like any
   connects and leaves.
 - **Bot games beside yours, from the panel:** while you are in a session, the **Bots** page
   starts from 1 to 8 more games, each a player of its own in your session: your game, copied,
-  in an emulator of its own that is muted, reads no controller, and goes on running behind
-  other windows. The page lists the port each one's bot connects to, `127.0.0.1:33131` and
+  in an emulator of its own that opens in a window 640 by 480, whatever size your own game's
+  is, is muted, reads no controller, and goes on running behind other windows. Each window
+  comes to the front as it opens. The page lists the port each one's bot connects to, `127.0.0.1:33131` and
   on, and whether one has; **Stop bot games**, or leaving, closes them. Under **When they
   join**, **Follow you** has their Marios get into the game and follow yours until a bot takes
   the controller; **Wait for a bot** leaves them at the title screen.

@@ -185,7 +185,8 @@ game's warps. Everything for bots is on the panel's **Bots** page:
 
 - **Let a bot play your game** lets a bot connect to your own game while you are in a session.
 - **Bot games** starts more games beside yours while you are in a session, from 1 to 8, each a
-  player of its own for a bot to play. Each is muted, ignores your controller, and costs about
+  player of its own for a bot to play. Each opens in a small window (640 by 480), is muted,
+  ignores your controller, and costs about
   a tenth of a processor core and 600 MB of memory. With **Follow you**, their Marios get into
   the game and follow yours by themselves until a bot takes over. They close when you stop
   them or leave.

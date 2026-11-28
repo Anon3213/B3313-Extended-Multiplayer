@@ -61,6 +61,8 @@ pub struct BotGame {
     /// The player its Mario is to follow once it is in the session, until then: told to its
     /// bridge as `/follow` in its own chat, which presses through the game's menus first.
     follow: Option<String>,
+    /// The player it was sent to follow, once it has been: what its row says it does.
+    pub following: Option<String>,
 }
 
 impl BotGame {
@@ -86,6 +88,7 @@ impl BotGame {
             bridge: Some(Bridge::start(request)?),
             emulator: None,
             follow,
+            following: None,
         })
     }
 
@@ -108,13 +111,19 @@ impl BotGame {
                 self.status = Status::Playing(player.get());
                 if let (Some(name), Some(bridge)) = (self.follow.take(), &self.bridge) {
                     bridge.say(format!("/follow {name}"));
+                    self.following = Some(name);
                 }
             }
             Notice::Event(Event::Reconnecting(_)) => self.status = Status::Rejoining,
             Notice::Event(Event::Bot(notice)) => match notice {
                 BotNotice::Listening(address) => self.address = Some(address),
                 BotNotice::Unavailable(why) => self.status = Status::Ended(why),
-                BotNotice::Connected => self.has_bot = true,
+                BotNotice::Connected => {
+                    self.has_bot = true;
+                    // A bot that takes the controller ends the following; one that only
+                    // watches does not, but the row cannot tell which.
+                    self.following = None;
+                }
                 BotNotice::Left => self.has_bot = false,
             },
             Notice::Ended { reason, .. } => {

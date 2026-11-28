@@ -3,7 +3,7 @@
 
 use super::overview::{hint, label};
 use super::play_page::PlayState;
-use super::preferences_page::{choice, stepper_value};
+use super::preferences_page::choice;
 use super::{Page, Panel, page_frame};
 use crate::bot_games::{self, BotGame, Status};
 use crate::emulator;
@@ -261,12 +261,13 @@ impl Panel {
                 count.saturating_sub(1),
                 "One fewer",
             ))
-            .child(stepper_value(
-                Button::new("bot-games-count", count.to_string())
-                    .small()
-                    .tone(Tone::Quiet)
-                    .enabled(false),
-            ))
+            .child(
+                div()
+                    .flex()
+                    .justify_center()
+                    .w(scaled(32.))
+                    .child(label(theme, &count.to_string())),
+            )
             .child(step(
                 "bot-games-more",
                 "+",
@@ -309,17 +310,17 @@ impl Panel {
                 Status::Ended(_) => theme.danger,
                 _ => theme.warning,
             };
+            let doing = match (&game.following, game.has_bot) {
+                (_, true) => "a bot is connected".to_owned(),
+                (Some(name), false) => format!("following {}", self.shown_text(name)),
+                (None, false) => "waiting for a bot".to_owned(),
+            };
             let detail = match (&game.status, game.address) {
                 (Status::Ended(_), _) => self.shown_text(&game.status.describe()),
                 (status, Some(address)) => format!(
-                    "{}; a bot connects to {}; {}",
+                    "{}; {doing}; its bot connects to {}",
                     status.describe(),
                     self.shown_address(address),
-                    if game.has_bot {
-                        "one is playing"
-                    } else {
-                        "none is connected"
-                    }
                 ),
                 (status, None) => status.describe(),
             };
@@ -343,7 +344,8 @@ impl Panel {
                 )
         });
         div().flex().flex_col().gap_2().children(rows).child(
-            div().pt_1().child(
+            // A row of its own, so the button is as wide as its words.
+            div().pt_1().flex().child(
                 Button::new("bot-games-stop", "Stop bot games")
                     .small()
                     .icon(IconName::Square)

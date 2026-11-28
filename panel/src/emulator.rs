@@ -123,7 +123,22 @@ const FIXED_CHANGES: [FixedChange; 6] = [
 
 /// What a bot's game is given besides what every game is, as what, why and the settings. A
 /// bot's game runs beside the player's own, behind it, and no person plays it.
-const BOT_CHANGES: [FixedChange; 3] = [
+const BOT_CHANGES: [FixedChange; 4] = [
+    (
+        "It opens in a window 640 by 480, not full screen.",
+        "Full screen, or at the size your own game's window was last left, it would cover your \
+         own game and everything else on that screen.",
+        // The size a window is given back, as the emulator keeps it, here fixed: the size
+        // from the picture would be the core's, as large as 2880 by 2160.
+        &[
+            ("video_fullscreen", "false"),
+            ("video_window_save_positions", "true"),
+            ("video_windowed_position_width", "640"),
+            ("video_windowed_position_height", "480"),
+            ("video_windowed_position_x", "40"),
+            ("video_windowed_position_y", "40"),
+        ],
+    ),
     (
         "Its sound is muted.",
         "Several games make a din, and none of a bot's is yours to hear.",
@@ -537,13 +552,14 @@ mod tests {
     }
 
     #[test]
-    fn a_bots_game_is_muted_reads_no_controller_and_runs_behind_other_windows() {
+    fn a_bots_game_is_windowed_muted_reads_no_controller_and_runs_behind_other_windows() {
         let theirs = "input_pause_toggle = \"p\"\n";
         let written = overrides(&bot_changes_to(theirs));
         for needed in [
             "audio_mute_enable = \"true\"",
             "input_joypad_driver = \"null\"",
             "pause_nonactive = \"false\"",
+            "video_fullscreen = \"false\"",
             // What every game is given, so the bot's stays in step too.
             "audio_sync = \"true\"",
             "config_save_on_exit = \"false\"",
