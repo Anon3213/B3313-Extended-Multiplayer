@@ -2,8 +2,8 @@
 ; and so is the ROM, so it goes just past the ROM's end, in two segments one after the other
 ; there. mp_setup (Multiplayer/boot.c) loads both at boot into RAM the survey found unused: the
 ; first, the code, between the mailbox and GhostPeach.asm's flag at 0x807D0000; and the second,
-; the font for names and chat, which the first has no room for, after the object numbers, where
-; the puppets' animation cache began.
+; the font for names and chat and the display lists that draw it and the minimap, which the
+; first has no room for, after the object numbers, where the puppets' animation cache began.
 ;
 ; Keep these in step with MP_CODE_ADDR, MP_CODE_END, MP_CODE2_ADDR and MP_CODE2_END in
 ; Multiplayer/mailbox.h.
@@ -11,7 +11,7 @@
 .definelabel mpseg_start, 0x807C56C0
 .definelabel mpseg_end, 0x807CC000
 .definelabel mpseg2_start, 0x807D1600
-.definelabel mpseg2_end, 0x807D2700
+.definelabel mpseg2_end, 0x807D2040
 
 .definelabel mpseg_romstart, filesize(BASE)
 .definelabel mpseg_romend, mpseg_romstart + (mpseg_end - mpseg_start)
@@ -72,10 +72,12 @@
 
 ; The second segment: the font names and chat are drawn in (Multiplayer/font.txt, packed into
 ; font.bin by scripts/make_font.py), then the display lists text is drawn between
-; (Multiplayer/font.c). The font is first, so that it sits at MP_FONT_ADDR.
+; (Multiplayer/font.c) and the one that shows the minimap (Multiplayer/map.c). The font is
+; first, so that it sits at MP_FONT_ADDR.
 .headersize mpseg2_start - mpseg2_romstart
 .org mpseg2_start
 .area mpseg2_end - mpseg2_start, 0x00
     .incbin "Multiplayer/font.bin"
     .importobj "Multiplayer/font.o"
+    .importobj "Multiplayer/map.o"
 .endarea

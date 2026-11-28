@@ -33,7 +33,8 @@ here go to the chat, and so do lines typed in the game: there, T opens the chat,
 in B3313_CHAT_KEY, and \"off\" for that leaves the keyboard unread; B3313_CHAT_SECONDS is how long
 the game shows a line, 8 unless given, B3313_CHAT_LINES how many rows it shows at once, 1 to 6
 (6 unless given), B3313_CHAT_HOVER=on shows the chat while the mouse rests on it, and
-B3313_CHAT_SIZE=large draws the chat at twice the size.
+B3313_CHAT_SIZE=large draws the chat at twice the size. B3313_MINIMAP=off hides the minimap of
+the walls and players around you in the lower right corner.
 B3313_BOT_PORT opens that port on 127.0.0.1 for a bot to play this game through; BOTS.md says how.
 The control panel's Play page does all this without a command line.";
 /// The key the server must have, for a server given by its address alone; unset joins
@@ -59,6 +60,8 @@ const CHAT_LINES_VARIABLE: &str = "B3313_CHAT_LINES";
 const CHAT_HOVER_VARIABLE: &str = "B3313_CHAT_HOVER";
 /// How large the game draws the chat: "normal" or "large"; unset, or anything else, is normal.
 const CHAT_SIZE_VARIABLE: &str = "B3313_CHAT_SIZE";
+/// Whether the game shows the minimap: "off" hides it; unset, or anything else, shows it.
+const MINIMAP_VARIABLE: &str = "B3313_MINIMAP";
 /// The port on 127.0.0.1 a bot may connect to; unset opens none.
 const BOT_PORT_VARIABLE: &str = "B3313_BOT_PORT";
 
@@ -219,6 +222,8 @@ fn run() -> Result<(), Box<dyn Error>> {
             .ok()
             .and_then(|named| ChatSize::named(&named))
             .unwrap_or_default(),
+        minimap: !std::env::var(MINIMAP_VARIABLE)
+            .is_ok_and(|named| named.trim().eq_ignore_ascii_case("off")),
         bot_port: bot_port()?,
     };
     leave_on_ctrl_c();

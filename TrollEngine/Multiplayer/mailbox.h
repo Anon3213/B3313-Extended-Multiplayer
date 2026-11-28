@@ -27,21 +27,27 @@
 #define MP_WORLD_STASH_ADDR 0x807D0A00
 #define MP_OBJECT_IDS_ADDR 0x807D0C00
 // A second segment loaded from the ROM, as the first is full: the font names and chat are
-// drawn in, and the display lists that go with it (Multiplayer/font.c). boot.c loads it and
-// segment.asm must agree. It starts in the room the object numbers leave of theirs and runs
-// into what was the front of the puppets' animation cache, which has what is left; every
-// byte it takes is one the cache loses, so it holds only what the first cannot.
+// drawn in, and the display lists that go with it and the minimap (Multiplayer/font.c,
+// map.c). boot.c loads it and segment.asm must agree. It starts in the room the object
+// numbers leave of theirs and runs into what was the front of the puppets' animation cache,
+// which has what is left; every byte it takes is one the cache loses, so it holds only what
+// the first cannot.
 #define MP_CODE2_ADDR 0x807D1600
-#define MP_CODE2_END 0x807D2700
+#define MP_CODE2_END 0x807D2040
 // The font comes first in it. It is Multiplayer/font.bin: a byte for each cell's advance,
-// then the texture.
+// then the texture, then its palettes.
 #define MP_FONT_ADDR MP_CODE2_ADDR
-#define MP_ANIM_CACHE_ADDR MP_CODE2_END
+// The minimap the bridge draws and the game shows (struct MpMap), never loaded from the ROM:
+// after the second segment, in what was the front of the animation cache too. Halving the
+// font's texture (Multiplayer/font.h) gave the cache back most of what the map took.
+#define MP_MAP_ADDR 0x807D2040
+#define MP_MAP_END 0x807D2870
+#define MP_ANIM_CACHE_ADDR MP_MAP_END
 // aiseg2p1's code starts here; see AI/ai segment.asm.
 #define MP_ANIM_CACHE_END 0x807E0000
 
 #define MP_MAILBOX_MAGIC 0x42334D50 // "B3MP"
-#define MP_MAILBOX_VERSION 24
+#define MP_MAILBOX_VERSION 25
 #define MP_PLAYER_SLOTS 16
 // Every other player in a full session. Slot 15 stays unused.
 #define MP_PUPPETS 15
@@ -354,6 +360,21 @@ struct MpPadIn {
     /*0x6*/ u16 pad;
 };
 
+// The minimap in the lower right corner, which the bridge draws whole from the area's walls and
+// where the players are, and the game only shows (Multiplayer/map.c): a square picture of
+// MP_MAP_SIDE pixels, 4 bits each, which are colors of `palette`, and the palette, in the
+// game's 16-bit colors. Neither is in the mailbox, which has no room left, but at MP_MAP_ADDR.
+// The game shows it while `shown` is not 0 and the bridge's lease lasts.
+#define MP_MAP_SIDE 64
+#define MP_MAP_COLORS 16
+struct MpMap {
+    // Two pixels a byte, the left one in the high four bits, row by row from the top.
+    /*0x000*/ u8 pixels[MP_MAP_SIDE * MP_MAP_SIDE / 2];
+    /*0x800*/ u16 palette[MP_MAP_COLORS];
+    /*0x820*/ u32 shown;
+    /*0x824*/ u32 pad;
+};
+
 // How many frames of the game a bridge's word that it is here lasts: about five seconds of
 // play, and two in the test emulators, which run faster. The game cannot time it otherwise.
 #define MP_BRIDGE_LEASE 150
@@ -432,6 +453,13 @@ typedef char MpCoinRingSizeCheck[sizeof(struct MpCoinRing) == 0x84 ? 1 : -1];
 typedef char MpPeopleSizeCheck[sizeof(struct MpPeople) == 0x16C ? 1 : -1];
 typedef char MpChatSizeCheck[sizeof(struct MpChat) == 0x1DC ? 1 : -1];
 typedef char MpPadInSizeCheck[sizeof(struct MpPadIn) == 0x8 ? 1 : -1];
+typedef char MpMapSizeCheck[sizeof(struct MpMap) == 0x828 ? 1 : -1];
+// The map fits between the second segment and the animation cache, which starts aligned as
+// its animations are.
+typedef char MpMapEndCheck[MP_MAP_ADDR == MP_CODE2_END && MP_MAP_ADDR + sizeof(struct MpMap) <= MP_MAP_END
+                                   && MP_ANIM_CACHE_ADDR % 16 == 0
+                               ? 1
+                               : -1];
 typedef char MpMailboxSizeCheck[sizeof(struct MpMailbox) == 0x54C0 ? 1 : -1];
 // A place written beside a member is what the bridge reads and writes at: one that is wrong
 // would have the two sides of the mailbox disagree, in silence.
@@ -462,5 +490,6 @@ typedef char MpMailboxEndCheck[MP_MAILBOX_ADDR + sizeof(struct MpMailbox) <= MP_
 typedef char MpCodeEndCheck[MP_CODE_END <= MP_COPIES_ADDR && MP_COPIES_END <= 0x807D0000 ? 1 : -1];
 
 #define gMpMailbox ((struct MpMailbox *) MP_MAILBOX_ADDR)
+#define gMpMap ((struct MpMap *) MP_MAP_ADDR)
 
 #endif

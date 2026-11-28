@@ -4,6 +4,7 @@
 //! it can never choose where a write lands.
 
 use crate::layout::{self, byte, len};
+use crate::minimap::Picture;
 use crate::ram::{N64Ram, ProcessMemory};
 use crate::text::{self, ChatSize, NAME_BYTES, ROW_BYTES, TEXT_END};
 use b3313_protocol::objects::{OBJECT_SET_SIZE, is_object_id, object_id};
@@ -737,7 +738,7 @@ impl<'a, M: ProcessMemory> Mailbox<'a, M> {
     /// take for a button, so the keys are kept from it for one lease more, which the game
     /// counts down by itself. `size` is the chat text's, which the parting rows were cut for.
     ///
-    /// A controller held for a bot or the bridge's travel is let go.
+    /// A controller held for a bot or the bridge's travel is let go, and the minimap goes.
     ///
     /// # Errors
     /// Fails if the game's memory cannot be read or written.
@@ -749,6 +750,7 @@ impl<'a, M: ProcessMemory> Mailbox<'a, M> {
     ) -> io::Result<()> {
         self.write_chat_draft(&[TEXT_END; ROW_BYTES])?;
         self.hold_pad(&HeldPad::default())?;
+        self.hide_map()?;
         if parting.is_empty() {
             // No bridge is here now, so the game has nothing to wait out.
             self.ram.write(BRIDGE_LEASE_ADDRESS, &0_u32.to_be_bytes())?;
@@ -785,6 +787,30 @@ impl<'a, M: ProcessMemory> Mailbox<'a, M> {
     pub fn run_every_object(&self) -> io::Result<()> {
         let nothing = ObjectSet::default();
         self.write_objects_owned((NO_LEVEL, 0), &nothing, &nothing)
+    }
+
+    /// Gives the game the minimap to show (`struct MpMap`, outside the mailbox): its pixels and
+    /// palette, and its word to show it, in one write. The game reads the picture as it draws
+    /// a frame, so one written meanwhile may show half new for that frame, which nobody sees.
+    ///
+    /// # Errors
+    /// Fails if the game's memory cannot be written.
+    pub fn show_map(&self, picture: &Picture) -> io::Result<()> {
+        let mut bytes = picture.bytes();
+        bytes.extend(1_u32.to_be_bytes());
+        debug_assert_eq!(bytes.len(), len::MAP_SHOWN_OFFSET + 4);
+        self.ram.write(layout::MAP_ADDR, &bytes)
+    }
+
+    /// Has the game show no minimap.
+    ///
+    /// # Errors
+    /// Fails if the game's memory cannot be written.
+    pub fn hide_map(&self) -> io::Result<()> {
+        self.ram.write(
+            layout::MAP_ADDR + layout::MAP_SHOWN_OFFSET,
+            &0_u32.to_be_bytes(),
+        )
     }
 
     /// How many chat rows the bridges have written to `chat` since the game booted.

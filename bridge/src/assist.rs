@@ -276,7 +276,11 @@ fn ok() -> crate::json::Value {
 }
 
 /// The other players in a level, by the names the roster gives them.
-fn named(people: &People, me: PlayerId, states: &[(PlayerId, PlayerState)]) -> Vec<Other> {
+pub(crate) fn named(
+    people: &People,
+    me: PlayerId,
+    states: &[(PlayerId, PlayerState)],
+) -> Vec<Other> {
     states
         .iter()
         .filter(|(player, _)| *player != me)

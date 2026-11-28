@@ -12,10 +12,12 @@ pub const PRIVATE_ADDR: u32 = 0x807D_0100;
 pub const WORLD_STASH_ADDR: u32 = 0x807D_0A00;
 pub const OBJECT_IDS_ADDR: u32 = 0x807D_0C00;
 pub const CODE2_ADDR: u32 = 0x807D_1600;
-pub const CODE2_END: u32 = 0x807D_2700;
+pub const CODE2_END: u32 = 0x807D_2040;
+pub const MAP_ADDR: u32 = 0x807D_2040;
+pub const MAP_END: u32 = 0x807D_2870;
 pub const ANIM_CACHE_END: u32 = 0x807E_0000;
 pub const MAILBOX_MAGIC: u32 = 0x4233_4D50;
-pub const MAILBOX_VERSION: u32 = 0x18;
+pub const MAILBOX_VERSION: u32 = 0x19;
 pub const PLAYER_SLOTS: u32 = 0x10;
 pub const PUPPETS: u32 = 0xF;
 pub const HIT_PUNCH: u32 = 1;
@@ -48,6 +50,8 @@ pub const CHAT_ROW_PIXELS: u32 = 0xC8;
 pub const CHAT_ROW_PIXELS_LARGE: u32 = 0x7C;
 pub const CHAT_SHOWN_MOST: u32 = 6;
 pub const TYPING_LEASE: u32 = 0x1E;
+pub const MAP_SIDE: u32 = 0x40;
+pub const MAP_COLORS: u32 = 0x10;
 pub const BRIDGE_LEASE: u32 = 0x96;
 pub const PLAYER_SLOT_ACTIVE_OFFSET: u32 = 0;
 pub const PLAYER_SLOT_AREA_INDEX_OFFSET: u32 = 1;
@@ -148,6 +152,9 @@ pub const PAD_IN_BUTTONS_OFFSET: u32 = 0;
 pub const PAD_IN_STICK_X_OFFSET: u32 = 2;
 pub const PAD_IN_STICK_Y_OFFSET: u32 = 3;
 pub const PAD_IN_FRAMES_OFFSET: u32 = 4;
+pub const MAP_PIXELS_OFFSET: u32 = 0;
+pub const MAP_PALETTE_OFFSET: u32 = 0x800;
+pub const MAP_SHOWN_OFFSET: u32 = 0x820;
 pub const MAILBOX_MAGIC_OFFSET: u32 = 0;
 pub const MAILBOX_VERSION_OFFSET: u32 = 4;
 pub const MAILBOX_BRIDGE_LEASE_OFFSET: u32 = 8;
@@ -193,6 +200,7 @@ pub const COIN_RING_SIZE: u32 = 0x84;
 pub const PEOPLE_SIZE: u32 = 0x16C;
 pub const CHAT_SIZE: u32 = 0x1DC;
 pub const PAD_IN_SIZE: u32 = 8;
+pub const MAP_SIZE: u32 = 0x828;
 pub const MAILBOX_SIZE: u32 = 0x54C0;
 pub const NO_LEVEL: i16 = -1;
 
@@ -207,10 +215,12 @@ pub mod len {
     pub const WORLD_STASH_ADDR: usize = 0x807D_0A00;
     pub const OBJECT_IDS_ADDR: usize = 0x807D_0C00;
     pub const CODE2_ADDR: usize = 0x807D_1600;
-    pub const CODE2_END: usize = 0x807D_2700;
+    pub const CODE2_END: usize = 0x807D_2040;
+    pub const MAP_ADDR: usize = 0x807D_2040;
+    pub const MAP_END: usize = 0x807D_2870;
     pub const ANIM_CACHE_END: usize = 0x807E_0000;
     pub const MAILBOX_MAGIC: usize = 0x4233_4D50;
-    pub const MAILBOX_VERSION: usize = 0x18;
+    pub const MAILBOX_VERSION: usize = 0x19;
     pub const PLAYER_SLOTS: usize = 0x10;
     pub const PUPPETS: usize = 0xF;
     pub const HIT_PUNCH: usize = 1;
@@ -243,6 +253,8 @@ pub mod len {
     pub const CHAT_ROW_PIXELS_LARGE: usize = 0x7C;
     pub const CHAT_SHOWN_MOST: usize = 6;
     pub const TYPING_LEASE: usize = 0x1E;
+    pub const MAP_SIDE: usize = 0x40;
+    pub const MAP_COLORS: usize = 0x10;
     pub const BRIDGE_LEASE: usize = 0x96;
     pub const PLAYER_SLOT_ACTIVE_OFFSET: usize = 0;
     pub const PLAYER_SLOT_AREA_INDEX_OFFSET: usize = 1;
@@ -343,6 +355,9 @@ pub mod len {
     pub const PAD_IN_STICK_X_OFFSET: usize = 2;
     pub const PAD_IN_STICK_Y_OFFSET: usize = 3;
     pub const PAD_IN_FRAMES_OFFSET: usize = 4;
+    pub const MAP_PIXELS_OFFSET: usize = 0;
+    pub const MAP_PALETTE_OFFSET: usize = 0x800;
+    pub const MAP_SHOWN_OFFSET: usize = 0x820;
     pub const MAILBOX_MAGIC_OFFSET: usize = 0;
     pub const MAILBOX_VERSION_OFFSET: usize = 4;
     pub const MAILBOX_BRIDGE_LEASE_OFFSET: usize = 8;
@@ -388,12 +403,13 @@ pub mod len {
     pub const PEOPLE_SIZE: usize = 0x16C;
     pub const CHAT_SIZE: usize = 0x1DC;
     pub const PAD_IN_SIZE: usize = 8;
+    pub const MAP_SIZE: usize = 0x828;
     pub const MAILBOX_SIZE: usize = 0x54C0;
 }
 
 /// Those of the numbers that are a byte's worth, as bytes.
 pub mod byte {
-    pub const MAILBOX_VERSION: u8 = 0x18;
+    pub const MAILBOX_VERSION: u8 = 0x19;
     pub const PLAYER_SLOTS: u8 = 0x10;
     pub const PUPPETS: u8 = 0xF;
     pub const HIT_PUNCH: u8 = 1;
@@ -426,6 +442,8 @@ pub mod byte {
     pub const CHAT_ROW_PIXELS_LARGE: u8 = 0x7C;
     pub const CHAT_SHOWN_MOST: u8 = 6;
     pub const TYPING_LEASE: u8 = 0x1E;
+    pub const MAP_SIDE: u8 = 0x40;
+    pub const MAP_COLORS: u8 = 0x10;
     pub const BRIDGE_LEASE: u8 = 0x96;
     pub const PLAYER_SLOT_ACTIVE_OFFSET: u8 = 0;
     pub const PLAYER_SLOT_AREA_INDEX_OFFSET: u8 = 1;
@@ -523,6 +541,7 @@ pub mod byte {
     pub const PAD_IN_STICK_X_OFFSET: u8 = 2;
     pub const PAD_IN_STICK_Y_OFFSET: u8 = 3;
     pub const PAD_IN_FRAMES_OFFSET: u8 = 4;
+    pub const MAP_PIXELS_OFFSET: u8 = 0;
     pub const MAILBOX_MAGIC_OFFSET: u8 = 0;
     pub const MAILBOX_VERSION_OFFSET: u8 = 4;
     pub const MAILBOX_BRIDGE_LEASE_OFFSET: u8 = 8;

@@ -186,6 +186,7 @@ fn request(joined: &Request, number: u8, port: u16) -> Request {
         chat_lines: DEFAULT_CHAT_LINES,
         chat_on_hover: false,
         chat_size: ChatSize::Normal,
+        minimap: true,
         bot_port: Some(port),
         hosting: joined.hosting.as_ref().map(|hosting| Hosting {
             host_password: String::new(),
@@ -237,6 +238,7 @@ mod tests {
             chat_lines: 6,
             chat_on_hover: true,
             chat_size: b3313_bridge::text::ChatSize::Large,
+            minimap: true,
             bot_port: Some(40000),
             hosting: Some(Hosting {
                 address: ([127, 0, 0, 1], 41313).into(),

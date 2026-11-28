@@ -249,6 +249,8 @@ pub struct Request {
     pub chat_on_hover: bool,
     /// How large the game draws the chat.
     pub chat_size: ChatSize,
+    /// Whether the game shows the minimap.
+    pub minimap: bool,
     /// The port a bot on this PC may play the game through, if the player lets one.
     pub bot_port: Option<u16>,
     /// The server this panel is hosting, if it is: where it listens, its key, and its host
@@ -484,6 +486,7 @@ impl Request {
             chat_lines: self.chat_lines,
             chat_on_hover: self.chat_on_hover,
             chat_size: self.chat_size,
+            minimap: self.minimap,
             bot_port: self.bot_port,
         })
     }

@@ -89,7 +89,7 @@ impl Panel {
             .gap_4()
             .child(card_header(
                 theme,
-                "Chat in the game",
+                "Chat and minimap in the game",
                 Some("For your own game, when you join a session from the Play page."),
             ))
             .child(self.render_chat_key(theme, cx))
@@ -106,6 +106,21 @@ impl Panel {
                 self.preferences.chat_on_hover,
                 cx.listener(|this, _, _, cx| {
                     this.preferences.chat_on_hover = !this.preferences.chat_on_hover;
+                    this.save_preferences();
+                    cx.notify();
+                }),
+            ))
+            .child(switch(
+                theme,
+                "minimap",
+                "Show the minimap",
+                "A small map in the lower right corner of the game: the walls around your \
+                 Mario seen from above, turned with the camera, and an arrow for each player \
+                 in the same room, in their colors. Holding the D-pad down shows the player \
+                 list in its place. Applies the next time you join.",
+                self.preferences.minimap,
+                cx.listener(|this, _, _, cx| {
+                    this.preferences.minimap = !this.preferences.minimap;
                     this.save_preferences();
                     cx.notify();
                 }),

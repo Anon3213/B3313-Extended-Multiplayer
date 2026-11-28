@@ -186,6 +186,8 @@ pub struct Preferences {
     pub chat_on_hover: bool,
     /// How large the game draws the chat.
     pub chat_size: ChatSize,
+    /// Whether the game shows the minimap of the walls and players around the player's Mario.
+    pub minimap: bool,
     /// The port a bot on this PC may play the player's game through, while they are in a
     /// session; none for no bot.
     pub bot_port: Option<u16>,
@@ -251,6 +253,7 @@ impl Default for Preferences {
             chat_lines: DEFAULT_CHAT_LINES,
             chat_on_hover: false,
             chat_size: ChatSize::Normal,
+            minimap: true,
             bot_port: None,
             servers: Vec::new(),
             reopen_settings: true,
@@ -511,6 +514,7 @@ impl Preferences {
             }
             "chat_on_hover" => set_flag(&mut self.chat_on_hover, value),
             "chat_size" => self.chat_size = ChatSize::named(value).unwrap_or_default(),
+            "minimap" => set_flag(&mut self.minimap, value),
             // A port; anything else, as the "off" this writes, is none.
             "bot_port" => self.bot_port = value.parse().ok().filter(|&port| port != 0),
             "server" if !value.is_empty() && self.servers.len() < RECENT_SERVERS => {
@@ -636,6 +640,7 @@ impl Preferences {
         let _ = writeln!(text, "chat_lines = {}", self.chat_lines);
         let _ = writeln!(text, "chat_on_hover = {}", self.chat_on_hover);
         let _ = writeln!(text, "chat_size = {}", self.chat_size.name());
+        let _ = writeln!(text, "minimap = {}", self.minimap);
         let bot_port = self
             .bot_port
             .map_or("off".to_owned(), |port| port.to_string());
@@ -897,6 +902,16 @@ mod tests {
         let usual = Preferences::parse("");
         assert_eq!((usual.chat_lines, usual.chat_on_hover), (6, false));
         assert_eq!(Preferences::parse("chat_lines = 9\n").chat_lines, 6);
+    }
+
+    #[test]
+    fn the_minimap_is_shown_unless_turned_off() {
+        assert!(Preferences::parse("").minimap);
+        let off = Preferences {
+            minimap: false,
+            ..Preferences::default()
+        };
+        assert_eq!(Preferences::parse(&off.format()), off);
     }
 
     #[test]

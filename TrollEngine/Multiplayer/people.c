@@ -14,11 +14,13 @@
 
 #include "Multiplayer/font.h"
 #include "Multiplayer/mailbox.h"
+#include "Multiplayer/map.h"
 #include "Multiplayer/people.h"
 
 // What the other players are to this one on screen: a name over each Mario in view, the newest
-// lines of the chat, and, while the D-pad is held down, the list of everyone with where they
-// are. While the player types a line of chat, the chat is a box with that line under it.
+// lines of the chat, the minimap the bridge draws (Multiplayer/map.c), and, while the D-pad is
+// held down, the list of everyone with where they are, in place of the minimap. While the
+// player types a line of chat, the chat is a box with that line under it.
 //
 // The bridge writes all text as plain characters. The game draws it in a font of this
 // project's own (Multiplayer/font.txt), not B3313's dialog font, whose letters are all
@@ -135,13 +137,16 @@ static void text_color(s32 red, s32 green, s32 blue) {
 
 // Draws one cell of the font with its lower left corner at (x, y) from the bottom left, at
 // twice its size if `large` is 1: a rectangle twice as wide and high, which steps through the
-// texture half a pixel at a time.
+// texture half a pixel at a time. A cell of the font's second image is drawn through the tile
+// that shows it (Multiplayer/font.h).
 static void draw_cell(s32 x, s32 y, s32 cell, s32 large) {
     s32 height = CELL_HEIGHT << large;
     s32 top = SCREEN_HEIGHT - y - height;
+    s32 layer = cell >= FONT_LAYER_CELLS;
 
+    cell -= layer * FONT_LAYER_CELLS;
     gSPTextureRectangle(gDisplayListHead++, x << 2, top << 2, (x + (CELL_WIDTH << large)) << 2,
-                        (top + height) << 2, G_TX_RENDERTILE,
+                        (top + height) << 2, G_TX_RENDERTILE + layer,
                         (cell % FONT_COLUMNS * CELL_WIDTH) << 5,
                         (cell / FONT_COLUMNS * CELL_HEIGHT) << 5, (1 << 10) >> large,
                         (1 << 10) >> large);
@@ -376,6 +381,12 @@ void mp_render_hud(void) {
         // one was sent are let go: nothing is drawn for that.
         typing = gMpMailbox->chat.typing != 0 && gMpMailbox->chat.draft[0] != MP_TEXT_END;
         large = gMpMailbox->chat.large != 0;
+        // The minimap, under the text: its display list is data (Multiplayer/map.c), so it
+        // costs the pool only the call, eight bytes of the margin kept for the game, and is
+        // not counted, as the code to count it would cost more room than the call.
+        if (gMpMap->shown) {
+            gSPDisplayList(gDisplayListHead++, gMpMapDraw);
+        }
         if (typing) {
             shade_chat(rows, large);
         }

@@ -10,6 +10,9 @@ pub mod json;
 pub mod keyboard;
 pub mod layout;
 pub mod mailbox;
+pub mod minimap;
+#[cfg(windows)]
+mod minimap_turn;
 pub mod object_motion;
 pub mod objects;
 pub mod pacing;

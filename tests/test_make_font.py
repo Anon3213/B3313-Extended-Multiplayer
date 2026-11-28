@@ -1,19 +1,21 @@
+import struct
+
 import pytest
 from make_font import (
-    ATLAS_WIDTH,
     CELL_HEIGHT,
     CELL_WIDTH,
-    CELLS,
-    COLUMNS,
     FONT_BYTES,
+    LAYER_CELLS,
     OUTPUT,
+    PALETTE_BYTES,
     SOURCE,
     build,
     outlined,
+    pixel_of,
     read_glyphs,
 )
 
-_CLEAR, _OUTLINE, _FILL = 0x0, 0x1, 0xF
+_CLEAR, _OUTLINE, _FILL = 0, 1, 2
 
 
 def _drawing() -> dict[str, list[str]]:
@@ -21,9 +23,7 @@ def _drawing() -> dict[str, list[str]]:
 
 
 def _pixel(font: bytes, cell: int, x: int, y: int) -> int:
-    """A pixel of a cell of the font's texture, which follows its advances."""
-    at = (cell // COLUMNS * CELL_HEIGHT + y) * ATLAS_WIDTH + cell % COLUMNS * CELL_WIDTH + x
-    return font[CELLS + at // 2] >> (0 if at % 2 else 4) & 0xF
+    return pixel_of(font, cell, x, y)
 
 
 def test_the_font_the_rom_carries_is_the_one_drawn() -> None:
@@ -57,6 +57,23 @@ def test_a_glyph_is_outlined_on_every_side_and_kept_in_its_own_cell() -> None:
             assert _pixel(font, stop, x, y) == expected
     # It is one pixel wide, and the next glyph starts a pixel after it.
     assert font[stop] == 2
+
+
+def test_the_two_images_share_the_texture_and_each_palette_sees_one() -> None:
+    font = build(_drawing())
+    # A full stop is in the first image and a caret in the second, in the same place: low and
+    # high in it, each comes out of the texels they share as it was drawn.
+    stop, caret = ord(".") - 0x20, ord("^") - 0x20
+    assert stop < LAYER_CELLS <= caret
+    assert stop % LAYER_CELLS == caret % LAYER_CELLS
+    assert (_pixel(font, stop, 1, 8), _pixel(font, caret, 1, 8)) == (_FILL, _CLEAR)
+    assert (_pixel(font, stop, 3, 1), _pixel(font, caret, 3, 1)) == (_CLEAR, _FILL)
+    shades = struct.unpack(">32H", font[-PALETTE_BYTES:])
+    first, second = shades[:16], shades[16:]
+    # A texel with the fill in its high bits and the outline in its low.
+    texel = _FILL << 2 | _OUTLINE
+    assert (first[texel], second[texel]) == (0xFFFF, 0x00FF)
+    assert first[_OUTLINE] == 0 and second[_FILL << 2] == 0
 
 
 def test_the_widest_and_tallest_glyph_still_has_its_outline() -> None:

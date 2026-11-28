@@ -623,6 +623,7 @@ impl Panel {
             chat_lines: self.preferences.chat_lines,
             chat_on_hover: self.preferences.chat_on_hover,
             chat_size: self.preferences.chat_size,
+            minimap: self.preferences.minimap,
             bot_port: self.preferences.bot_port,
             server: server.clone(),
             password,

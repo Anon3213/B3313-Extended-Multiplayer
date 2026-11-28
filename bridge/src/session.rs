@@ -10,6 +10,7 @@ use crate::client::{
 use crate::interpolation::Interpolator;
 use crate::keyboard::{Keyboard, WindowsKeys};
 use crate::mailbox::{Mailbox, RemoteSlot};
+use crate::minimap_turn::Minimap;
 use crate::objects::ObjectSync;
 use crate::pacing::{FRAME_INTERVAL, SEND_INTERVAL, Schedule};
 use crate::people::People;
@@ -95,6 +96,9 @@ pub struct Options {
     pub chat_on_hover: bool,
     /// How large the game draws the chat.
     pub chat_size: ChatSize,
+    /// Whether the game shows the minimap of the walls about Mario and the players near him
+    /// (`crate::minimap`).
+    pub minimap: bool,
     /// The port on 127.0.0.1 a bot may connect to, to play this game (`crate::bots`); none
     /// opens none.
     pub bot_port: Option<u16>,
@@ -274,6 +278,7 @@ pub fn run(
     let mut people = People::new(options);
     let (mut keyboard, mut pointer) = player_devices(options);
     let mut assist = Assist::new(options.bot_port, &mut |notice| events(Event::Bot(notice)));
+    let mut minimap = Minimap::new(options.minimap);
     let mut faults = Faults::default();
     let end = loop {
         if stop.load(Ordering::Relaxed) {
@@ -304,6 +309,7 @@ pub fn run(
                 let drawn = (&session.interpolator, session.playing);
                 if removed.is_none() {
                     assist.turn(&mailbox, &mut connection, &mut people, drawn, &mut notices)?;
+                    minimap.turn(&mailbox, &people, connection.player(), drawn)?;
                 }
                 Ok(removed)
             });
@@ -912,6 +918,7 @@ pub(crate) mod testing {
             chat_lines: crate::typing::DEFAULT_CHAT_LINES,
             chat_on_hover: false,
             chat_size: crate::text::ChatSize::Normal,
+            minimap: true,
             bot_port: None,
         }
     }

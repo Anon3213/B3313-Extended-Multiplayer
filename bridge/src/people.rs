@@ -198,6 +198,15 @@ impl People {
         Some(entry.name.as_str())
     }
 
+    /// The outfit `player` wears: the roster's, or, if it does not list them yet, the one their
+    /// number gives, which the server gives too.
+    pub(crate) fn outfit_of(&self, player: PlayerId) -> Outfit {
+        self.roster
+            .iter()
+            .find(|entry| entry.player == player)
+            .map_or_else(|| Outfit::of_player(player), |entry| entry.outfit)
+    }
+
     /// Says `words` in the game's chat, to this player alone, as the bridge's own: for what a
     /// command for their own game did.
     pub(crate) fn say_here(&mut self, words: &str) {
@@ -631,6 +640,7 @@ mod tests {
                 chat_lines: 6,
                 chat_on_hover: false,
                 chat_size: ChatSize::Normal,
+                minimap: true,
                 bot_port: None,
             };
             let mut people = People::new(&options);

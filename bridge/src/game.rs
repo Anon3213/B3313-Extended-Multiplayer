@@ -71,6 +71,77 @@ pub const PAINTING_ENTRY_NODE: u8 = 0x0A;
 /// Mario's action flags: in the air, and in water.
 const ACTION_AIR: u32 = 0x0000_0800;
 const ACTION_SWIMMING: u32 = 0x0000_2000;
+/// `sSurfacePool`, a pointer to the surfaces the game collides with, and `gNumStaticSurfaces`,
+/// how many of them, from the first, are the loaded area's own: the rest are objects', made
+/// again each frame. B3313 keeps the pool in the expansion pak's half of RAM.
+const SURFACE_POOL_POINTER: u32 = 0x8038_EE9C;
+const STATIC_SURFACES: u32 = 0x8036_1178;
+/// `struct Surface`, 0x30 bytes, which the versions lay out in two orders.
+const SURFACE_SIZE: usize = 0x30;
+/// More surfaces than any area has: 6-1 has 3,175. A count above it is not one the game made.
+const STATIC_SURFACES_MOST: u32 = 20_000;
+/// How many surfaces, from the first, are looked at to tell the order: each must have a normal
+/// of length 1 in it.
+const SURFACES_TOLD_BY: usize = 32;
+
+/// Where `struct Surface` keeps the corners and the normal. Read from running games: A2AE's
+/// engine has the order of `TrollEngine/DecompHeaders/include/types.h`, and the 1.0.2 ROMs,
+/// both, vanilla's; in each, every normal of an area had a length of 1 in its order and none
+/// in the other.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SurfaceOrder {
+    /// The corners `[x, y, z]` one after another at 0x0A, the normal at 0x1C.
+    Vanilla,
+    /// The corners' heights at 0x06, x at 0x20 and z at 0x26, the normal at 0x10.
+    Regrouped,
+}
+
+impl SurfaceOrder {
+    fn normal_at(self) -> usize {
+        match self {
+            Self::Vanilla => 0x1C,
+            Self::Regrouped => 0x10,
+        }
+    }
+
+    fn read(self, surface: &[u8]) -> Surface {
+        let at = |field: usize| f32::from(half(surface, field));
+        let corner = |index: usize| match self {
+            Self::Vanilla => {
+                let first = 0x0A + 6 * index;
+                [at(first), at(first + 2), at(first + 4)]
+            }
+            Self::Regrouped => [
+                at(0x20 + 2 * index),
+                at(0x06 + 2 * index),
+                at(0x26 + 2 * index),
+            ],
+        };
+        Surface {
+            corners: [corner(0), corner(1), corner(2)],
+            normal_y: float(surface, self.normal_at() + 4),
+        }
+    }
+
+    /// Whether `surface`'s normal has a length of 1 when read in this order.
+    fn fits(self, surface: &[u8]) -> bool {
+        let normal = self.normal_at();
+        let length = [0, 4, 8]
+            .map(|axis| float(surface, normal + axis))
+            .iter()
+            .map(|value| value * value)
+            .sum::<f32>();
+        (length - 1.0).abs() < 0.01
+    }
+
+    /// The order the first of `surfaces` are in, or None if neither fits them all.
+    fn of(surfaces: &[[u8; SURFACE_SIZE]]) -> Option<Self> {
+        let sample = surfaces.get(..SURFACES_TOLD_BY).unwrap_or(surfaces);
+        [Self::Vanilla, Self::Regrouped]
+            .into_iter()
+            .find(|order| sample.iter().all(|surface| order.fits(surface)))
+    }
+}
 
 /// The local Mario as the game has him now.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -114,6 +185,16 @@ pub struct WarpNode {
     /// for a door or a pipe, what takes him on. None for the other areas, whose objects are
     /// not loaded, and for a node with no object.
     pub position: Option<[f32; 3]>,
+}
+
+/// One triangle of the loaded area that Mario collides with: a floor, a wall or a ceiling, as
+/// the up part of its normal tells.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Surface {
+    /// Its corners, as `[x, y, z]`.
+    pub corners: [[f32; 3]; 3],
+    /// How much it faces up: 1 for a level floor, about 0 for a wall, below 0 for a ceiling.
+    pub normal_y: f32,
 }
 
 /// One area of the level loaded now, and its warp nodes.
@@ -208,6 +289,34 @@ fn camera_yaw<M: ProcessMemory>(ram: &N64Ram<'_, M>, area: u32) -> io::Result<Op
     };
     let [.., high, low] = ram.read_u32(camera + CAMERA_YAW_WORD)?.to_be_bytes();
     Ok(Some(i16::from_be_bytes([high, low])))
+}
+
+/// The loaded area's own surfaces: its floors, walls and ceilings, without those of objects.
+/// None if the pool or its count is not one the game made, as between two areas may be, or
+/// its surfaces are in neither order a version keeps them in.
+///
+/// # Errors
+/// Fails if the game's memory cannot be read.
+pub fn static_surfaces<M: ProcessMemory>(ram: &N64Ram<'_, M>) -> io::Result<Option<Vec<Surface>>> {
+    let count = ram.read_u32(STATIC_SURFACES)?;
+    let Some(pool) = ram_pointer(ram.read_u32(SURFACE_POOL_POINTER)?) else {
+        return Ok(None);
+    };
+    let bytes = usize::try_from(count)
+        .ok()
+        .filter(|_| count <= STATIC_SURFACES_MOST)
+        .and_then(|count| count.checked_mul(SURFACE_SIZE));
+    let ram_end = u64::from(0x8000_0000_u32) + u64::from(crate::ram::RAM_SIZE);
+    let Some(bytes) = bytes
+        .filter(|&bytes| u64::from(pool) + u64::try_from(bytes).unwrap_or(u64::MAX) <= ram_end)
+    else {
+        return Ok(None);
+    };
+    let mut pool_bytes = vec![0; bytes];
+    ram.read(pool, &mut pool_bytes)?;
+    let records = pool_bytes.as_chunks::<SURFACE_SIZE>().0;
+    Ok(SurfaceOrder::of(records)
+        .map(|order| records.iter().map(|surface| order.read(surface)).collect()))
 }
 
 /// Whether `object` is an object of the pool that is in use.
@@ -336,8 +445,8 @@ mod tests {
     use super::{
         AREA_SCENE, AREA_SIZE, AREA_WARP_NODES, AREA_WORD, AREAS_POINTER, CURRENT_AREA_POINTER,
         LEVEL_TO_START_WORD, LEVEL_WORD, MARIO_STATE, OBJECT_ACTIVE_FLAGS_WORD, OBJECT_POOL,
-        OBJECT_POS, OBJECT_SIZE, PLAY_MODE_WORD, WARP_DEST, areas, mario, place, start_level,
-        teleport, warp,
+        OBJECT_POS, OBJECT_SIZE, PLAY_MODE_WORD, STATIC_SURFACES, SURFACE_POOL_POINTER, Surface,
+        SurfaceOrder, WARP_DEST, areas, mario, place, start_level, static_surfaces, teleport, warp,
     };
     use crate::ram::N64Ram;
     use crate::ram::testing::FakeProcess;
@@ -431,6 +540,77 @@ mod tests {
         // The same object, for an area not loaded, is no place of its.
         let elsewhere: Vec<Option<[f32; 3]>> = nodes(1).iter().map(|node| node.position).collect();
         assert_eq!(elsewhere, [None]);
+        Ok(())
+    }
+
+    /// A surface record in `order`, whole: RAM is written in whole words.
+    fn surface_record(order: SurfaceOrder, corners: [[i16; 3]; 3], normal: [f32; 3]) -> Vec<u8> {
+        let mut record = vec![0; 0x30];
+        let mut put = |at: usize, bytes: &[u8]| {
+            if let Some(field) = record.get_mut(at..at + bytes.len()) {
+                field.copy_from_slice(bytes);
+            }
+        };
+        for (index, [x, y, z]) in corners.into_iter().enumerate() {
+            match order {
+                SurfaceOrder::Vanilla => {
+                    let first = 0x0A + 6 * index;
+                    put(first, &x.to_be_bytes());
+                    put(first + 2, &y.to_be_bytes());
+                    put(first + 4, &z.to_be_bytes());
+                }
+                SurfaceOrder::Regrouped => {
+                    put(0x20 + 2 * index, &x.to_be_bytes());
+                    put(0x06 + 2 * index, &y.to_be_bytes());
+                    put(0x26 + 2 * index, &z.to_be_bytes());
+                }
+            }
+        }
+        for (axis, value) in normal.into_iter().enumerate() {
+            put(order.normal_at() + 4 * axis, &value.to_be_bytes());
+        }
+        record
+    }
+
+    #[test]
+    fn the_static_surfaces_are_read_in_either_order_and_a_pool_in_neither_is_none() -> io::Result<()>
+    {
+        let process = FakeProcess::new(BASE, RAM_BYTES);
+        let ram = N64Ram::new(&process, BASE);
+        let pool = 0x8066_0000;
+        write(&ram, SURFACE_POOL_POINTER, pool)?;
+        write(&ram, STATIC_SURFACES, 2)?;
+        // A wall, and a floor at height -79, as one under Mario in 6-1 was.
+        let wall = [[0, 0, 0], [500, 0, 0], [500, 400, 0]];
+        let floor = [[-951, -79, 677], [-1023, -79, 595], [-1023, -79, 761]];
+        for order in [SurfaceOrder::Vanilla, SurfaceOrder::Regrouped] {
+            let mut records = surface_record(order, wall, [0.0, 0.0, 1.0]);
+            records.extend(surface_record(order, floor, [0.0, 1.0, 0.0]));
+            ram.write(pool, &records)?;
+            let surfaces = static_surfaces(&ram)?.unwrap_or_default();
+            assert_eq!(surfaces.len(), 2, "{order:?}");
+            assert_eq!(
+                surfaces.get(1).copied(),
+                Some(Surface {
+                    corners: [
+                        [-951.0, -79.0, 677.0],
+                        [-1023.0, -79.0, 595.0],
+                        [-1023.0, -79.0, 761.0]
+                    ],
+                    normal_y: 1.0,
+                }),
+                "{order:?}"
+            );
+        }
+        // A normal of no length in either order is no surface the game made.
+        ram.write(pool, &[0; 0x30])?;
+        assert_eq!(static_surfaces(&ram)?, None);
+        write(&ram, STATIC_SURFACES, 1_000_000)?;
+        assert_eq!(static_surfaces(&ram)?, None);
+        // A pool whose surfaces would run past the end of RAM is none either.
+        write(&ram, STATIC_SURFACES, 2)?;
+        write(&ram, SURFACE_POOL_POINTER, 0x807F_FFF0)?;
+        assert_eq!(static_surfaces(&ram)?, None);
         Ok(())
     }
 

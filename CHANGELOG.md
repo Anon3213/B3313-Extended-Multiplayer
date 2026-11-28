@@ -8,8 +8,16 @@ those from 0.1.0 to 0.1.4 join each other's servers, as do those from 0.2.0 to 0
 ## Not yet released
 
 It plays with 0.4.1's servers and players: nothing a player's program tells the server
-changed, and neither did the game.
+changed. The game did, for the minimap, so the panel builds it again by itself at the next
+join.
 
+- **A minimap** in the lower right corner of the game: the walls and floors around your
+  Mario seen from above, turned with the camera, and an arrow for each player in the same
+  area, in the color of their cap, pointing the way they face. A player beyond the map's edge
+  is a dot at the edge, the way to them; one in another area of the level is a dot at the
+  door, pipe or other warp that leads straight there, if one does. Holding the D-pad down
+  shows the player list in its place. Preferences → **Show the minimap** turns it off, or
+  `B3313_MINIMAP=off` for the bridge on its own.
 - **A Bots page in the panel**, for everything about bots. **Let a bot play your game** moved
   there from Preferences. Its shortcut is Ctrl+7, so Preferences is now Ctrl+8.
 - **Bot games:** while you are in a session, the Bots page starts from 1 to 8 more games beside
